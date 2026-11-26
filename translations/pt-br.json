@@ -209,6 +209,8 @@
   "layer-drag-hint": "{0} · Arraste para reordenar",
   "layer-number": "Camada {0}",
   "layer-opacity": "Opacidade da camada",
+  "layer-panel-delete": "Excluir camada (painel Camadas)",
+  "layer-panel-insert": "Inserir camada (painel Camadas)",
   "layer-properties": "Propriedades da camada",
   "layer-rotate-zoom": "Girar/Zoom da camada",
   "layer-to-bottom": "Mover camada para a base",

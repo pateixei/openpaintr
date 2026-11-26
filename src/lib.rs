@@ -132,8 +132,21 @@ impl Document {
     }
 
     pub fn add_layer(&mut self, name: impl Into<String>) -> io::Result<usize> {
+        let index = self.layers.len();
+        self.insert_blank_layer(index, name)?;
+        Ok(index)
+    }
+
+    pub fn insert_blank_layer(&mut self, index: usize, name: impl Into<String>) -> io::Result<()> {
+        if index > self.layers.len() {
+            return Err(crate::Diagnostic::io(
+                io::ErrorKind::InvalidInput,
+                "error.invalid-layer-position",
+                "posição de camada inválida",
+            ));
+        }
         let pixels = self.allocate_pixels()?;
-        self.layers.push(Layer {
+        self.layers.insert(index, Layer {
             name: name.into(),
             visible: true,
             opacity: 255,
@@ -142,7 +155,7 @@ impl Document {
             pdn_background: 0,
             pdn_metadata: Vec::new(),
         });
-        Ok(self.layers.len() - 1)
+        Ok(())
     }
 
     pub fn layer_name(&self, layer: usize) -> Option<&str> {

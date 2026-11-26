@@ -502,8 +502,21 @@ impl App {
                 let result = self.tab_mut().editor.add_layer();
                 self.finish_geometry(result);
             }
-            DeleteLayer => {
+            InsertLayerInPanel => {
                 self.finish_opacity();
+                self.commit_active_session();
+                let index = self.tab().editor.selected + 1;
+                let result = self.tab_mut().editor.insert_blank_layer(index);
+                self.finish_geometry(result);
+            }
+            DeleteLayer | DeleteLayerInPanel => {
+                self.finish_opacity();
+                if command == DeleteLayerInPanel {
+                    if self.tab().editor.document.layer_count() == 1 {
+                        return;
+                    }
+                    self.commit_active_session();
+                }
                 let selected = self.tab().editor.selected;
                 let result = self.tab_mut().editor.delete_layer(selected);
                 self.finish_geometry(result);

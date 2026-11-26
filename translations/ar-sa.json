@@ -209,6 +209,8 @@
   "layer-drag-hint": "{0} · اسحب لإعادة الترتيب",
   "layer-number": "طبقة {0}",
   "layer-opacity": "عتامة الطبقة",
+  "layer-panel-delete": "حذف الطبقة (لوحة الطبقات)",
+  "layer-panel-insert": "إدراج طبقة (لوحة الطبقات)",
   "layer-properties": "خصائص الطبقة",
   "layer-rotate-zoom": "تدوير/تكبير الطبقة",
   "layer-to-bottom": "نقل الطبقة إلى الأسفل",

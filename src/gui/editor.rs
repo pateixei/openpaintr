@@ -585,9 +585,13 @@ impl Editor {
     }
 
     pub fn add_layer(&mut self) -> io::Result<()> {
+        self.insert_blank_layer(self.document.layer_count())
+    }
+
+    pub fn insert_blank_layer(&mut self, index: usize) -> io::Result<()> {
         self.finish_stroke();
         let name = super::i18n::format_logical("layer-number", &[&(self.document.layer_count() + 1)]);
-        let index = self.document.add_layer(&name)?;
+        self.document.insert_blank_layer(index, name)?;
         let prev_selected = self.selected;
         self.selected = index;
         self.mark_full_refresh();

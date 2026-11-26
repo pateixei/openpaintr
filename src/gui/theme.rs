@@ -280,7 +280,7 @@ impl Theme {
         title: &str,
         header_right: impl FnOnce(&mut egui::Ui),
         body: impl FnOnce(&mut egui::Ui),
-    ) {
+    ) -> egui::Response {
         let radius = CornerRadius::same(CARD_CORNER_RADIUS);
         let card_width = ui.available_width();
         let inner_width = (card_width - 2.0).max(0.0);
@@ -336,7 +336,8 @@ impl Theme {
                         ui.spacing_mut().item_spacing = Vec2::splat(6.0);
                         body(ui);
                     });
-            });
+            })
+            .response
     }
 }
 

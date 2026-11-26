@@ -209,6 +209,8 @@
   "layer-drag-hint": "{0} · Zum Sortieren ziehen",
   "layer-number": "Ebene {0}",
   "layer-opacity": "Ebenendeckkraft",
+  "layer-panel-delete": "Ebene löschen (Ebenenbedienfeld)",
+  "layer-panel-insert": "Ebene einfügen (Ebenenbedienfeld)",
   "layer-properties": "Ebeneneigenschaften",
   "layer-rotate-zoom": "Ebene drehen/vergrößern",
   "layer-to-bottom": "Ebene ganz nach unten",

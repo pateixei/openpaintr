@@ -209,6 +209,8 @@
   "layer-drag-hint": "{0} · перетащите для сортировки",
   "layer-number": "Слой {0}",
   "layer-opacity": "Непрозрачность слоя",
+  "layer-panel-delete": "Удалить слой (панель «Слои»)",
+  "layer-panel-insert": "Вставить слой (панель «Слои»)",
   "layer-properties": "Свойства слоя",
   "layer-rotate-zoom": "Поворот/масштаб слоя",
   "layer-to-bottom": "Переместить слой вниз до конца",

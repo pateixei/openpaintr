@@ -63,6 +63,7 @@ use view::View;
 
 const APP_NAME: &str = "OpenPaintR";
 const CANVAS_ID: &str = "document_canvas";
+const LAYERS_ID: &str = "layers_card_focus";
 const DEFAULT_SIZE: (u32, u32) = (640, 480);
 const PDN_EXT: &str = "pdn";
 const DEFAULT_PRIMARY: [u8; 3] = [103, 75, 195];
@@ -402,6 +403,7 @@ struct App {
     fullscreen: bool,
     observed_fullscreen: Option<bool>,
     color_popup_rect: Option<Rect>,
+    layers_clicked: bool,
 }
 
 impl App {
@@ -485,6 +487,7 @@ impl App {
             fullscreen: false,
             observed_fullscreen: None,
             color_popup_rect: None,
+            layers_clicked: false,
         }
     }
 
@@ -2189,7 +2192,7 @@ impl App {
         let mut action_cmd: Option<Command> = None;
         let mut open_props: Option<usize> = None;
 
-        self.settings.theme.styled_card(
+        let card = self.settings.theme.styled_card(
             ui,
             tr("layers"),
             |ui| {
@@ -2531,6 +2534,32 @@ impl App {
                 });
             },
         );
+
+        let focus = ui.interact(
+            card.rect,
+            egui::Id::new(LAYERS_ID),
+            egui::Sense::focusable_noninteractive(),
+        );
+        let click = ui.input(|input| {
+            input
+                .pointer
+                .interact_pos()
+                .filter(|_| input.pointer.button_clicked(PointerButton::Primary))
+        });
+        if !self.has_modal_open()
+            && !egui::Popup::is_any_open(ui.ctx())
+            && click.is_some_and(|pos| {
+                card.rect.contains(pos) && ui.ctx().layer_id_at(pos) == Some(ui.layer_id())
+            })
+            && ui
+                .memory(|memory| memory.focused())
+                .is_none_or(|id| egui::TextEdit::load_state(ui.ctx(), id).is_none())
+        {
+            focus.request_focus();
+            self.layers_clicked = true;
+        } else if !focus.has_focus() {
+            self.layers_clicked = false;
+        }
 
         if add_layer {
             self.execute_command(ui.ctx(), Command::AddLayer);
@@ -5171,17 +5200,15 @@ impl App {
                 }
             }
         }
-        let editor_shortcuts = ctx.memory(|memory| {
-            memory
-                .focused()
-                .is_none_or(|id| id == egui::Id::new(CANVAS_ID))
-        });
+        let focus = ctx.memory(|memory| memory.focused());
+        let layers_focused = self.layers_clicked && focus == Some(egui::Id::new(LAYERS_ID));
+        let editor_shortcuts = focus.is_none_or(|id| id == egui::Id::new(CANVAS_ID));
         if !handled_session_key
             && !self.has_modal_open()
-            && editor_shortcuts
+            && (editor_shortcuts || (layers_focused && !egui::Popup::is_any_open(ctx)))
             && !ctx.input(|input| input.pointer.any_down())
         {
-            for command in self.shortcuts.commands(ctx) {
+            for command in self.shortcuts.commands(ctx, layers_focused) {
                 if let Some(transform) = &self.tab().transform
                     && command != Command::Deselect
                     && (!transform.affine.is_identity()
@@ -5848,7 +5875,7 @@ mod tests {
                 ..Default::default()
             };
             let _ = ctx.run(input, |ctx| {
-                for command in app.shortcuts.commands(ctx) {
+                for command in app.shortcuts.commands(ctx, false) {
                     app.execute_command(ctx, command);
                 }
             });
@@ -7240,6 +7267,96 @@ mod tests {
                 );
             }
         }
+        Ok(())
+    }
+
+    #[test]
+    fn layer_card_shortcuts_require_a_click_and_keep_canvas_delete() -> io::Result<()> {
+        let ctx = egui::Context::default();
+        let mut doc = new_document(32, 24)?;
+        doc.add_layer("Top")?;
+        let mut app = App::new(&ctx, doc);
+        let screen = Rect::from_min_size(pos2(0.0, 0.0), vec2(1120.0, 760.0));
+        let frame = |app: &mut App, events| {
+            let _ = ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(screen),
+                    events,
+                    ..Default::default()
+                },
+                |ctx| app.ui_frame(ctx),
+            );
+        };
+        let press = |app: &mut App, key| {
+            for pressed in [true, false] {
+                frame(
+                    app,
+                    vec![egui::Event::Key {
+                        key,
+                        physical_key: Some(key),
+                        pressed,
+                        repeat: false,
+                        modifiers: egui::Modifiers::NONE,
+                    }],
+                );
+            }
+        };
+        let click = |app: &mut App, pos| {
+            for pressed in [true, false] {
+                frame(
+                    app,
+                    vec![
+                        egui::Event::PointerMoved(pos),
+                        egui::Event::PointerButton {
+                            pos,
+                            button: PointerButton::Primary,
+                            pressed,
+                            modifiers: egui::Modifiers::NONE,
+                        },
+                    ],
+                );
+            }
+        };
+
+        frame(&mut app, vec![]);
+        frame(&mut app, vec![]);
+        press(&mut app, egui::Key::Insert);
+        assert_eq!(app.tab().editor.document.layer_count(), 2);
+        let card = ctx.read_response(egui::Id::new(LAYERS_ID)).unwrap().rect;
+        click(&mut app, card.left_top() + vec2(12.0, 12.0));
+        assert!(app.layers_clicked);
+        press(&mut app, egui::Key::Insert);
+        assert_eq!(app.tab().editor.document.layer_count(), 3);
+        assert_eq!(app.tab().editor.selected, 1);
+        assert_eq!(app.tab().editor.document.layer_name(2), Some("Top"));
+        assert_eq!(
+            app.tab().editor.document.pixel(1, 0, 0),
+            Some(Pixel::default())
+        );
+        press(&mut app, egui::Key::Delete);
+        assert_eq!(app.tab().editor.document.layer_count(), 2);
+        assert_eq!(app.tab().editor.document.layer_name(1), Some("Top"));
+        assert!(app.tab_mut().editor.undo()?);
+        assert_eq!(app.tab().editor.document.layer_count(), 3);
+        assert!(app.tab_mut().editor.undo()?);
+        assert_eq!(app.tab().editor.document.layer_count(), 2);
+
+        app.tool = Tool::Pan;
+        let canvas = ctx.read_response(egui::Id::new(CANVAS_ID)).unwrap().rect;
+        click(&mut app, canvas.center());
+        assert!(!app.layers_clicked);
+        app.tab_mut().editor.select_all();
+        press(&mut app, egui::Key::Delete);
+        assert_eq!(app.tab().editor.document.layer_count(), 2);
+        assert_eq!(
+            app.tab().editor.document.pixel(0, 0, 0),
+            Some(Pixel::default())
+        );
+
+        click(&mut app, card.left_top() + vec2(12.0, 12.0));
+        press(&mut app, egui::Key::Delete);
+        press(&mut app, egui::Key::Delete);
+        assert_eq!(app.tab().editor.document.layer_count(), 1);
         Ok(())
     }
 

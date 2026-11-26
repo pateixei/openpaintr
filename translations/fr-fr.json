@@ -209,6 +209,8 @@
   "layer-drag-hint": "{0} · Faire glisser pour réorganiser",
   "layer-number": "Calque {0}",
   "layer-opacity": "Opacité du calque",
+  "layer-panel-delete": "Supprimer le calque (panneau Calques)",
+  "layer-panel-insert": "Insérer un calque (panneau Calques)",
   "layer-properties": "Propriétés du calque",
   "layer-rotate-zoom": "Rotation/Zoom du calque",
   "layer-to-bottom": "Placer le calque en bas",

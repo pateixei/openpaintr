@@ -209,6 +209,8 @@
   "layer-drag-hint": "{0} · Drag to reorder",
   "layer-number": "Layer {0}",
   "layer-opacity": "Layer opacity",
+  "layer-panel-delete": "Delete layer (Layers panel)",
+  "layer-panel-insert": "Insert layer (Layers panel)",
   "layer-properties": "Layer properties",
   "layer-rotate-zoom": "Layer Rotate/Zoom",
   "layer-to-bottom": "Move layer to bottom",

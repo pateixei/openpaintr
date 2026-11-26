@@ -209,6 +209,8 @@
   "layer-drag-hint": "{0} · ドラッグして並べ替え",
   "layer-number": "レイヤー {0}",
   "layer-opacity": "レイヤーの不透明度",
+  "layer-panel-delete": "レイヤーを削除（レイヤーパネル）",
+  "layer-panel-insert": "レイヤーを挿入（レイヤーパネル）",
   "layer-properties": "レイヤーのプロパティ",
   "layer-rotate-zoom": "レイヤーの回転/ズーム",
   "layer-to-bottom": "レイヤーを最背面へ",

@@ -16,6 +16,8 @@ Tools are on the left, document tabs and the canvas are in the center, and the *
 
 The Layers panel lets you add, delete, duplicate, merge down, reorder by dragging, and import layers from files. Edit each layer's name, visibility, opacity, and blend mode. The History panel records strokes, selections, and layer changes. Click a history entry to return to that state, use **Ctrl+Z** to undo, or use **Ctrl+Y** (Paint.NET profile) or **Ctrl+Shift+Z** (Adobe profile) to redo.
 
+After clicking the Layers panel, press **Insert** to create a transparent layer directly above the selected layer or **Delete** to remove the selected layer. The document keeps at least one layer. With focus on the canvas, **Delete** erases the selection.
+
 Use **Salvar** (`Ctrl+S`) and **Salvar como** (`Ctrl+Shift+S`) to save layered PDN files atomically. PDN retains RGBA pixels, layer order, names, visibility, opacity, and blend modes. **Exportar PNG** (Export PNG) writes the visible composition to a new file and offers a preview, bit depth, and compression options. An asterisk marks documents with unsaved changes. Closing a tab or the application prompts for confirmation before discarding changes. File dialogs use the Linux desktop portal.
 
 ### Painting and selection
