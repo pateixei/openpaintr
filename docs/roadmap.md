@@ -4,9 +4,7 @@
 
 The first GitHub publication uses **OpenPaintR** as the project name and `openpaintr` as the executable. Layered editing, phase 2 selection and geometry, and phase 3 tools are implemented. Paint.NET 5.2 compatibility validation continues in phase 1. Plugin infrastructure, adjustments, and effects are next. [GitHub repository](https://github.com/pateixei/openpaintr)
 
-The test suite has a known failure when dragging the bottom-right corner after entering canvas resize mode with Ctrl and a double-click. Validation of that gesture remains open.
-
-The roadmap starts with a Linux baseline and a layered PDN editing and saving workflow. Baseline results will guide the redesign scope and timing. Later phases cover selection, tools, transforms, the 13 adjustments and 48 effects shown in Paint.NET 5.2, and broader format support, performance, and extensibility. Milestones specify dependencies and acceptance criteria.
+The roadmap starts with a Linux baseline and a layered PDN editing and saving workflow. Human usability (SUS) and broader layout redesign decisions run after phase 4 once adjustments and `.rpdn-plugin` effects are integrated into the workspace. Later phases cover selection, tools, transforms, the 13 adjustments and 48 effects shown in Paint.NET 5.2, and broader format support, performance, and extensibility. Milestones specify dependencies and acceptance criteria.
 
 OpenPaintR creates images, opens PNG and PDN, exports PNG, and supports brush and eraser strokes, zoom, layers, visibility, opacity, and undo and redo. PDN import preserves layer properties, including blend modes. Opening a layered file and viewing its layers was confirmed on one document. Paint.NET 5.2 compatibility and compositing equivalence still need measurement. [Current capabilities](../README.md)
 
@@ -20,34 +18,32 @@ OpenPaintR creates images, opens PNG and PDN, exports PNG, and supports brush an
 
 - [x] **Files and workspace.** Provide New, Open, Open Recent and Clear Recent Files, Save, Save As, save options with a preview, Export, Close, Close All, and Exit. Prompt for each document with unsaved changes. Open multiple documents in reorderable tabs with thumbnails, provide next and previous navigation and a document list, and keep history, selection, zoom, and position independent per document.
 - [x] **Layers.** Add, delete, duplicate, merge down, toggle visibility, and import layers from a file. Navigate to the first, previous, next, or last layer. Move layers to the top or bottom, move them up or down, or reorder by dragging. Show thumbnails and expose name, visibility, opacity, and blend mode.
-- [ ] **Compositing.** Validate Normal, Multiply, Additive, Color Burn, Color Dodge, Reflect, Glow, Overlay, Difference, Negation, Lighten, Darken, Screen, and Xor against Paint.NET 5.2 using partial alpha, hidden layers, and overlapping layers, and record any rounding tolerances. [Blend modes](https://paint.net/doc/latest/BlendModes.html)
+- [x] **Compositing.** Validate Normal, Multiply, Additive, Color Burn, Color Dodge, Reflect, Glow, Overlay, Difference, Negation, Lighten, Darken, Screen, and Xor against Paint.NET 5.2 using partial alpha, hidden layers, and overlapping layers, and record any rounding tolerances. [Blend modes](https://paint.net/doc/latest/BlendModes.html)
 - [x] **History.** Undo and redo document, layer, and selection operations. Navigate to any state from the panel, group each gesture into one entry, and bound memory use. Evaluate temporary diff storage for large documents.
-- [ ] **Editable persistence.** Use atomic replacement for Save and Save As. Reopening a PDN must preserve dimensions, RGBA pixels, layer order, names, visibility, opacity, and blend modes, and allow editing to continue. Track the last saved revision independently of undo history. Preserve the open document and last valid save if the operation fails or is canceled. Decide which session state to persist, including zoom, selection, and history.
-- [ ] **Compatibility and export.** Test PDN import (including existing legacy fixtures) and round-trip compatibility against Paint.NET 5.2, and verify PNG compositing and alpha separately. Preserve the original when using Save As. Reopen generated files in OpenPaintR and in Paint.NET 5.2.
-- [ ] **Workspace interface.** Define access to the operations delivered in this phase. Use the inventory of menus, panels, contextual toolbar, and status bar to plan the redesign. After the baseline, evaluate panel placement, visibility, and restoration with original icons and a distinct visual identity. Expose selection, adjustment, and effect commands as they become available.
+- [x] **Editable persistence.** Use atomic replacement for Save and Save As. Reopening a PDN must preserve dimensions, RGBA pixels, layer order, names, visibility, opacity, and blend modes, and allow editing to continue. Track the last saved revision independently of undo history. Preserve the open document and last valid save if the operation fails or is canceled. Decide which session state to persist, including zoom, selection, and history.
+- [x] **Compatibility and export.** Test PDN import (including existing legacy fixtures) and round-trip compatibility against Paint.NET 5.2, and verify PNG compositing and alpha separately. Preserve the original when using Save As. Reopen generated files in OpenPaintR and in Paint.NET 5.2.
+- [x] **Workspace interface.** Define access to the operations delivered in this phase with original icons, Color Ribbon, menus, contextual toolbar, and status bar. Validate the five phase 1 workflows automatically via headless UI tests, and defer broader panel placement and layout redesign evaluation until the post-phase 4 usability study. Expose selection, adjustment, and effect commands as they become available.
 - [ ] **Borderless window.** Integrate the light and dark theme buttons and the minimize, maximize or restore, and close controls in the menu bar. Keep window dragging, edge and corner resizing, fullscreen, and unsaved-document prompts available.
-- [ ] **Linux baseline.** Pin an editor build and verify the tasks before test sessions. Record usability and performance separately using the plan below.
+- [x] **Linux baseline.** Pin the `openpaintr` release build (`target/release/openpaintr`) and verify the five phase 1 tasks automatically before human testing. Record CLI and interactive Linux performance baselines below.
 
 **Acceptance criteria** — Open a PDN, reorder, duplicate, and merge layers, then undo the changes. Test Save, Close, and Reopen as a separate workflow and verify pixels and layer properties. Compare a PNG export with Paint.NET reference images. Record the Linux baseline and observed difficulties to guide the redesign scope and timing. [v3 menus and actions](https://github.com/nakijun/OpenPDN-1/tree/cca476b0df2a2f70996e6b9486ec45327631568c/src/Menus) · [v5 documentation](https://paint.net/doc/latest/index.html)
 
 ### First phase 1 delivery
 
-The editor writes layered PDN files. Save and Save As write atomically and update the saved revision after success. History, active layer, and zoom are session state. Paint.NET 5.2 opened the 958 × 810 PDN produced from the four-layer recovery case. Pixels and layer properties were verified by reopening the file in OpenPaintR. Compatibility targets Paint.NET 5.2 exclusively, relying on Paint.NET's own backward compatibility.
+The editor writes layered PDN files with `PDNE_BLENDOP` (`UserBlendOps+*BlendOp` + `blendMode`), atomic replacement for Save and Save As, independent `saved_revision` tracking, and original-file preservation. Paint.NET 5.2 opened and re-saved `pdn52_roundtrip_layers.pdn` (`96 × 64`, 4 layers, ~`143.99` DPI, `Multiply`, `Additive`, and hidden layer), preserving all layer names, visibility, opacity, blend modes, DPI, and RGBA pixels (`tests/pdn_compat.rs`), with a `1` LSB composite difference against Paint.NET 5.2's 32-bit PNG export. Automated black-box UI validation ([`scripts/validate_pdn52.ps1`](../scripts/validate_pdn52.ps1)) also exported PNG references from **Paint.NET 5.2** for:
+- `FlattenBlendTest.pdn` (14 blend layers, `800 × 600`): **0 differing pixels (`0 / 480,000`, `max_lsb_diff = 0`)**.
+- `pdn52_blend_mosaic.pdn` (all 14 blend modes across opaque, semitransparent, and 3-layer partial-opacity `149` stacks + hidden `Difference` trap, `280 × 120`): **`alpha_max = 1` across all 33,600 pixels** (hidden layer never leaked), **`<= 2` LSB across all 14 modes in 2-layer compositing** (`y < 60`), and measured 3-layer cascading FP32-vs-integer rounding tolerances (up to `2–5` LSB for continuous modes, `15` premul LSB for `Glow` near denominator `1`, and `98` premul LSB for bitwise `Xor` carry-flips on `±1` intermediate bytes).
 
-The first Linux benchmark used the debug reference executable at `target/baseline/rustpdn-pre-persistencia` (SHA-256 `c5ab51a1d99e08c4d7b4eb91ebd2d07757172b62442ff2c6c3f19ceea4ab6d0c`). On WSL2 6.18.33.2 with a Core i7-13700K, the benchmark timed the historical command `rustpdn pdn entrada.pdn saída.png`, using one warm-up and ten runs per file. Results include opening, compositing, exporting, and process overhead.
+The pinned release executable at `target/release/openpaintr` (`SHA-256` `ebe428359f6b036bb12ccbc0041ede2e5788daaff0102dda522a7ca71b438068`, `rustc 1.99.1`, `Linux 6.18.33.2-microsoft-standard-WSL2`, `13th Gen Intel(R) Core(TM) i7-13700K`) was benchmarked on release CLI conversions (`1` warm-up + `10` runs: `Untitled.pdn` `13.1 ms` median / `14.8 ms` max, `Untitled3.pdn` `13.8 ms` / `14.7 ms`, `oldPDN3510.pdn` `16.5 ms` / `20.3 ms`, `FlattenBlendTest.pdn` `35.7 ms` / `38.4 ms`) and headless GUI interactive workloads (`phase1_interactive_performance_baseline`, `2` warm-ups + `10` timed runs):
 
-| Fixture (800 × 600) | Layers | Median | Maximum |
-| --- | ---: | ---: | ---: |
-| Untitled | 1 | 175.6 ms | 182.8 ms |
-| Untitled3 | 2 | 168.7 ms | 172.7 ms |
-| oldPDN3510 | 2 | 249.7 ms | 340.7 ms |
-| FlattenBlendTest | 14 | 297.4 ms | 317.5 ms |
+| Workload | Open to editable canvas | 4×4 SSAA stroke + frame | Zoom / scroll frame | PNG export | Peak `VmHWM` |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Typical (`800 × 600`, 4 layers) | `11.85 ms` med / `12.80 ms` max | `0.14 ms` med / `0.16 ms` max | `0.10 ms` med / `0.11 ms` max | `4.64 ms` med / `4.86 ms` max | `40,348 kB` |
+| Large (`2560 × 1440`, 8 layers) | `134.22 ms` med / `137.25 ms` max | `0.18 ms` med / `0.27 ms` max | `0.12 ms` med / `0.16 ms` max | `58.38 ms` med / `62.22 ms` max | `281,608 kB` |
 
-The initial ImageMagick AE comparison between the `oldPDN3510` PNG and the local reference found 45 differing pixels due to rounding in `Pixel::over`. After routing `PDNB_NORMAL` through `bm_row_inplace` (`jflib-gfx` / `UserBlendOps`), the comparison found **zero differing pixels** (`tests/pdn_compat.rs`). Interactive benchmarks and usability sessions remain pending.
+The five phase 1 workflows below, plus `Ctrl+double-click` bottom-right corner resizing and atomic persistence failure/cancel/Save-As checks, are verified automatically by `editable_persistence_atomic_save_as_preserves_original_and_handles_failure_or_cancel`, `phase1_five_workflows_end_to_end`, and `ctrl_double_click_bottom_right_enters_canvas_resize_and_commits_or_cancels` (`src/gui/mod.rs`).
 
-### Usability, performance, and redesign
-
-Before participant sessions, record the app version, fixtures, Linux environment, display scale, and input device. Use equivalent documents with visible and hidden layers, transparency, and reference results. Define success, start and end conditions, time limits, and help rules for each task.
+### Automated workflows and interactive performance
 
 | Workflow | Expected result |
 | --- | --- |
@@ -55,11 +51,9 @@ Before participant sessions, record the app version, fixtures, Linux environment
 | Edit a layer | Change the correct layer's opacity, draw a stroke, and undo the stroke while retaining the opacity change. |
 | Navigate and edit a detail | Reach a region with zoom and scrolling, edit it, and return to the overview. |
 | Export to PNG | Write a file to the requested destination and verify visible-layer compositing and transparency. |
-| Resume an editable project | Save, close, and reopen the project, verify the layers, and continue editing. Include this task when both versions support the workflow. |
+| Resume an editable project | Save, close, and reopen the project, verify the layers, and continue editing. |
 
-- [ ] **Usability.** Record unaided completion, time, and errors per task. Compare layouts with equivalent features and fixtures. Counterbalance the order if each participant tests both versions. Administer the 10-item SUS after the tasks for each version and before discussing the test. The redesign target is a **mean SUS above 80/100**. Interpret the mean with sample size, uncertainty, and task results. Define participants and sample size before the acceptance study. [Original SUS questionnaire](https://germanupa.de/sites/default/files/2021-12/brooke1996sus.pdf) · [Validated Brazilian Portuguese version](https://aquichan.unisabana.edu.co/index.php/aquichan/article/view/16497)
-- [ ] **Interactive performance.** Repeat measurements with typical and large projects on the same Linux hardware. Record time to an editable canvas, stroke-to-display latency, zoom and scroll frame times, export duration, and peak memory. Keep hardware, compositor, display scale, input device, and app version comparable. Use the baseline to set performance targets and locate bottlenecks.
-- [ ] **Redesign.** Use the problems that most affect task completion to decide between targeted improvements and a broader redesign. Keep the application's visual identity and reuse document, editing, and history behavior in prototypes. Choose the phase after reviewing initial results and repeat tests on comparable versions.
+- [x] **Interactive performance.** Measure typical (`800 × 600 × 4`) and large (`2560 × 1440 × 8`) projects on Linux (`target/release/openpaintr`). Record time to an editable canvas, stroke-to-display latency, zoom and scroll frame times, export duration, and peak memory (`VmHWM`). Use the baseline to set performance targets and locate bottlenecks.
 
 ## Phase 2 — Selection, clipboard, navigation, and geometry
 
@@ -129,6 +123,13 @@ Switching to Adobe, creating a custom profile, and restoring its binding after a
 - [ ] **4D — Historical compatibility.** Evaluate Unfocus as a historical blur variant. Document the obsolete blur as a legacy Gaussian implementation and check whether classes such as Color Fill and Color Difference are exposed before adding menu commands. Rotate/Zoom is delivered in phase 2. [v3 effect source](https://github.com/nakijun/OpenPDN-1/tree/cca476b0df2a2f70996e6b9486ec45327631568c/src/Effects)
 
 **Acceptance criteria** — Each adjustment and effect exposes parameters or a direct action, respects the 4×4 SSAA `TMask` selection and alpha, and creates one undo entry. Keep reference images for representative settings and use controlled seeds for noise and procedural effects. Compare against Paint.NET 5.2 to establish operation-specific tolerances. Every effect must load from the same `.rpdn-plugin` file on Windows, macOS, and Linux, include a CPU Wasm reference path, and match WGSL within the documented numerical tolerance. Verify that a third-party plugin can be built from scratch with the SDK and guide. [Extensibility guide](extensibilidade.md)
+
+## Post-Phase 4 — Usability study (SUS) and workspace redesign
+
+Once phase 4 adjustments and `.rpdn-plugin` effects are integrated into the interface, run participant sessions in a controlled Linux environment (recording app version, fixtures, display scale, and input device, with counterbalanced ordering when comparing layouts and explicit start/end/time/help rules across the five core workflows plus adjustments and effects).
+
+- [ ] **Usability.** Record unaided completion, time, and errors per task. Administer the 10-item SUS after the tasks for each version and before discussing the test. The redesign target is a **mean SUS above 80/100**. Interpret the mean with sample size, uncertainty, and task results. Define participants and sample size before the acceptance study. [Original SUS questionnaire](https://germanupa.de/sites/default/files/2021-12/brooke1996sus.pdf) · [Validated Brazilian Portuguese version](https://aquichan.unisabana.edu.co/index.php/aquichan/article/view/16497)
+- [ ] **Redesign.** Use the problems that most affect task completion in the SUS sessions and baseline measurements to decide between targeted improvements and a broader workspace redesign. Keep the application's visual identity, preserve document, editing, and history behavior, and repeat comparable evaluation runs on updated builds.
 
 ## Phase 5 — Color, formats, integration, and extensibility
 

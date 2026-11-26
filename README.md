@@ -36,7 +36,7 @@ Use **Mover/transformar máscara** (Move/Transform Mask) or **Mover/transformar 
 
 The **Exibir** (View) menu controls zoom, the pixel grid, and rulers. Zoom with `Ctrl+wheel` in the Paint.NET profile or `Alt+wheel` in the Adobe profile. The Zoom tool (`Z`) supports drag-to-region zoom in the Paint.NET profile and scrubby zoom in the Adobe profile. Pan with the Hand tool, middle mouse button, or `Space` while dragging. In the Adobe profile, double-click the Hand icon to fit the window or the Zoom icon to return to actual size. Rulers and coordinates can show pixels, inches, or centimeters. Documents without a valid physical resolution use 96 DPI.
 
-The **Imagem** (Image) menu crops to a selection, resizes images or the canvas, flips, rotates, and flattens. Canvas Size supports an anchor. You can also enter canvas resizing with `Ctrl+double-click` at the bottom-right corner, drag the boundary, and press `Enter` or `Ctrl` to confirm or `Esc` to cancel. The [roadmap](docs/roadmap.md) tracks a known issue with the corner drag. The **Camadas** (Layers) menu includes **Girar/Zoom** (Rotate/Zoom) with a preview. In the Paint.NET profile, `Ctrl+Shift+Z` opens Rotate/Zoom and `Ctrl+Y` redoes an edit. In the Adobe profile, `Ctrl+Shift+Z` redoes an edit and `Ctrl+T` opens Free Transform.
+The **Imagem** (Image) menu crops to a selection, resizes images or the canvas, flips, rotates, and flattens. Canvas Size supports an anchor. You can also enter canvas resizing with `Ctrl+double-click` at the bottom-right corner, drag the boundary, and press `Enter` or `Ctrl` to confirm or `Esc` to cancel. The **Camadas** (Layers) menu includes **Girar/Zoom** (Rotate/Zoom) with a preview. In the Paint.NET profile, `Ctrl+Shift+Z` opens Rotate/Zoom and `Ctrl+Y` redoes an edit. In the Adobe profile, `Ctrl+Shift+Z` redoes an edit and `Ctrl+T` opens Free Transform.
 
 ### Shortcut profiles
 
@@ -47,6 +47,10 @@ Open **Configurações → Atalhos de teclado e mouse** (Settings → Keyboard a
 Choose a language under **Settings → Language**. The change takes effect immediately and is saved in `$XDG_CONFIG_HOME/openpaintr/language.json` (defaults to `~/.config/openpaintr/language.json`). The first launch uses a supported system language or falls back to English. The bundled catalogs cover English, French, Spanish, German, Brazilian Portuguese, Italian, Russian, Arabic, Simplified Chinese, and Japanese. Arabic labels read right to left within the existing editor layout. System file-picker controls use the desktop's language.
 
 At startup, OpenPaintR scans `translations/` in the working directory and beside the executable. Catalogs beside the executable take precedence. To add a language, save a flat JSON object under a lowercase locale filename such as `nl-nl.json` and restart. Use `language-name` to set its name in the language menu. Use [`en-us.json`](translations/en-us.json) as the key reference and keep numbered placeholders such as `{0}` intact. Missing messages in an additional language fall back to English.
+
+### Window controls
+
+The menu bar includes light and dark theme buttons and controls to minimize, maximize or restore, and close the window. Drag the empty part of the menu bar to move the window, double-click it to maximize or restore, and drag an edge or corner to resize. Closing the window prompts you about unsaved documents.
 
 ## Core and command line
 
