@@ -1,15 +1,22 @@
 use eframe::egui::{self, Color32, CornerRadius, Frame, Margin, Shadow, Stroke, Vec2};
+use serde::{Deserialize, Serialize};
 
 pub const CARD_GAP: i8 = 6;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum Theme {
+    #[default]
     Light,
     Dark,
 }
 
 impl Theme {
     pub fn apply(self, ctx: &egui::Context) {
+        ctx.set_theme(match self {
+            Self::Light => egui::Theme::Light,
+            Self::Dark => egui::Theme::Dark,
+        });
         let mut style = (*ctx.style()).clone();
         style.spacing.item_spacing = Vec2::splat(6.0);
         style.spacing.button_padding = Vec2::new(8.0, 4.0);

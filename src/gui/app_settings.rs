@@ -5,7 +5,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use super::i18n::text as tr;
+use super::{i18n::text as tr, theme::Theme};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -30,6 +30,8 @@ impl AaMode {
 pub struct GlobalSettings {
     #[serde(default)]
     pub antialiasing: AaMode,
+    #[serde(default)]
+    pub theme: Theme,
 }
 
 impl GlobalSettings {
@@ -100,21 +102,30 @@ mod tests {
     }
 
     #[test]
-    fn settings_round_trip_and_empty_json_defaults() -> io::Result<()> {
+    fn settings_round_trip_and_legacy_json_defaults() -> io::Result<()> {
         let dir = tempfile::tempdir()?;
         let path = dir.path().join("openpaintr").join("settings.json");
 
         for mode in AaMode::ALL {
-            let saved = GlobalSettings { antialiasing: mode };
-            saved.save_at(&path)?;
-            let loaded = GlobalSettings::load_at(&path)?;
-            assert_eq!(loaded, saved);
+            for theme in [Theme::Light, Theme::Dark] {
+                let saved = GlobalSettings {
+                    antialiasing: mode,
+                    theme,
+                };
+                saved.save_at(&path)?;
+                assert_eq!(GlobalSettings::load_at(&path)?, saved);
+            }
         }
 
         std::fs::write(&path, b"{}")?;
+        assert_eq!(GlobalSettings::load_at(&path)?, GlobalSettings::default());
+        std::fs::write(&path, br#"{"antialiasing":"ssaa4x4"}"#)?;
         assert_eq!(
-            GlobalSettings::load_at(&path)?.antialiasing,
-            AaMode::Analytical
+            GlobalSettings::load_at(&path)?,
+            GlobalSettings {
+                antialiasing: AaMode::Ssaa4x4,
+                theme: Theme::Light,
+            }
         );
         Ok(())
     }

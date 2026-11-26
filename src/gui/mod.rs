@@ -124,9 +124,8 @@ pub fn run() -> io::Result<()> {
         APP_NAME,
         options,
         Box::new(move |creation| {
-            let mut app = App::new(&creation.egui_ctx, document);
+            let mut app = App::with_settings(&creation.egui_ctx, document, GlobalSettings::load());
             app.locale = locale;
-            app.settings = GlobalSettings::load();
             creation.egui_ctx.set_fonts(i18n::fonts(locale));
             app.font_catalog = FontCatalog::for_locale(locale);
             app.locale.with(|| {
@@ -351,7 +350,6 @@ struct App {
     size_dialog: Option<SizeDialog>,
     save_dialog: Option<SaveOptionsDialog>,
     layer_dialog: Option<LayerPropertiesDialog>,
-    theme: Theme,
     palette: ColorPalette,
     colors_open: bool,
     history_open: bool,
@@ -407,9 +405,13 @@ struct App {
 }
 
 impl App {
+    #[cfg(test)]
     fn new(ctx: &egui::Context, document: Document) -> Self {
-        let theme = Theme::Light;
-        theme.apply(ctx);
+        Self::with_settings(ctx, document, GlobalSettings::default())
+    }
+
+    fn with_settings(ctx: &egui::Context, document: Document, settings: GlobalSettings) -> Self {
+        settings.theme.apply(ctx);
         let light = Color32::from_gray(215);
         let dark = Color32::from_gray(172);
         let checker = ctx.load_texture(
@@ -431,7 +433,6 @@ impl App {
             size_dialog: None,
             save_dialog: None,
             layer_dialog: None,
-            theme,
             palette: ColorPalette::new(DEFAULT_PRIMARY, DEFAULT_SECONDARY),
             colors_open: false,
             history_open: true,
@@ -468,7 +469,7 @@ impl App {
             shape_fill_mode: ShapeFillMode::Both,
             shape_corner_radius: 8.0,
             font_catalog: FontCatalog::new(),
-            settings: GlobalSettings::default(),
+            settings,
             text_family: "Padrão (Sans)".to_owned(),
             text_size: 28.0,
             text_bold: false,
@@ -884,9 +885,22 @@ impl App {
         self.shortcut_item(ui, Exit, true);
     }
 
+    fn save_settings(&mut self) {
+        self.notice = self.locale.with(|| {
+            self.settings.save().err().map(|error| {
+                (i18n::format("settings-save-error", &[&error]), true)
+            })
+        });
+    }
+
     fn menu_bar(&mut self, ui: &mut egui::Ui) {
         ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
-            if window_chrome::controls(ui, &mut self.theme, self.fullscreen) {
+            let previous = self.settings.theme;
+            let close = window_chrome::controls(ui, &mut self.settings.theme, self.fullscreen);
+            if self.settings.theme != previous {
+                self.save_settings();
+            }
+            if close {
                 self.request(ui.ctx(), Action::Close);
             }
             ui.with_layout(egui::Layout::left_to_right(Align::Center), |ui| {
@@ -914,7 +928,7 @@ impl App {
                 ui.label(
                     RichText::new(APP_NAME)
                         .strong()
-                        .color(self.theme.text_primary())
+                        .color(self.settings.theme.text_primary())
                         .size(13.5),
                 );
                 ui.add_space(8.0);
@@ -971,11 +985,7 @@ impl App {
                             {
                                 if self.settings.antialiasing != mode {
                                     self.settings.antialiasing = mode;
-                                    self.notice = self.locale.with(|| {
-                                        self.settings.save().err().map(|error| {
-                                            (i18n::format("settings-save-error", &[&error]), true)
-                                        })
-                                    });
+                                    self.save_settings();
                                     self.tab_mut().editor.mark_full_refresh();
                                 }
                                 ui.close();
@@ -999,7 +1009,7 @@ impl App {
             let btn_sz = vec2(26.0, 26.0);
             if icon_button(
                 ui,
-                self.theme,
+                self.settings.theme,
                 ActionIcon::NewDoc,
                 true,
                 false,
@@ -1015,7 +1025,7 @@ impl App {
             }
             if icon_button(
                 ui,
-                self.theme,
+                self.settings.theme,
                 ActionIcon::OpenFolder,
                 true,
                 false,
@@ -1031,7 +1041,7 @@ impl App {
             }
             if icon_button(
                 ui,
-                self.theme,
+                self.settings.theme,
                 ActionIcon::SaveDisk,
                 true,
                 false,
@@ -1047,7 +1057,7 @@ impl App {
             }
             if icon_button(
                 ui,
-                self.theme,
+                self.settings.theme,
                 ActionIcon::ExportPng,
                 true,
                 false,
@@ -1062,7 +1072,7 @@ impl App {
             ui.separator();
             if icon_button(
                 ui,
-                self.theme,
+                self.settings.theme,
                 ActionIcon::Undo,
                 self.tab().editor.has_edits(),
                 false,
@@ -1078,7 +1088,7 @@ impl App {
             }
             if icon_button(
                 ui,
-                self.theme,
+                self.settings.theme,
                 ActionIcon::Redo,
                 self.tab().editor.can_redo(),
                 false,
@@ -1103,13 +1113,13 @@ impl App {
                 ui.label(
                     RichText::new(tr("transform-field"))
                         .size(12.0)
-                        .color(self.theme.text_muted()),
+                        .color(self.settings.theme.text_muted()),
                 );
                 ui.label(
                     RichText::new(target.short_label())
                         .strong()
                         .size(12.5)
-                        .color(self.theme.text_primary()),
+                        .color(self.settings.theme.text_primary()),
                 );
                 if target != TransformTarget::Mask {
                     let prev = method;
@@ -1132,7 +1142,7 @@ impl App {
                         degrees
                     ))
                     .size(12.0)
-                    .color(self.theme.text_muted()),
+                    .color(self.settings.theme.text_muted()),
                 );
                 self.session_commit_buttons(ui);
             } else if let Some((
@@ -1148,7 +1158,7 @@ impl App {
                     RichText::new(tr("gradient-field"))
                         .strong()
                         .size(12.5)
-                        .color(self.theme.text_primary()),
+                        .color(self.settings.theme.text_primary()),
                 );
                 let changed = Self::gradient_controls(
                     ui,
@@ -1184,7 +1194,7 @@ impl App {
                     RichText::new(tr("line-curve-field"))
                         .strong()
                         .size(12.5)
-                        .color(self.theme.text_primary()),
+                        .color(self.settings.theme.text_primary()),
                 );
                 let changed = Self::line_curve_controls(
                     ui,
@@ -1228,7 +1238,7 @@ impl App {
                     RichText::new(tr("shape-field"))
                         .strong()
                         .size(12.5)
-                        .color(self.theme.text_primary()),
+                        .color(self.settings.theme.text_primary()),
                 );
                 let changed = Self::shape_controls(
                     ui,
@@ -1285,7 +1295,7 @@ impl App {
                     RichText::new(tr("text-field"))
                         .strong()
                         .size(12.5)
-                        .color(self.theme.text_primary()),
+                        .color(self.settings.theme.text_primary()),
                 );
                 let text_resp = ui.add(
                     egui::TextEdit::singleline(&mut text)
@@ -1340,7 +1350,7 @@ impl App {
                     RichText::new(tr("canvas-size-field"))
                         .strong()
                         .size(12.5)
-                        .color(self.theme.text_primary()),
+                        .color(self.settings.theme.text_primary()),
                 );
                 let mut changed = false;
                 changed |= ui
@@ -1359,21 +1369,21 @@ impl App {
                         &[&original.0, &original.1],
                     ))
                     .size(11.5)
-                    .color(self.theme.text_muted()),
+                    .color(self.settings.theme.text_muted()),
                 );
                 self.session_commit_buttons(ui);
             } else {
                 ui.label(
                     RichText::new(tr("tool-field"))
                         .size(12.0)
-                        .color(self.theme.text_muted()),
+                        .color(self.settings.theme.text_muted()),
                 );
                 tool_icons::paint_small_tool(ui, self.tool);
                 ui.label(
                     RichText::new(self.tool.label())
                         .strong()
                         .size(12.5)
-                        .color(self.theme.text_primary()),
+                        .color(self.settings.theme.text_primary()),
                 );
 
                 ui.spacing_mut().slider_width = if compact { 50.0 } else { 80.0 };
@@ -1383,19 +1393,19 @@ impl App {
                         ui.label(
                             RichText::new(tr("size-field"))
                                 .size(12.0)
-                                .color(self.theme.text_muted()),
+                                .color(self.settings.theme.text_muted()),
                         );
                         ui.add(egui::Slider::new(&mut self.diameter, 1..=MAX_BRUSH_DIAMETER).suffix(" px"));
                         ui.label(
                             RichText::new(tr("hardness-field"))
                                 .size(12.0)
-                                .color(self.theme.text_muted()),
+                                .color(self.settings.theme.text_muted()),
                         );
                         ui.add(egui::Slider::new(&mut self.hardness, 0..=100).suffix("%"));
                         ui.label(
                             RichText::new(tr("spacing-field"))
                                 .size(12.0)
-                                .color(self.theme.text_muted()),
+                                .color(self.settings.theme.text_muted()),
                         );
                         ui.add(egui::Slider::new(&mut self.spacing, 1..=200).suffix("%"));
                         if self.tool == Tool::Brush {
@@ -1417,7 +1427,7 @@ impl App {
                             ui.label(
                                 RichText::new(hint)
                                     .size(11.5)
-                                    .color(self.theme.text_muted()),
+                                    .color(self.settings.theme.text_muted()),
                             );
                         }
                     }
@@ -1441,13 +1451,13 @@ impl App {
                         ui.label(
                             RichText::new(tr("short-size-field"))
                                 .size(12.0)
-                                .color(self.theme.text_muted()),
+                                .color(self.settings.theme.text_muted()),
                         );
                         ui.add(egui::Slider::new(&mut self.diameter, 1..=MAX_BRUSH_DIAMETER).suffix(" px"));
                         ui.label(
                             RichText::new(tr("short-hardness-field"))
                                 .size(12.0)
-                                .color(self.theme.text_muted()),
+                                .color(self.settings.theme.text_muted()),
                         );
                         ui.add(egui::Slider::new(&mut self.hardness, 0..=100).suffix("%"));
                         let target = self.recolor_target.unwrap_or(self.palette.secondary);
@@ -1462,7 +1472,7 @@ impl App {
                         ui.painter().rect_stroke(
                             r,
                             3.0,
-                            egui::Stroke::new(1.0_f32, self.theme.border_color()),
+                            egui::Stroke::new(1.0_f32, self.settings.theme.border_color()),
                             egui::StrokeKind::Outside,
                         );
                         if !wrap_wand {
@@ -1525,7 +1535,7 @@ impl App {
                         ui.label(
                             RichText::new(tr("mode-field"))
                                 .size(12.0)
-                                .color(self.theme.text_muted()),
+                                .color(self.settings.theme.text_muted()),
                         );
                         self.combine_selector(ui);
                         ui.label(tr("feather-field"));
@@ -1548,13 +1558,13 @@ impl App {
                 ui.painter().rect_stroke(
                     rect,
                     4.0,
-                    egui::Stroke::new(1.0_f32, self.theme.border_color()),
+                    egui::Stroke::new(1.0_f32, self.settings.theme.border_color()),
                     egui::StrokeKind::Outside,
                 );
                 ui.label(
                     RichText::new(tr("color-field"))
                         .size(11.5)
-                        .color(self.theme.text_muted()),
+                        .color(self.settings.theme.text_muted()),
                 );
             });
         });
@@ -1589,7 +1599,7 @@ impl App {
         ui.label(
             RichText::new(tr("tolerance-field"))
                 .size(12.0)
-                .color(self.theme.text_muted()),
+                .color(self.settings.theme.text_muted()),
         );
         ui.add(egui::Slider::new(&mut self.color_tolerance, 0..=100).suffix("%"));
         egui::ComboBox::from_id_salt(id_salt)
@@ -1895,8 +1905,8 @@ impl App {
                             };
                             let frame = if active {
                                 egui::Frame::new()
-                                    .fill(self.theme.card_fill())
-                                    .stroke(egui::Stroke::new(1.0_f32, self.theme.border_color()))
+                                    .fill(self.settings.theme.card_fill())
+                                    .stroke(egui::Stroke::new(1.0_f32, self.settings.theme.border_color()))
                                     .corner_radius(egui::CornerRadius {
                                         nw: 6,
                                         ne: 6,
@@ -1932,16 +1942,16 @@ impl App {
                                                 2.0,
                                                 egui::Stroke::new(
                                                     0.8_f32,
-                                                    self.theme.border_color(),
+                                                    self.settings.theme.border_color(),
                                                 ),
                                                 egui::StrokeKind::Outside,
                                             );
                                         }
                                         let label =
                                             RichText::new(title).size(12.5).color(if active {
-                                                self.theme.text_primary()
+                                                self.settings.theme.text_primary()
                                             } else {
-                                                self.theme.text_muted()
+                                                self.settings.theme.text_muted()
                                             });
                                         let label_resp = ui
                                             .add(egui::Button::new(label).frame(false))
@@ -1958,7 +1968,7 @@ impl App {
                                                 egui::Button::new(
                                                     RichText::new("×")
                                                         .size(13.0)
-                                                        .color(self.theme.text_muted()),
+                                                        .color(self.settings.theme.text_muted()),
                                                 )
                                                 .frame(false),
                                             )
@@ -1984,7 +1994,7 @@ impl App {
                         }
                         if tool_icons::icon_button(
                             ui,
-                            self.theme,
+                            self.settings.theme,
                             tool_icons::ActionIcon::Plus,
                             true,
                             false,
@@ -2034,7 +2044,7 @@ impl App {
         ];
         ui.vertical_centered(|ui| {
             ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
-            if tool_icons::move_button(ui, self.theme, self.tab().transform.is_some()).clicked() {
+            if tool_icons::move_button(ui, self.settings.theme, self.tab().transform.is_some()).clicked() {
                 run_cmd = Some(Command::MovePixels);
             }
             ui.separator();
@@ -2043,7 +2053,7 @@ impl App {
                 .spacing(vec2(4.0, 4.0))
                 .show(ui, |ui| {
                     for (idx, tool) in tools.into_iter().enumerate() {
-                        let resp = tool_icons::button(ui, self.theme, tool, self.tool == tool);
+                        let resp = tool_icons::button(ui, self.settings.theme, tool, self.tool == tool);
                         let double_action = match tool {
                             Tool::Pan => {
                                 self.shortcuts.mouse.click(&resp, Scope::ToolbarHand, true)
@@ -2083,7 +2093,7 @@ impl App {
             .min(screen.right() - card_w - 4.0)
             .max(4.0);
         let y = (ribbon.chevron_rect.bottom() + 6.0).min((screen.bottom() - 80.0).max(4.0));
-        let theme = self.theme;
+        let theme = self.settings.theme;
         let eraser_active = self.tool == Tool::Eraser;
         let checker = self.checker.clone();
         let mut palette_action = PaletteAction::None;
@@ -2171,7 +2181,7 @@ impl App {
 
     fn layers(&mut self, ui: &mut egui::Ui, height: f32) {
         use tool_icons::{ActionIcon, icon_button};
-        let theme = self.theme;
+        let theme = self.settings.theme;
         let mut add_layer = false;
         let list_max = (height - 135.0).max(48.0);
         let mut move_pair: Option<(usize, usize)> = None;
@@ -2179,7 +2189,7 @@ impl App {
         let mut action_cmd: Option<Command> = None;
         let mut open_props: Option<usize> = None;
 
-        self.theme.styled_card(
+        self.settings.theme.styled_card(
             ui,
             tr("layers"),
             |ui| {
@@ -2540,11 +2550,11 @@ impl App {
         use tool_icons::{ActionIcon, icon_button};
         let open = self.history_open;
         let mut next_open = open;
-        let theme = self.theme;
+        let theme = self.settings.theme;
         let undo_len = self.tab().editor.undo_len();
         let mut target_state: Option<usize> = None;
 
-        self.theme.styled_card(
+        self.settings.theme.styled_card(
             ui,
             tr("history"),
             |ui| {
@@ -3197,7 +3207,7 @@ impl App {
                 },
             );
             let outer = ui.painter();
-            let shadow_alpha = match self.theme {
+            let shadow_alpha = match self.settings.theme {
                 Theme::Light => 14,
                 Theme::Dark => 56,
             };
@@ -3209,7 +3219,7 @@ impl App {
             outer.rect_stroke(
                 rect,
                 0.0,
-                egui::Stroke::new(1.0_f32, self.theme.border_color()),
+                egui::Stroke::new(1.0_f32, self.settings.theme.border_color()),
                 egui::StrokeKind::Outside,
             );
             let painter = ui.painter_at(rect);
@@ -3420,7 +3430,7 @@ impl App {
                     overlay.rect_stroke(
                         preview_rect,
                         0.0,
-                        egui::Stroke::new(1.2_f32, self.theme.accent()),
+                        egui::Stroke::new(1.2_f32, self.settings.theme.accent()),
                         egui::StrokeKind::Outside,
                     );
                     for handle_pos in [
@@ -5188,7 +5198,7 @@ impl App {
 
         self.refresh_thumbnails(ctx);
 
-        let workspace_frame = egui::Frame::new().fill(self.theme.workspace());
+        let workspace_frame = egui::Frame::new().fill(self.settings.theme.workspace());
         let window_radius = window_chrome::corner_radius(ctx, self.fullscreen);
 
         window_chrome::resize_edges(ctx, self.fullscreen);
@@ -5196,7 +5206,7 @@ impl App {
         egui::TopBottomPanel::top("menubar")
             .frame(
                 egui::Frame::new()
-                    .fill(self.theme.menubar_fill())
+                    .fill(self.settings.theme.menubar_fill())
                     .corner_radius(egui::CornerRadius {
                         nw: window_radius,
                         ne: window_radius,
@@ -5211,16 +5221,16 @@ impl App {
         egui::TopBottomPanel::top("command_bar")
             .frame(
                 egui::Frame::new()
-                    .fill(self.theme.toolbar_fill())
-                    .stroke(egui::Stroke::new(1.0_f32, self.theme.border_color()))
+                    .fill(self.settings.theme.toolbar_fill())
+                    .stroke(egui::Stroke::new(1.0_f32, self.settings.theme.border_color()))
                     .inner_margin(egui::Margin::symmetric(10, 5)),
             )
             .show_separator_line(false)
             .show(ctx, |ui| self.command_bar(ui));
 
         let ribbon_frame = egui::Frame::new()
-            .fill(self.theme.toolbar_fill())
-            .stroke(egui::Stroke::new(1.0_f32, self.theme.border_color()))
+            .fill(self.settings.theme.toolbar_fill())
+            .stroke(egui::Stroke::new(1.0_f32, self.settings.theme.border_color()))
             .inner_margin(egui::Margin::symmetric(6, 4));
         let ribbon = egui::TopBottomPanel::top("color_ribbon")
             // Include the stroke in the initial clip height and let the content size the panel.
@@ -5232,7 +5242,7 @@ impl App {
                     ui,
                     &mut self.palette,
                     self.colors_open,
-                    self.theme,
+                    self.settings.theme,
                     &self.checker,
                 )
             })
@@ -5248,8 +5258,8 @@ impl App {
         egui::TopBottomPanel::bottom("status")
             .frame(
                 egui::Frame::new()
-                    .fill(self.theme.status_fill())
-                    .stroke(egui::Stroke::new(1.0_f32, self.theme.border_color()))
+                    .fill(self.settings.theme.status_fill())
+                    .stroke(egui::Stroke::new(1.0_f32, self.settings.theme.border_color()))
                     .corner_radius(egui::CornerRadius {
                         nw: 0,
                         ne: 0,
@@ -5264,9 +5274,9 @@ impl App {
                 ui.horizontal(|ui| {
                     if let Some((notice, error)) = &self.notice {
                         let color = if *error {
-                            self.theme.error()
+                            self.settings.theme.error()
                         } else {
-                            self.theme.accent()
+                            self.settings.theme.accent()
                         };
                         ui.add(
                             egui::Label::new(RichText::new(notice).size(12.0).color(color))
@@ -5277,7 +5287,7 @@ impl App {
                         ui.label(
                             RichText::new(tr("ready"))
                                 .size(12.0)
-                                .color(self.theme.text_muted()),
+                                .color(self.settings.theme.text_muted()),
                         );
                     }
 
@@ -5285,7 +5295,7 @@ impl App {
                         ui.spacing_mut().item_spacing.x = 6.0;
                         if icon_button(
                             ui,
-                            self.theme,
+                            self.settings.theme,
                             ActionIcon::ZoomIn,
                             true,
                             false,
@@ -5312,7 +5322,7 @@ impl App {
                         }
                         if icon_button(
                             ui,
-                            self.theme,
+                            self.settings.theme,
                             ActionIcon::ZoomOut,
                             true,
                             false,
@@ -5326,7 +5336,7 @@ impl App {
                         ui.menu_button(
                             RichText::new(format!("{:.0}%", self.tab().display_zoom * 100.0))
                                 .size(12.0)
-                                .color(self.theme.text_primary()),
+                                .color(self.settings.theme.text_primary()),
                             |ui| {
                                 if ui.button(tr("fit-window")).clicked() {
                                     self.tab_mut().zoom = None;
@@ -5349,14 +5359,14 @@ impl App {
                             ui.label(
                                 RichText::new(coords)
                                     .size(12.0)
-                                    .color(self.theme.text_muted()),
+                                    .color(self.settings.theme.text_muted()),
                             );
                             ui.separator();
                         }
                         ui.label(
                             RichText::new(tab.view.dimensions(&tab.editor.document))
                                 .size(12.0)
-                                .color(self.theme.text_muted()),
+                                .color(self.settings.theme.text_muted()),
                         );
                     });
                 });
@@ -5407,7 +5417,7 @@ impl App {
         {
             self.shortcut_dialog = Some(dialog);
         }
-        window_chrome::window_border(ctx, self.theme, self.fullscreen);
+        window_chrome::window_border(ctx, self.settings.theme, self.fullscreen);
     }
 }
 
@@ -5429,9 +5439,12 @@ mod tests {
     fn color_ribbon_background_reaches_the_workspace() -> io::Result<()> {
         for theme in [Theme::Light, Theme::Dark] {
             let ctx = egui::Context::default();
-            let mut app = App::new(&ctx, new_document(32, 24)?);
-            app.theme = theme;
-            theme.apply(&ctx);
+            let settings = GlobalSettings {
+                theme,
+                ..GlobalSettings::default()
+            };
+            let mut app = App::with_settings(&ctx, new_document(32, 24)?, settings);
+            assert_eq!(ctx.style().visuals.dark_mode, theme == Theme::Dark);
             let screen = Rect::from_min_size(pos2(0.0, 0.0), vec2(1120.0, 760.0));
             let output = ctx.run(
                 egui::RawInput {
@@ -5905,7 +5918,7 @@ mod tests {
             ..Default::default()
         };
         for theme in [Theme::Light, Theme::Dark] {
-            app.theme = theme;
+            app.settings.theme = theme;
             theme.apply(&ctx);
             app.colors_open = false;
             app.history_open = false;
