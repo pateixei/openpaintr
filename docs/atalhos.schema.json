@@ -1,0 +1,560 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Configuração de atalhos do OpenPaintR",
+  "type": "object",
+  "required": [
+    "version",
+    "active",
+    "profiles"
+  ],
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "active": {
+      "type": "string",
+      "minLength": 1
+    },
+    "profiles": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/profile"
+      }
+    }
+  },
+  "$defs": {
+    "combinações": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "profile": {
+      "type": "object",
+      "required": [
+        "base"
+      ],
+      "properties": {
+        "base": {
+          "enum": [
+            "Paint.NET",
+            "Adobe"
+          ]
+        },
+        "bindings": {
+          "type": "object",
+          "properties": {
+            "tool.brush": {
+              "$ref": "#/$defs/combinações"
+            },
+            "tool.pencil": {
+              "$ref": "#/$defs/combinações"
+            },
+            "tool.bucket": {
+              "$ref": "#/$defs/combinações"
+            },
+            "tool.eraser": {
+              "$ref": "#/$defs/combinações"
+            },
+            "tool.eyedropper": {
+              "$ref": "#/$defs/combinações"
+            },
+            "tool.clone_stamp": {
+              "$ref": "#/$defs/combinações"
+            },
+            "tool.recolor": {
+              "$ref": "#/$defs/combinações"
+            },
+            "tool.gradient": {
+              "$ref": "#/$defs/combinações"
+            },
+            "tool.line_curve": {
+              "$ref": "#/$defs/combinações"
+            },
+            "tool.shape": {
+              "$ref": "#/$defs/combinações"
+            },
+            "tool.text": {
+              "$ref": "#/$defs/combinações"
+            },
+            "tool.rectangle_select": {
+              "$ref": "#/$defs/combinações"
+            },
+            "tool.lasso": {
+              "$ref": "#/$defs/combinações"
+            },
+            "tool.ellipse_select": {
+              "$ref": "#/$defs/combinações"
+            },
+            "tool.magic_wand": {
+              "$ref": "#/$defs/combinações"
+            },
+            "tool.pan": {
+              "$ref": "#/$defs/combinações"
+            },
+            "tool.zoom": {
+              "$ref": "#/$defs/combinações"
+            },
+            "tool.temporary_pan": {
+              "$ref": "#/$defs/combinações"
+            },
+            "tool.brush_smaller": {
+              "$ref": "#/$defs/combinações"
+            },
+            "tool.brush_larger": {
+              "$ref": "#/$defs/combinações"
+            },
+            "tool.brush_smaller_fast": {
+              "$ref": "#/$defs/combinações"
+            },
+            "tool.brush_larger_fast": {
+              "$ref": "#/$defs/combinações"
+            },
+            "file.new": {
+              "$ref": "#/$defs/combinações"
+            },
+            "file.open": {
+              "$ref": "#/$defs/combinações"
+            },
+            "file.save": {
+              "$ref": "#/$defs/combinações"
+            },
+            "file.save_as": {
+              "$ref": "#/$defs/combinações"
+            },
+            "file.export_png": {
+              "$ref": "#/$defs/combinações"
+            },
+            "file.close": {
+              "$ref": "#/$defs/combinações"
+            },
+            "file.close_all": {
+              "$ref": "#/$defs/combinações"
+            },
+            "file.exit": {
+              "$ref": "#/$defs/combinações"
+            },
+            "view.next_document": {
+              "$ref": "#/$defs/combinações"
+            },
+            "view.prev_document": {
+              "$ref": "#/$defs/combinações"
+            },
+            "edit.undo": {
+              "$ref": "#/$defs/combinações"
+            },
+            "edit.redo": {
+              "$ref": "#/$defs/combinações"
+            },
+            "edit.cut": {
+              "$ref": "#/$defs/combinações"
+            },
+            "edit.copy": {
+              "$ref": "#/$defs/combinações"
+            },
+            "edit.copy_composite": {
+              "$ref": "#/$defs/combinações"
+            },
+            "edit.paste": {
+              "$ref": "#/$defs/combinações"
+            },
+            "edit.paste_layer": {
+              "$ref": "#/$defs/combinações"
+            },
+            "edit.paste_image": {
+              "$ref": "#/$defs/combinações"
+            },
+            "selection.copy_mask": {
+              "$ref": "#/$defs/combinações"
+            },
+            "selection.paste_mask": {
+              "$ref": "#/$defs/combinações"
+            },
+            "selection.all": {
+              "$ref": "#/$defs/combinações"
+            },
+            "selection.clear": {
+              "$ref": "#/$defs/combinações"
+            },
+            "selection.invert": {
+              "$ref": "#/$defs/combinações"
+            },
+            "selection.fill": {
+              "$ref": "#/$defs/combinações"
+            },
+            "selection.erase": {
+              "$ref": "#/$defs/combinações"
+            },
+            "selection.move_pixels": {
+              "$ref": "#/$defs/combinações"
+            },
+            "selection.move_mask": {
+              "$ref": "#/$defs/combinações"
+            },
+            "view.zoom_in": {
+              "$ref": "#/$defs/combinações"
+            },
+            "view.zoom_out": {
+              "$ref": "#/$defs/combinações"
+            },
+            "view.fit": {
+              "$ref": "#/$defs/combinações"
+            },
+            "view.fit_selection": {
+              "$ref": "#/$defs/combinações"
+            },
+            "view.actual_size": {
+              "$ref": "#/$defs/combinações"
+            },
+            "view.pixel_grid": {
+              "$ref": "#/$defs/combinações"
+            },
+            "view.rulers": {
+              "$ref": "#/$defs/combinações"
+            },
+            "view.fullscreen": {
+              "$ref": "#/$defs/combinações"
+            },
+            "image.crop": {
+              "$ref": "#/$defs/combinações"
+            },
+            "image.resize": {
+              "$ref": "#/$defs/combinações"
+            },
+            "image.canvas_size": {
+              "$ref": "#/$defs/combinações"
+            },
+            "image.flip_horizontal": {
+              "$ref": "#/$defs/combinações"
+            },
+            "image.flip_vertical": {
+              "$ref": "#/$defs/combinações"
+            },
+            "image.rotate_clockwise": {
+              "$ref": "#/$defs/combinações"
+            },
+            "image.rotate_counterclockwise": {
+              "$ref": "#/$defs/combinações"
+            },
+            "image.rotate_half": {
+              "$ref": "#/$defs/combinações"
+            },
+            "image.flatten": {
+              "$ref": "#/$defs/combinações"
+            },
+            "layer.add": {
+              "$ref": "#/$defs/combinações"
+            },
+            "layer.delete": {
+              "$ref": "#/$defs/combinações"
+            },
+            "layer.duplicate": {
+              "$ref": "#/$defs/combinações"
+            },
+            "layer.merge_down": {
+              "$ref": "#/$defs/combinações"
+            },
+            "layer.import_file": {
+              "$ref": "#/$defs/combinações"
+            },
+            "layer.properties": {
+              "$ref": "#/$defs/combinações"
+            },
+            "layer.move_top": {
+              "$ref": "#/$defs/combinações"
+            },
+            "layer.move_up": {
+              "$ref": "#/$defs/combinações"
+            },
+            "layer.move_down": {
+              "$ref": "#/$defs/combinações"
+            },
+            "layer.move_bottom": {
+              "$ref": "#/$defs/combinações"
+            },
+            "layer.go_top": {
+              "$ref": "#/$defs/combinações"
+            },
+            "layer.go_up": {
+              "$ref": "#/$defs/combinações"
+            },
+            "layer.go_down": {
+              "$ref": "#/$defs/combinações"
+            },
+            "layer.go_bottom": {
+              "$ref": "#/$defs/combinações"
+            },
+            "layer.toggle_visibility": {
+              "$ref": "#/$defs/combinações"
+            },
+            "layer.flip_horizontal": {
+              "$ref": "#/$defs/combinações"
+            },
+            "layer.flip_vertical": {
+              "$ref": "#/$defs/combinações"
+            },
+            "layer.rotate_half": {
+              "$ref": "#/$defs/combinações"
+            },
+            "layer.rotate_zoom": {
+              "$ref": "#/$defs/combinações"
+            },
+            "edit.free_transform": {
+              "$ref": "#/$defs/combinações"
+            },
+            "color.swap": {
+              "$ref": "#/$defs/combinações"
+            },
+            "color.reset": {
+              "$ref": "#/$defs/combinações"
+            },
+            "settings.shortcuts": {
+              "$ref": "#/$defs/combinações"
+            },
+            "canvas.pan": {
+              "$ref": "#/$defs/combinações"
+            },
+            "canvas.scroll_vertical": {
+              "$ref": "#/$defs/combinações"
+            },
+            "canvas.scroll_horizontal": {
+              "$ref": "#/$defs/combinações"
+            },
+            "canvas.wheel_zoom": {
+              "$ref": "#/$defs/combinações"
+            },
+            "canvas.wheel_stroke_size": {
+              "$ref": "#/$defs/combinações"
+            },
+            "canvas.temp_zoom_in": {
+              "$ref": "#/$defs/combinações"
+            },
+            "canvas.temp_zoom_out": {
+              "$ref": "#/$defs/combinações"
+            },
+            "hand.pan": {
+              "$ref": "#/$defs/combinações"
+            },
+            "zoom.in": {
+              "$ref": "#/$defs/combinações"
+            },
+            "zoom.out": {
+              "$ref": "#/$defs/combinações"
+            },
+            "hand.double_fit": {
+              "$ref": "#/$defs/combinações"
+            },
+            "zoom.double_actual": {
+              "$ref": "#/$defs/combinações"
+            },
+            "brush.primary": {
+              "$ref": "#/$defs/combinações"
+            },
+          "bucket.primary": {
+              "$ref": "#/$defs/combinações"
+            },
+            "brush.secondary": {
+              "$ref": "#/$defs/combinações"
+            },
+          "bucket.secondary": {
+              "$ref": "#/$defs/combinações"
+            },
+            "brush.options": {
+              "$ref": "#/$defs/combinações"
+            },
+            "brush.sample_color": {
+              "$ref": "#/$defs/combinações"
+            },
+            "pencil.primary": {
+              "$ref": "#/$defs/combinações"
+            },
+            "pencil.secondary": {
+              "$ref": "#/$defs/combinações"
+            },
+            "bucket.global_primary": {
+              "$ref": "#/$defs/combinações"
+            },
+            "bucket.global_secondary": {
+              "$ref": "#/$defs/combinações"
+            },
+            "eraser.erase": {
+              "$ref": "#/$defs/combinações"
+            },
+            "eraser.options": {
+              "$ref": "#/$defs/combinações"
+            },
+            "eyedropper.primary": {
+              "$ref": "#/$defs/combinações"
+            },
+            "eyedropper.secondary": {
+              "$ref": "#/$defs/combinações"
+            },
+            "eyedropper.composite": {
+              "$ref": "#/$defs/combinações"
+            },
+            "clone.paint": {
+              "$ref": "#/$defs/combinações"
+            },
+            "clone.set_anchor": {
+              "$ref": "#/$defs/combinações"
+            },
+            "recolor.primary": {
+              "$ref": "#/$defs/combinações"
+            },
+            "recolor.secondary": {
+              "$ref": "#/$defs/combinações"
+            },
+            "recolor.sample": {
+              "$ref": "#/$defs/combinações"
+            },
+            "gradient.primary": {
+              "$ref": "#/$defs/combinações"
+            },
+            "gradient.secondary": {
+              "$ref": "#/$defs/combinações"
+            },
+            "line.primary": {
+              "$ref": "#/$defs/combinações"
+            },
+            "line.secondary": {
+              "$ref": "#/$defs/combinações"
+            },
+            "shape.primary": {
+              "$ref": "#/$defs/combinações"
+            },
+            "shape.secondary": {
+              "$ref": "#/$defs/combinações"
+            },
+            "text.place": {
+              "$ref": "#/$defs/combinações"
+            },
+            "zoom.marquee": {
+              "$ref": "#/$defs/combinações"
+            },
+            "zoom.scrubby": {
+              "$ref": "#/$defs/combinações"
+            },
+            "selection.create": {
+              "$ref": "#/$defs/combinações"
+            },
+            "selection.relocate": {
+              "$ref": "#/$defs/combinações"
+            },
+            "selection.constrain": {
+              "$ref": "#/$defs/combinações"
+            },
+            "selection.add": {
+              "$ref": "#/$defs/combinações"
+            },
+            "selection.subtract": {
+              "$ref": "#/$defs/combinações"
+            },
+            "selection.xor": {
+              "$ref": "#/$defs/combinações"
+            },
+            "selection.intersect": {
+              "$ref": "#/$defs/combinações"
+            },
+            "wand.sample": {
+              "$ref": "#/$defs/combinações"
+            },
+            "wand.add": {
+              "$ref": "#/$defs/combinações"
+            },
+            "wand.subtract": {
+              "$ref": "#/$defs/combinações"
+            },
+            "wand.xor": {
+              "$ref": "#/$defs/combinações"
+            },
+            "wand.intersect": {
+              "$ref": "#/$defs/combinações"
+            },
+            "wand.global": {
+              "$ref": "#/$defs/combinações"
+            },
+            "wand.global_add": {
+              "$ref": "#/$defs/combinações"
+            },
+            "wand.global_subtract": {
+              "$ref": "#/$defs/combinações"
+            },
+            "wand.global_xor": {
+              "$ref": "#/$defs/combinações"
+            },
+            "wand.global_intersect": {
+              "$ref": "#/$defs/combinações"
+            },
+            "colors.primary": {
+              "$ref": "#/$defs/combinações"
+            },
+            "colors.secondary": {
+              "$ref": "#/$defs/combinações"
+            },
+            "colors.hue_only": {
+              "$ref": "#/$defs/combinações"
+            },
+            "colors.saturation_only": {
+              "$ref": "#/$defs/combinações"
+            },
+            "colors.snap_hue": {
+              "$ref": "#/$defs/combinações"
+            },
+            "colors.snap_hue_only": {
+              "$ref": "#/$defs/combinações"
+            },
+            "transform.move": {
+              "$ref": "#/$defs/combinações"
+            },
+            "transform.move_copy": {
+              "$ref": "#/$defs/combinações"
+            },
+            "transform.scale": {
+              "$ref": "#/$defs/combinações"
+            },
+            "transform.scale_proportional": {
+              "$ref": "#/$defs/combinações"
+            },
+            "transform.scale_centered": {
+              "$ref": "#/$defs/combinações"
+            },
+            "transform.scale_centered_proportional": {
+              "$ref": "#/$defs/combinações"
+            },
+            "transform.rotate": {
+              "$ref": "#/$defs/combinações"
+            },
+            "transform.rotate_snap": {
+              "$ref": "#/$defs/combinações"
+            },
+            "transform.rotate_copy": {
+              "$ref": "#/$defs/combinações"
+            },
+            "layer.mouse_properties": {
+              "$ref": "#/$defs/combinações"
+            },
+            "layer.mouse_move_up": {
+              "$ref": "#/$defs/combinações"
+            },
+            "layer.mouse_move_top": {
+              "$ref": "#/$defs/combinações"
+            },
+            "layer.mouse_move_down": {
+              "$ref": "#/$defs/combinações"
+            },
+            "layer.mouse_move_bottom": {
+              "$ref": "#/$defs/combinações"
+            },
+            "canvas.corner_resize": {
+              "$ref": "#/$defs/combinações"
+            }
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/combinações"
+          }
+        }
+      }
+    }
+  }
+}

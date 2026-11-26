@@ -1,0 +1,12 @@
+/target/
+/benchmarks/baseline/
+/benchmarks/manual-samples/
+/.codex/
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+/atalhos.json
+/recentes.json
+/paleta.txt
