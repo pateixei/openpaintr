@@ -40,7 +40,7 @@ use app_settings::{AaMode, GlobalSettings};
 use colors::{ColorPalette, PaletteAction};
 use dialogs::{
     LayerDialogAction, LayerPropertiesDialog, RecentFiles, SaveDialogAction, SaveOptionsDialog,
-    atomic_write_bytes, make_thumbnail_texture,
+    atomic_write_bytes, make_thumbnail_texture, modal,
 };
 use editor::{Editor, LayerMeta, StrokeSpec};
 use gradient_tool::{
@@ -52,7 +52,7 @@ use phase2::SizeDialog;
 use selection::{Combine, Point, Region, Selection, Shape};
 use shortcuts::{Command, ShortcutDialog, Shortcuts};
 use text_tool::{FontCatalog, TextAlign, TextSession};
-use theme::{CARD_GAP, Theme};
+use theme::{CARD_CORNER_RADIUS, CARD_GAP, Theme};
 use tolerance::{AlphaMatchMode, FillPattern, StrokeBlend};
 use transform::{Transform, TransformOutcome, TransformTarget};
 use vector_tools::{
@@ -2104,7 +2104,7 @@ impl App {
                 egui::Frame::new()
                     .fill(theme.card_fill())
                     .stroke(egui::Stroke::new(1.0_f32, theme.border_color()))
-                    .corner_radius(egui::CornerRadius::same(8))
+                    .corner_radius(CARD_CORNER_RADIUS)
                     .shadow(ctx.style().visuals.popup_shadow)
                     .inner_margin(egui::Margin::same(10))
                     .show(ui, |ui| {
@@ -4585,7 +4585,7 @@ impl App {
             let scope = pending.scope;
             let tab_index = pending.tab_index;
             let doc_name = self.tabs[tab_index].title();
-            let response = egui::Modal::new(egui::Id::new("discard")).show(ctx, |ui| {
+            let response = modal(ctx, "discard").show(ctx, |ui| {
                 ui.heading(i18n::format("save-changes", &[&doc_name]));
                 ui.horizontal(|ui| {
                     (
@@ -4694,7 +4694,7 @@ impl App {
 
         if let Some((mut width, mut height)) = self.new_size {
             let limit = ctx.input(|input| input.max_texture_side).min(8192) as u32;
-            let response = egui::Modal::new(egui::Id::new("new")).show(ctx, |ui| {
+            let response = modal(ctx, "new").show(ctx, |ui| {
                 ui.heading(tr("new-image"));
                 ui.horizontal(|ui| {
                     ui.label(tr("width"));
@@ -7244,13 +7244,67 @@ mod tests {
     }
 
     #[test]
+    fn dialogs_and_window_use_the_layers_card_radius() -> io::Result<()> {
+        let screen = Rect::from_min_size(pos2(0.0, 0.0), vec2(1120.0, 760.0));
+        let card_radius = egui::CornerRadius::same(CARD_CORNER_RADIUS);
+        for theme in [Theme::Light, Theme::Dark] {
+            for modal_open in [false, true] {
+                let ctx = egui::Context::default();
+                let mut app = App::with_settings(
+                    &ctx,
+                    new_document(32, 24)?,
+                    GlobalSettings {
+                        theme,
+                        ..Default::default()
+                    },
+                );
+                app.tool_size_popup = !modal_open;
+                app.new_size = modal_open.then_some((32, 24));
+                let mut draw = |time| {
+                    ctx.run(
+                        egui::RawInput {
+                            screen_rect: Some(screen),
+                            time: Some(time),
+                            ..Default::default()
+                        },
+                        |ctx| app.ui_frame(ctx),
+                    )
+                };
+                let _ = draw(0.0);
+                let output = draw(1.0);
+                let has_rect = |predicate: &dyn Fn(&egui::epaint::RectShape) -> bool| {
+                    output.shapes.iter().any(|clipped| match &clipped.shape {
+                        egui::Shape::Rect(rect) => predicate(rect),
+                        egui::Shape::Vec(shapes) => shapes.iter().any(|shape| {
+                            matches!(shape, egui::Shape::Rect(rect) if predicate(rect))
+                        }),
+                        _ => false,
+                    })
+                };
+                assert!(has_rect(&|rect| rect.rect == screen
+                    && rect.corner_radius == card_radius
+                    && rect.stroke.color == theme.border_color()));
+                assert!(has_rect(&|rect| rect.rect.right() < screen.right() - 246.0
+                    && rect.corner_radius == card_radius
+                    && rect.fill == theme.card_fill()
+                    && rect.stroke.width > 0.0));
+                if modal_open {
+                    assert!(has_rect(&|rect| rect.rect == screen
+                        && rect.corner_radius == card_radius
+                        && rect.fill == Color32::from_black_alpha(100)));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
     fn window_corner_radius_matches_windowed_and_fullscreen_states() {
         let ctx = egui::Context::default();
         assert_eq!(
             window_chrome::corner_radius(&ctx, false),
-            window_chrome::WINDOW_CORNER_RADIUS
+            CARD_CORNER_RADIUS
         );
-        assert_eq!(window_chrome::corner_radius(&ctx, false), 4);
         assert_eq!(window_chrome::corner_radius(&ctx, true), 0);
     }
 }

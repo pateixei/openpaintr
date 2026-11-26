@@ -6,6 +6,7 @@ use openpaintr::{Document, Pixel};
 
 use super::{
     Action, App, Tool,
+    dialogs::modal,
     geometry::{self, Affine, Orthogonal, Resampling},
     selection::{Point, Selection, Shape},
     shortcuts::Command,
@@ -610,7 +611,7 @@ impl App {
     pub fn geometry_dialogs(&mut self, ctx: &egui::Context) {
         if let Some(mut dialog) = self.size_dialog.take() {
             let limit = ctx.input(|input| input.max_texture_side).min(8192) as u32;
-            let response = egui::Modal::new(egui::Id::new("dimensoes")).show(ctx, |ui| {
+            let response = modal(ctx, "dimensoes").show(ctx, |ui| {
                 ui.heading(if dialog.kind == SizeKind::Resize {
                     tr("resize")
                 } else {

@@ -2,6 +2,7 @@ use eframe::egui::{self, Color32, CornerRadius, Frame, Margin, Shadow, Stroke, V
 use serde::{Deserialize, Serialize};
 
 pub const CARD_GAP: i8 = 6;
+pub const CARD_CORNER_RADIUS: u8 = 8;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -56,7 +57,7 @@ impl Theme {
             Self::Dark => rgb(36, 39, 54),
         };
         visuals.window_stroke = Stroke::new(1.0_f32, border);
-        visuals.window_corner_radius = CornerRadius::same(6);
+        visuals.window_corner_radius = CornerRadius::same(CARD_CORNER_RADIUS);
         visuals.menu_corner_radius = CornerRadius::same(2);
         visuals.override_text_color = Some(fg);
         visuals.selection.bg_fill = active;
@@ -280,7 +281,7 @@ impl Theme {
         header_right: impl FnOnce(&mut egui::Ui),
         body: impl FnOnce(&mut egui::Ui),
     ) {
-        let radius = CornerRadius::same(8);
+        let radius = CornerRadius::same(CARD_CORNER_RADIUS);
         let card_width = ui.available_width();
         let inner_width = (card_width - 2.0).max(0.0);
         Frame::new()
@@ -303,8 +304,8 @@ impl Theme {
                 Frame::new()
                     .fill(self.card_header_fill())
                     .corner_radius(CornerRadius {
-                        nw: 7,
-                        ne: 7,
+                        nw: CARD_CORNER_RADIUS - 1,
+                        ne: CARD_CORNER_RADIUS - 1,
                         sw: 0,
                         se: 0,
                     })

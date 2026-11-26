@@ -9,7 +9,10 @@ use std::{
 use eframe::egui::{self, Key, Modifiers};
 use serde::{Deserialize, Serialize};
 
-use super::mouse_shortcuts::{self, MouseBindings};
+use super::{
+    dialogs::modal,
+    mouse_shortcuts::{self, MouseBindings},
+};
 
 const FILE_NAME: &str = "atalhos.json";
 const VERSION: u32 = 1;
@@ -571,7 +574,7 @@ impl Shortcuts {
     }
 
     pub fn settings(&mut self, ctx: &egui::Context, dialog: &mut ShortcutDialog) -> bool {
-        let response = egui::Modal::new(egui::Id::new("configurar_atalhos")).show(ctx, |ui| {
+        let response = modal(ctx, "configurar_atalhos").show(ctx, |ui| {
             ui.set_width((ctx.content_rect().width() - 36.0).clamp(320.0, 560.0));
             ui.heading(tr("shortcuts"));
             if let Some(path) = &self.path {

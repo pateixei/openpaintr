@@ -5,17 +5,15 @@ use eframe::egui::{
 
 use super::{
     i18n::text as tr,
-    theme::Theme,
+    theme::{CARD_CORNER_RADIUS, Theme},
     tool_icons::{ActionIcon, icon_button},
 };
-
-pub const WINDOW_CORNER_RADIUS: u8 = 4;
 
 pub fn corner_radius(ctx: &egui::Context, fullscreen: bool) -> u8 {
     if fullscreen || ctx.input(|input| input.viewport().maximized.unwrap_or(false)) {
         0
     } else {
-        WINDOW_CORNER_RADIUS
+        CARD_CORNER_RADIUS
     }
 }
 
