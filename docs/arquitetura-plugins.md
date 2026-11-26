@@ -1,66 +1,66 @@
-# Arquitetura de Plugins do OpenPaintR (`.rpdn-plugin`)
+# OpenPaintR Plugin Architecture (`.rpdn-plugin`)
 
-Este documento define o formato portátil, o modelo de execução híbrido (**WebAssembly + shaders `WGSL`**) e a interface de **UI declarativa** usados por todas as extensões do OpenPaintR.
+This document specifies the planned portable package format, hybrid execution model (**WebAssembly and WGSL shaders**), and declarative UI for OpenPaintR extensions.
 
-> **Regra do projeto:** Todos os efeitos do menu **Efeitos** são implementados exclusivamente como plugins `.rpdn-plugin`, utilizando exatamente a mesma API pública e a mesma biblioteca mínima (`rustpdn-plugin-sdk`) disponibilizadas para desenvolvedores terceiros.
+> **Project rule** — Implement every effect in the **Effects** menu as a `.rpdn-plugin`, using the public API and minimal `rustpdn-plugin-sdk` available to third-party developers.
 
-## 1. Objetivos e garantias multiplataforma
+## 1. Cross-platform goals and guarantees
 
-- **Binário único real:** um mesmo arquivo `.rpdn-plugin` roda sem recompilação em **Windows, macOS e Linux** (`x86_64` e `aarch64`), sem `.dll`, `.so` ou `.dylib`.
-- **Execução híbrida (CPU + GPU):**
-  - **`plugin.wasm`** (`wasm32-unknown-unknown` com `simd128`): executa no host em sandbox via **`wasmtime`**, definindo parâmetros, validando opções, planejando passes e processando tiles na CPU.
-  - **`*.wgsl`** (opcional): *compute shaders* portáteis validados via **`naga`** e executados via **`wgpu`** sobre Vulkan (Linux/Windows), DirectX 12 (Windows) ou Metal (macOS).
-  - **Paridade e fallback:** todo plugin pode rodar em GPU quando disponível e mantém implementação Wasm de referência para ambientes sem GPU compatível, testes automatizados no Linux/WSL e inspeção determinística.
-- **UI Declarativa integrada ao host:** plugins nunca criam janelas do sistema operacional nem dependem de bibliotecas gráficas; o host monta os controles diretamente em **`egui`**, herdando automaticamente os temas **Claro Pastel** e **Escuro Elegante**, prévia assíncrona e atalhos.
-- **Segurança e estabilidade:** memória linear isolada por instância, ausência de acesso arbitrário a disco/rede, limite de memória e interrupção cooperativa (epoch/fuel) ao cancelar uma prévia obsoleta. Erros no plugin exibem diagnóstico na barra/diálogo sem fechar o editor.
-- **Fidelidade à seleção e antialiasing:** plugins operam apenas sobre tiles copiados da camada ativa; a gravação final no documento é sempre feita pelo host ponderada pela máscara `TMask` com **SSAA (4×4)** ativo 100% do tempo.
+- **One package.** The same `.rpdn-plugin` file runs on **Windows, macOS, and Linux** (`x86_64` and `aarch64`) without recompilation or platform-specific `.dll`, `.so`, or `.dylib` files.
+- **Hybrid CPU and GPU execution.**
+  - **`plugin.wasm`** (`wasm32-unknown-unknown` with `simd128`) runs in a **`wasmtime`** sandbox. It defines parameters, validates options, plans passes, and processes tiles on the CPU.
+  - Optional **`*.wgsl`** compute shaders are validated by **`naga`** and run through **`wgpu`** on Vulkan (Linux and Windows), DirectX 12 (Windows), or Metal (macOS).
+  - **Parity and fallback.** Plugins with a GPU path can use it when available. The reference Wasm implementation supports systems without a compatible GPU, automated Linux and WSL tests, and deterministic inspection.
+- **Host-rendered declarative UI.** The host creates controls directly in **`egui`** and provides the active light pastel or dark theme, asynchronous previews, and shortcuts. Plugins use the host UI and require no GUI libraries or native windows.
+- **Security and stability.** Isolate linear memory per instance, deny arbitrary disk and network access, limit memory, and use cooperative epoch or fuel interruption to cancel obsolete previews. Report plugin errors in the status bar or dialog while keeping the editor open.
+- **Selection fidelity and antialiasing.** Plugins work on tiles copied from the active layer. The host commits the results using the `TMask` coverage mask with **4×4 SSAA** always enabled.
 
-## 2. Fluxo arquitetural
+## 2. Architecture flow
 
 ```mermaid
 flowchart LR
-    PKG["Pacote .rpdn-plugin (manifest.json + plugin.wasm + .wgsl)"] --> LOADER["PluginLoader (Validacao + Cache)"]
-    LOADER --> UIHOST["PluginUiHost (egui Tema Pastel/Escuro)"]
-    UIHOST -->|"ParamBag"| SESSION["EffectSession (Debounce + Cancelamento)"]
-    SESSION -->|"plan_render"| PLAN{"Modo de Execucao"}
-    PLAN -->|"CpuTiles"| WASM["Wasmtime Sandbox (SIMD128)"]
-    PLAN -->|"GpuPasses"| WGPU["Pipeline wgpu (WGSL via naga)"]
-    WGPU -.->|"Fallback sem GPU"| WASM
-    WASM --> COMP["Compositor Host TMask (SSAA 4x4)"]
+    PKG[".rpdn-plugin package (manifest.json + plugin.wasm + .wgsl)"] --> LOADER["PluginLoader (validation and cache)"]
+    LOADER --> UIHOST["PluginUiHost (egui light or dark theme)"]
+    UIHOST -->|"ParamBag"| SESSION["EffectSession (debounce and cancellation)"]
+    SESSION -->|"plan_render"| PLAN{"Execution mode"}
+    PLAN -->|"CpuTiles"| WASM["Wasmtime sandbox (SIMD128)"]
+    PLAN -->|"GpuPasses"| WGPU["wgpu pipeline (WGSL via naga)"]
+    WGPU -.->|"CPU fallback"| WASM
+    WASM --> COMP["Host TMask compositor (4x4 SSAA)"]
     WGPU --> COMP
-    COMP -->|"Edit::Raster unico"| HIST["Historico e Repetir Ultimo Efeito"]
+    COMP -->|"One Edit::Raster entry"| HIST["History and Repeat Last Effect"]
 ```
 
-## 3. Estrutura do pacote `.rpdn-plugin`
+## 3. Package layout
 
-O arquivo `.rpdn-plugin` é um arquivo **ZIP** padrão (sem compressão proprietária) contendo:
+A `.rpdn-plugin` is a standard **ZIP** archive with the following layout.
 
 ```text
-meu-efeito.rpdn-plugin
-├── manifest.json          # Metadados, capacidades e pontos de entrada
-├── plugin.wasm            # Módulo WebAssembly obrigatório
-├── shaders/               # Opcional: compute shaders WGSL
+my-effect.rpdn-plugin
+├── manifest.json          # Metadata, capabilities, and entry points
+├── plugin.wasm            # Required WebAssembly module
+├── shaders/               # Optional WGSL compute shaders
 │   ├── pass_h.wgsl
 │   └── pass_v.wgsl
-└── assets/                # Opcional: ícone vetorial SVG/JSON e traduções
+└── assets/                # Optional SVG/JSON vector icon and translations
     └── icon.svg
 ```
 
-### 3.1. Esquema de `manifest.json` (versão 1)
+### 3.1. Version 1 `manifest.json` schema
 
 ```json
 {
   "schema_version": 1,
   "id": "org.rustpdn.effects.gaussian-blur",
-  "name": "Desfoque Gaussiano",
+  "name": "Gaussian Blur",
   "version": "1.0.0",
   "api_version": "1.0",
   "kind": "effect",
-  "author": "Equipe OpenPaintR",
+  "author": "OpenPaintR Team",
   "license": "MIT",
   "menu": {
-    "category": "Desfoques",
-    "label": "Desfoque Gaussiano...",
+    "category": "Blurs",
+    "label": "Gaussian Blur...",
     "order": 30,
     "shortcut_action": "effects.gaussian_blur"
   },
@@ -82,35 +82,35 @@ meu-efeito.rpdn-plugin
 }
 ```
 
-| Campo | Tipo | Obrigatório | Descrição |
+| Field | Type | Required | Description |
 | --- | --- | :---: | --- |
-| `schema_version` | `u32` | Sim | Versão do formato do manifesto (`1`). |
-| `id` | `string` | Sim | Identificador reverso único (`[a-z0-9._-]+`). |
-| `name` / `version` | `string` | Sim | Nome exibido no catálogo e versão SemVer do plugin. |
-| `api_version` | `string` | Sim | Versão da ABI de plugins esperada (`"1.0"`). |
-| `kind` | `string` | Sim | `"effect"` na Fase 4; `"adjustment"` e `"filetype"` reservados para Fase 5. |
-| `menu.category` | `string` | Sim | Submenu em **Efeitos** (ex.: `"Desfoques"`, `"Artístico"`, `"Ruído"`). |
-| `menu.shortcut_action` | `string` | Não | Identificador estável registrado em `atalhos.schema.json` quando houver atalho padrão. |
-| `capabilities.pixel_format` | `string` | Sim | `"rgba8unorm"` ou `"rgba32float"` (linear pré-multiplicado ou não-pré-multiplicado explícito). |
-| `capabilities.max_halo_px` | `u32` | Sim | Raio máximo de vizinhança exigido em pixels ao redor de cada tile. |
-| `entrypoints.wasm` | `string` | Sim | Caminho relativo ao `.wasm` dentro do ZIP. |
-| `entrypoints.shaders` | `array` | Não | Shaders `WGSL` declarados com `id`, `path` e nome do ponto de entrada `entry`. |
+| `schema_version` | `u32` | Yes | Manifest format version (`1`). |
+| `id` | `string` | Yes | Unique reverse-domain identifier (`[a-z0-9._-]+`). |
+| `name` / `version` | `string` | Yes | Catalog display name and plugin SemVer version. |
+| `api_version` | `string` | Yes | Expected plugin ABI version (`"1.0"`). |
+| `kind` | `string` | Yes | Use `"effect"` in phase 4. The values `"adjustment"` and `"filetype"` are reserved for phase 5. |
+| `menu.category` | `string` | Yes | Submenu under **Effects**, such as `"Blurs"`, `"Artistic"`, or `"Noise"`. |
+| `menu.shortcut_action` | `string` | No | Stable identifier registered in `atalhos.schema.json` when the effect has a default shortcut. |
+| `capabilities.pixel_format` | `string` | Yes | `"rgba8unorm"` or `"rgba32float"`, with explicit premultiplied or straight linear alpha. |
+| `capabilities.max_halo_px` | `u32` | Yes | Maximum neighborhood radius in pixels around each tile. |
+| `entrypoints.wasm` | `string` | Yes | Relative path to the `.wasm` file inside the ZIP archive. |
+| `entrypoints.shaders` | `array` | No | WGSL shaders with `id`, `path`, and an `entry` point name. |
 
-### 3.2. Descoberta e precedência
+### 3.2. Discovery and precedence
 
-O `PluginLoader` varre na inicialização (e ao recarregar plugins):
-1. **Embutidos (oficiais):** pacotes `.rpdn-plugin` enviados junto à distribuição do OpenPaintR (menu padrão **Efeitos**).
-2. **Diretório do sistema:** pasta compartilhada de instalação do aplicativo.
-3. **Diretório do usuário:**
-   - **Linux:** `$XDG_DATA_HOME/openpaintr/plugins` (padrão `~/.local/share/openpaintr/plugins`)
-   - **Windows:** `%APPDATA%\OpenPaintR\plugins`
-   - **macOS:** `~/Library/Application Support/OpenPaintR/plugins`
+At startup and on reload, `PluginLoader` searches these locations in order.
+1. **Built-in packages.** Official `.rpdn-plugin` packages shipped with OpenPaintR make up the default **Effects** menu.
+2. **System directory.** The shared application installation.
+3. **User directory.**
+   - **Linux** — `$XDG_DATA_HOME/openpaintr/plugins` (defaults to `~/.local/share/openpaintr/plugins`)
+   - **Windows** — `%APPDATA%\OpenPaintR\plugins`
+   - **macOS** — `~/Library/Application Support/OpenPaintR/plugins`
 
-Em caso de `id` duplicado, pacotes com versão SemVer mais recente no diretório do usuário podem sobrepor pacotes antigos somente com consentimento explícito; plugins embutidos oficiais preservam verificação de integridade.
+When IDs collide, a newer SemVer package in the user directory can override an older package only with explicit consent. Official built-in plugins retain integrity verification.
 
-## 4. Contrato ABI / WIT (`rustpdn:plugin@1.0.0`)
+## 4. ABI and WIT contract (`rustpdn:plugin@1.0.0`)
 
-A fronteira entre o host OpenPaintR e `plugin.wasm` usa tipos puramente valoráveis e buffers lineares (compatível com **WIT / Component Model** e representação binária estável):
+The boundary between the host and `plugin.wasm` uses value types and linear buffers for WIT and Component Model compatibility and a stable binary representation.
 
 ```wit
 package rustpdn:plugin@1.0.0;
@@ -183,7 +183,7 @@ interface types {
 world effect-plugin {
     use types.{effect-context, param-entry, render-plan, tile-region};
 
-    export describe-ui: func() -> list<u8>; // UiSchema serializado
+    export describe-ui: func() -> list<u8>; // Serialized UiSchema
     export validate-params: func(ctx: effect-context, params: list<param-entry>) -> result<list<param-entry>, string>;
     export plan-render: func(ctx: effect-context, params: list<param-entry>) -> result<render-plan, string>;
     export render-tile: func(
@@ -195,47 +195,47 @@ world effect-plugin {
 }
 ```
 
-## 5. Modelo de execução híbrida (CPU Wasm + GPU WGSL)
+## 5. Hybrid execution model (CPU Wasm and GPU WGSL)
 
-### 5.1. Pipeline por tiles em CPU (`CpuTiles`)
+### 5.1. CPU tile pipeline (`CpuTiles`)
 
-1. Antes do processamento, o host consulta `plan_render(ctx, params)`, que retorna `(halo_px, border_mode, pixel_format)`.
-2. O host particiona o *bounding box* da seleção ativa (ou o documento inteiro, caso não haja seleção) em **tiles de `256 × 256 px`**.
-3. Durante a **prévia interativa**, os tiles visíveis na área atual da tela são agendados com prioridade máxima; se o usuário mover um slider, o token de cancelamento sinaliza ao *epoch* do `wasmtime` para interromper o lote antigo imediatamente.
-4. Para cada tile, o host preenche o buffer expandido `(256 + 2 * halo_px) × (256 + 2 * halo_px)` aplicando o `border_mode` escolhido nas bordas do documento e chama `render_tile` em um pool de threads do host (uma `Store`/instância Wasm por worker thread).
+1. Before processing, the host calls `plan_render(ctx, params)`, which returns `(halo_px, border_mode, pixel_format)`.
+2. The host divides the active selection's bounding box, or the whole document when there is no selection, into **`256 × 256 px` tiles**.
+3. During an interactive preview, visible tiles receive top priority. When a slider moves, the cancellation token signals the `wasmtime` epoch to interrupt the previous batch.
+4. For each tile, the host fills an expanded `(256 + 2 * halo_px) × (256 + 2 * halo_px)` buffer using the selected `border_mode` at document edges. It then calls `render_tile` in a host thread pool, with one Wasm instance and `Store` per worker.
 
-### 5.2. Pipeline GPU com shaders `WGSL` (`GpuPasses`)
+### 5.2. GPU pipeline with WGSL shaders (`GpuPasses`)
 
-Para efeitos paralelos de alto custo (desfoques de raio grande, distorções, fractais, brilho difuso):
-1. `plan_render` retorna `RenderPlan::GpuPasses(halo_px, border_mode, pixel_format, passes)`.
-2. Cada passe informa:
-   - `shader_id`: identificador listado em `manifest.json`;
-   - `uniform_bytes`: struct `#[repr(C)]` alinhada em 16 bytes (`std140` / `bytemuck::Pod`);
-   - `reads_previous_pass`: permite encadear múltiplos passes *ping-pong* (ex.: passe horizontal + passe vertical).
-3. **Layout fixo de bindings WGSL do OpenPaintR (Grupo 0):**
+Use this pipeline for costly parallel effects such as large-radius blurs, distortions, fractals, and glow.
+1. `plan_render` returns `RenderPlan::GpuPasses(halo_px, border_mode, pixel_format, passes)`.
+2. Each pass declares the following fields.
+   - `shader_id` identifies the shader listed in `manifest.json`.
+   - `uniform_bytes` contains a 16-byte-aligned `#[repr(C)]` struct (`std140` / `bytemuck::Pod`).
+   - `reads_previous_pass` chains ping-pong passes, such as horizontal and vertical blur.
+3. OpenPaintR reserves the following WGSL bindings in group 0.
 
-| Binding | Tipo WGSL | Uso |
+| Binding | WGSL type | Purpose |
 | --- | --- | --- |
-| `@group(0) @binding(0)` | `texture_2d<f32>` | Textura de entrada (camada ou saída do passe anterior). |
-| `@group(0) @binding(1)` | `texture_storage_2d<rgba32float, write>` | Textura de saída do passe atual. |
-| `@group(0) @binding(2)` | `sampler` | Sampler linear/clamp gerenciado pelo host conforme `border_mode`. |
-| `@group(0) @binding(3)` | `var<uniform> host: HostUniforms` | Dimensões (`width`, `height`), `seed`, cores primária/secundária e DPI. |
-| `@group(0) @binding(4)` | `var<uniform> params: PluginUniforms` | `uniform_bytes` fornecidos pelo módulo Wasm do plugin. |
+| `@group(0) @binding(0)` | `texture_2d<f32>` | Input texture from the layer or previous pass. |
+| `@group(0) @binding(1)` | `texture_storage_2d<rgba32float, write>` | Output texture for the current pass. |
+| `@group(0) @binding(2)` | `sampler` | Host-managed linear/clamp sampler that follows `border_mode`. |
+| `@group(0) @binding(3)` | `var<uniform> host: HostUniforms` | Dimensions (`width`, `height`), `seed`, primary and secondary colors, and DPI. |
+| `@group(0) @binding(4)` | `var<uniform> params: PluginUniforms` | `uniform_bytes` supplied by the plugin's Wasm module. |
 
-4. Se o ambiente não possuir dispositivo `wgpu` suportado (ex.: sessão headless ou GPU incompatível), o host redireciona automaticamente a execução para `render_tile` no módulo Wasm.
+4. If no supported `wgpu` device is available, such as in a headless session or on incompatible hardware, the host falls back to the Wasm module's `render_tile`.
 
-### 5.3. Composição final e seleção `TMask` (SSAA 4×4)
+### 5.3. Final compositing and `TMask` selection (4×4 SSAA)
 
-O plugin **nunca escreve diretamente no `Document`**. Ao receber o buffer processado de cada tile:
-- Se não houver seleção ativa, o host grava o tile diretamente na camada temporária de prévia/commit.
-- Se houver seleção ativa, o host intercala cada pixel `(x, y)` entre `original` e `efeito` pela cobertura `cov = selection.coverage_u8((x, y))` da máscara `TMask` (**SSAA 4×4**).
-- Na confirmação (`OK`), o host gera apenas um registro `Edit::Raster` no histórico do documento com as alterações consolidadas.
+The host owns writes to `Document`. When it receives a processed tile, it applies these rules.
+- With no active selection, write the tile to the temporary preview or commit layer.
+- With an active selection, interpolate each pixel `(x, y)` between its original and effect values using the **4×4 SSAA** `TMask` coverage `cov = selection.coverage_u8((x, y))`.
+- On **OK**, save the consolidated changes as a single `Edit::Raster` entry in the document history.
 
-## 6. Interface de UI Declarativa (`UiSchema`) e Montagem no OpenPaintR
+## 6. Declarative UI (`UiSchema`) and host rendering
 
-### 6.1. Modelo de dados declarativo (`UiSchema`)
+### 6.1. Declarative data model (`UiSchema`)
 
-O plugin descreve sua tela usando apenas estruturas declarativas (sem callbacks de UI nem tipos de janela):
+The plugin describes its UI using declarative data structures without callbacks or window types.
 
 ```rust
 pub struct UiSchema {
@@ -288,9 +288,9 @@ pub struct VisibilityRule {
 }
 ```
 
-### 6.2. Interface de montagem no OpenPaintR (`PluginUiHost`)
+### 6.2. Host rendering (`PluginUiHost`)
 
-Dentro do editor (`src/gui/`), a montagem da UI declarativa é centralizada no módulo host `PluginUiHost` / `EffectDialogController`:
+In the editor (`src/gui/`), `PluginUiHost` and `EffectDialogController` assemble the declarative UI.
 
 ```rust
 pub struct EffectModalState {
@@ -303,8 +303,8 @@ pub struct EffectModalState {
 }
 
 pub trait PluginUiHost {
-    /// Renderiza o `UiSchema` como cartão/modal em `egui` usando `Theme::styled_card`,
-    /// retornando `true` sempre que algum parâmetro for alterado pelo usuário.
+    /// Renders the `UiSchema` as an `egui` card or modal using `Theme::styled_card`.
+    /// Returns `true` when the user changes a parameter.
     fn show_schema(
         &self,
         ui: &mut egui::Ui,
@@ -313,8 +313,8 @@ pub trait PluginUiHost {
         params: &mut ParamBag,
     ) -> bool;
 
-    /// Renderiza a janela flutuante completa do efeito: título, controles gerados,
-    /// checkbox "Prévia", indicador de progresso, "Restaurar padrões", "Cancelar" e "OK".
+    /// Renders the floating effect dialog with its title, generated controls,
+    /// Preview checkbox, progress indicator, Reset Defaults, Cancel, and OK.
     fn show_effect_modal(
         &self,
         ctx: &egui::Context,
@@ -324,22 +324,22 @@ pub trait PluginUiHost {
 }
 ```
 
-Comportamento padronizado pelo host para todo plugin:
-- **Identidade visual automática:** todos os grupos `Section` usam o mesmo estilo visual de `Theme::styled_card`, e sliders, checkboxes, seletores de ângulo (mostrador circular) e cores herdando o tema ativo (**Moderno Pastel** ou **Escuro Elegante**).
-- **Restaurar padrões:** botão automático no rodapé redefine `params` com todos os valores `default` do `UiSchema` e re-dispara a prévia.
-- **Prévia ao vivo e cancelamento:** alterar qualquer controle chama `validate_params` e agenda novo processamento com curto *debounce* (ex.: 16–32 ms), cancelando imediatamente o trabalho anterior.
-- **Repetição do último efeito:** ao clicar em **OK**, o host armazena `(plugin_id, params)` no estado da sessão para o atalho **Repetir último efeito** (`Ctrl+F` no perfil Paint.NET), reaplicando o efeito sem abrir o diálogo novamente.
+The host provides the same behavior to all plugins.
+- **Theme integration.** `Section` groups use `Theme::styled_card`. Sliders, checkboxes, angle dials, and color controls inherit the active light pastel or dark theme.
+- **Reset defaults.** The footer button restores every `default` from `UiSchema` to `params` and restarts the preview.
+- **Live preview and cancellation.** A control change calls `validate_params`, cancels the previous job, and schedules a new render after a short debounce, such as 16–32 ms.
+- **Repeat last effect.** On **OK**, the host stores `(plugin_id, params)` in the session. **Repeat Last Effect** (`Ctrl+F` in the Paint.NET profile) applies them again without opening the dialog.
 
-## 7. Biblioteca mínima de plugins (`rustpdn-plugin-sdk`)
+## 7. Minimal plugin SDK (`rustpdn-plugin-sdk`)
 
-Para que nenhum autor precise lidar manualmente com serialização ABI ou ponteiros crus Wasm, o workspace fornecerá a crate `#![no_std]` (com `alloc`) **`crates/rustpdn-plugin-sdk`**:
+The workspace will provide a `#![no_std]` crate with `alloc` at `crates/rustpdn-plugin-sdk`. It handles ABI serialization and raw Wasm pointers for plugin authors.
 
-| Módulo | Responsabilidade |
+| Module | Responsibility |
 | --- | --- |
-| `sdk::meta` | Contexto do documento (`EffectContext`), leitura de cores primária/secundária e semente. |
-| `sdk::ui` | `UiBuilder` fluente para declarar `SliderF32`, `SliderI32`, `Angle`, `CenterOffset`, `Color`, `Select`, `Seed` e regras `visible_if`. |
-| `sdk::params` | `Params` para leitura tipada por chave (`f32_or`, `i32_or`, `bool_or`, `color_or`, `seed_or`, `choice_or`). |
-| `sdk::tile` | `TileView` (leitura segura `(x, y)` com halo pré-expandido e helpers RGBA8/RGBA32F), `TileMut` e utilitários de pré-multiplicação alfa. |
-| `sdk::gpu` | `GpuPlanBuilder` para montar `RenderPlan::GpuPasses` com serialização segura via `bytemuck`. |
-| `sdk::simd` | Wrappers leves sobre `core::arch::wasm32` (`v128`) para vetores de 4 floats RGBA. |
-| `sdk::export_effect!` | Macro que registra o trait `EffectPlugin` e gera automaticamente os exports exigidos pelo runtime Wasm. |
+| `sdk::meta` | Document context (`EffectContext`), primary and secondary colors, and the seed. |
+| `sdk::ui` | Fluent `UiBuilder` for `SliderF32`, `SliderI32`, `Angle`, `CenterOffset`, `Color`, `Select`, `Seed`, and `visible_if` rules. |
+| `sdk::params` | Typed reads by key through `Params` (`f32_or`, `i32_or`, `bool_or`, `color_or`, `seed_or`, and `choice_or`). |
+| `sdk::tile` | `TileView` with safe `(x, y)` access to the expanded halo and RGBA8/RGBA32F helpers, plus `TileMut` and alpha premultiplication utilities. |
+| `sdk::gpu` | `GpuPlanBuilder` for `RenderPlan::GpuPasses` with safe `bytemuck` serialization. |
+| `sdk::simd` | Lightweight wrappers over `core::arch::wasm32` (`v128`) for four-channel floating-point RGBA vectors. |
+| `sdk::export_effect!` | Macro that registers the `EffectPlugin` trait implementation and generates the Wasm runtime exports. |

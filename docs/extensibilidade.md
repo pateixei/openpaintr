@@ -1,37 +1,37 @@
-# Guia de Extensibilidade do OpenPaintR
+# OpenPaintR Extensibility Guide
 
-Este guia mostra como criar, testar e empacotar um plugin portátil **`.rpdn-plugin`** para o OpenPaintR. O mesmo arquivo gerado roda sem alteração em **Linux, Windows e macOS** (`x86_64` e `aarch64`).
+This guide describes the planned workflow for building, testing, and packaging a portable OpenPaintR **`.rpdn-plugin`**. A package is designed to run on **Linux, Windows, and macOS** (`x86_64` and `aarch64`).
 
-Antes de começar, consulte as definições formais em [Arquitetura de plugins](arquitetura-plugins.md).
+See the [plugin architecture](arquitetura-plugins.md) for the format and API specification. The runtime, SDK, and packaging commands are planned for phase 4.
 
 ---
 
-## 1. Requisitos e estrutura do projeto
+## 1. Requirements and project layout
 
-Instale o alvo WebAssembly da toolchain Rust (uma única vez):
+Install the Rust toolchain's WebAssembly target once.
 
 ```sh
 rustup target add wasm32-unknown-unknown
 ```
 
-Um projeto mínimo de plugin tem a estrutura:
+A minimal plugin project has this layout.
 
 ```text
-meu-efeito/
+my-effect/
 ├── Cargo.toml
 ├── manifest.json
-├── shaders/            # Opcional: apenas para plugins híbridos Wasm + WGSL
+├── shaders/            # Optional, for hybrid Wasm and WGSL plugins
 │   ├── pass_h.wgsl
 │   └── pass_v.wgsl
 └── src/
     └── lib.rs
 ```
 
-### `Cargo.toml` mínimo
+### Minimal `Cargo.toml`
 
 ```toml
 [package]
-name = "openpaintr-efeito-ruido"
+name = "openpaintr-noise-effect"
 version = "1.0.0"
 edition = "2024"
 
@@ -40,10 +40,10 @@ crate-type = ["cdylib"]
 
 [dependencies]
 rustpdn-plugin-sdk = "1.0"
-bytemuck = { version = "1", features = ["derive"] } # Necessário apenas se enviar uniforms WGSL
+bytemuck = { version = "1", features = ["derive"] } # Required only for WGSL uniforms
 ```
 
-Sugestão de `.cargo/config.toml` para habilitar SIMD 128-bit no WebAssembly:
+Enable 128-bit WebAssembly SIMD in `.cargo/config.toml`.
 
 ```toml
 [target.wasm32-unknown-unknown]
@@ -52,25 +52,25 @@ rustflags = ["-C", "target-feature=+simd128"]
 
 ---
 
-## 2. Exemplo 1 — Plugin de efeito em WebAssembly (CPU)
+## 2. Example 1 — CPU WebAssembly effect
 
-Este exemplo implementa um efeito determinístico de **Adicionar Ruído** com três controles na UI declarativa: slider de **Intensidade**, checkbox **Monocromático** e **Semente** com botão de re-sorteio automático no diálogo do OpenPaintR.
+This example implements deterministic **Add Noise** with three declarative controls. OpenPaintR displays an **Intensity** slider, a **Monochrome** checkbox, and a **Seed** control with a randomize button.
 
 ### `manifest.json`
 
 ```json
 {
   "schema_version": 1,
-  "id": "com.exemplo.openpaintr.ruido",
-  "name": "Adicionar Ruído",
+  "id": "com.example.openpaintr.noise",
+  "name": "Add Noise",
   "version": "1.0.0",
   "api_version": "1.0",
   "kind": "effect",
-  "author": "Seu Nome",
+  "author": "Your Name",
   "license": "MIT",
   "menu": {
-    "category": "Ruído",
-    "label": "Adicionar Ruído...",
+    "category": "Noise",
+    "label": "Add Noise...",
     "order": 10
   },
   "capabilities": {
@@ -99,10 +99,10 @@ pub struct AddNoisePlugin;
 
 impl EffectPlugin for AddNoisePlugin {
     fn describe_ui(&self) -> UiSchema {
-        UiBuilder::new("Adicionar Ruído")
-            .slider_f32("intensity", "Intensidade", 0.0, 100.0, 25.0, Some("%"))
-            .checkbox("mono", "Monocromático", false)
-            .seed("seed", "Semente aleatória", 42)
+        UiBuilder::new("Add Noise")
+            .slider_f32("intensity", "Intensity", 0.0, 100.0, 25.0, Some("%"))
+            .checkbox("mono", "Monochrome", false)
+            .seed("seed", "Random seed", 42)
             .build()
     }
 
@@ -111,7 +111,7 @@ impl EffectPlugin for AddNoisePlugin {
         _ctx: &EffectContext,
         _params: &Params,
     ) -> Result<RenderPlan, String> {
-        // Halo 0 porque cada pixel depende apenas de si mesmo e da coordenada (x, y)
+        // Each pixel depends only on itself and its (x, y) position, so the halo is zero.
         Ok(RenderPlan::cpu_tiles(0, BorderMode::Clamp, PixelFormat::Rgba8Unorm))
     }
 
@@ -176,17 +176,16 @@ fn hash_2d(x: u32, y: u32, seed: u64) -> u64 {
 export_effect!(AddNoisePlugin);
 ```
 
-Pontos importantes neste código:
-- A coordenada global `(dst.origin_x() + x, dst.origin_y() + y)` garante que não apareçam emendas nas fronteiras dos tiles `256 × 256 px`.
-- Você não precisa checar a seleção ativa nem aplicar SSAA manualmente: o host aplica a máscara `TMask` (SSAA 4×4) ao gravar o resultado do tile na camada.
+- Using global coordinates `(dst.origin_x() + x, dst.origin_y() + y)` avoids seams at `256 × 256 px` tile boundaries.
+- The host applies the 4×4 SSAA `TMask` selection coverage when committing a tile to the layer.
 
 ---
 
-## 3. Exemplo 2 — Plugin híbrido (`Wasm` + shaders `WGSL`)
+## 3. Example 2 — Hybrid Wasm and WGSL plugin
 
-Para efeitos pesados de vizinhança (ex.: **Desfoque Gaussiano separável**), `plugin.wasm` descreve a UI e monta o plano com **dois passes `WGSL`**, mantendo `render_tile` como *fallback* determinístico em CPU.
+For costly neighborhood effects such as separable **Gaussian Blur**, `plugin.wasm` describes the UI and plans **two WGSL passes**. `render_tile` provides the deterministic CPU fallback.
 
-### `shaders/pass_h.wgsl` (passe horizontal — análogo ao `pass_v.wgsl`)
+### Horizontal pass in `shaders/pass_h.wgsl` (the vertical pass uses the same structure)
 
 ```wgsl
 struct HostUniforms {
@@ -224,7 +223,7 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3<u32>) {
         let sx = clamp(i32(gid.x) + dx, 0, i32(host.width) - 1);
         let px = textureLoad(src_tex, vec2<i32>(sx, i32(gid.y)), 0);
         let w = exp(-f32(dx * dx) / two_sigma_sq);
-        // Acumula em RGBA pré-multiplicado para evitar escurecimento em bordas transparentes
+        // Accumulate premultiplied RGBA to avoid darkening transparent edges.
         acc += vec4<f32>(px.rgb * px.a, px.a) * w;
         w_sum += w;
     }
@@ -235,7 +234,7 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 ```
 
-### Planejamento em `src/lib.rs`
+### Render planning in `src/lib.rs`
 
 ```rust
 use bytemuck::{Pod, Zeroable};
@@ -256,8 +255,8 @@ pub struct GaussianBlurPlugin;
 
 impl EffectPlugin for GaussianBlurPlugin {
     fn describe_ui(&self) -> UiSchema {
-        UiBuilder::new("Desfoque Gaussiano")
-            .slider_i32("radius", "Raio", 0, 200, 6, Some("px"))
+        UiBuilder::new("Gaussian Blur")
+            .slider_i32("radius", "Radius", 0, 200, 6, Some("px"))
             .build()
     }
 
@@ -285,7 +284,7 @@ impl EffectPlugin for GaussianBlurPlugin {
         dst: &mut TileMut,
     ) -> Result<(), String> {
         let radius = params.i32_or("radius", 6).clamp(0, 200) as i32;
-        // Implementação CPU equivalente usando src.rgba32f_clamped(x + dx, y + dy) ...
+        // Implement the equivalent CPU pass with src.rgba32f_clamped(x + dx, y + dy).
         let _ = (radius, src, dst);
         Ok(())
     }
@@ -296,59 +295,59 @@ export_effect!(GaussianBlurPlugin);
 
 ---
 
-## 4. Referência rápida da UI declarativa
+## 4. Declarative UI quick reference
 
-| Controle (`UiBuilder`) | Tipo salvo em `Params` | Widget montado em `egui` pelo OpenPaintR |
+| `UiBuilder` control | Type stored in `Params` | OpenPaintR `egui` widget |
 | --- | --- | --- |
-| `slider_f32(key, label, min, max, default, unit)` | `f32` | Slider contínuo com campo numérico e sufixo (ex.: `%`, `px`). |
-| `slider_i32(key, label, min, max, default, unit)` | `i32` | Slider inteiro com ajuste fino. |
-| `angle(key, label, default_deg)` | `f32` | Mostrador circular de ângulo + caixa em graus (`-180°` a `180°`). |
-| `center_offset(key, label, default_x, default_y)` | `(f32, f32)` | Pad 2D normalizado (`-1.0..=1.0`) para centro de distorções/iluminação. |
-| `color(key, label, default_rgba, allow_alpha)` | `[u8; 4]` | Botão de cor integrado ao tema + alfa opcional. |
-| `checkbox(key, label, default)` | `bool` | Caixa de seleção padrão. |
-| `select(key, label, default, options)` | `u32` | ComboBox suspenso estilo Windows. |
-| `radio(key, label, default, options)` | `u32` | Grupo de opções exclusivas. |
-| `seed(key, label, default)` | `u64` | Campo numérico + botão **Re-sortear**. |
-| `section(title, ...)` / `visible_if(key, value)` | — | Cartão recolhível `styled_card` e exibição condicional dinâmica. |
+| `slider_f32(key, label, min, max, default, unit)` | `f32` | Continuous slider with a numeric field and a unit suffix such as `%` or `px`. |
+| `slider_i32(key, label, min, max, default, unit)` | `i32` | Integer slider with fine adjustment. |
+| `angle(key, label, default_deg)` | `f32` | Circular angle dial and a degree field (`-180°` to `180°`). |
+| `center_offset(key, label, default_x, default_y)` | `(f32, f32)` | Normalized 2D pad (`-1.0..=1.0`) for a distortion or light center. |
+| `color(key, label, default_rgba, allow_alpha)` | `[u8; 4]` | Themed color button with optional alpha. |
+| `checkbox(key, label, default)` | `bool` | Standard checkbox. |
+| `select(key, label, default, options)` | `u32` | Windows-style drop-down combo box. |
+| `radio(key, label, default, options)` | `u32` | Group of mutually exclusive options. |
+| `seed(key, label, default)` | `u64` | Numeric field and **Randomize** button. |
+| `section(title, ...)` / `visible_if(key, value)` | — | Collapsible `styled_card` and dynamic conditional visibility. |
 
 ---
 
-## 5. Boas práticas de processamento
+## 5. Processing guidelines
 
-1. **Calcule o `halo_px` exato em `plan_render`:** nunca leia além de `[-halo, width + halo)` em `TileView`. Se o usuário escolher raio `12`, retorne `halo = 12`.
-2. **Trate transparência sem halos escuros:** em convoluções, pondere o RGB pelo alfa (`rgb * a`) antes de acumular e divida pelo alfa resultante ao final, usando `PixelFormat::Rgba32Float`.
-3. **Respeite o determinismo por tile:** efeitos aleatórios devem combinar `seed` com `(origin_x + x, origin_y + y)` (hash espacial), nunca um gerador sequencial dependente da ordem dos tiles.
-4. **Mantenha paridade entre WGSL e Wasm:** o resultado de `render_tile` em CPU é a referência oficial para testes automatizados e para sistemas sem suporte `wgpu`.
-5. **Preserve o contrato da UI:** não codifique cores fixas de texto/fundo nos textos de ajuda; o host aplica as cores dos temas **Moderno Pastel** e **Escuro Elegante** automaticamente.
+1. Return the exact `halo_px` from `plan_render` and read only within `[-halo, width + halo)` in `TileView`. For a radius of 12, return `halo = 12`.
+2. For convolution, multiply RGB by alpha before accumulating and divide by the resulting alpha at the end. Use `PixelFormat::Rgba32Float` to avoid dark halos around transparent areas.
+3. Keep results deterministic across tiles. Hash `seed` with `(origin_x + x, origin_y + y)` so random output is independent of tile order.
+4. Maintain parity between WGSL and Wasm. CPU `render_tile` provides the reference for automated tests and systems without `wgpu` support.
+5. Let the host apply the active light pastel or dark theme to help text. Leave text and background colors unstyled.
 
 ---
 
-## 6. Empacotamento, instalação e verificação
+## 6. Packaging, installation, and validation
 
-Compile o módulo WebAssembly em modo *release*:
+Build the WebAssembly module in release mode.
 
 ```sh
 cargo build --target wasm32-unknown-unknown --release
-cp target/wasm32-unknown-unknown/release/openpaintr_efeito_ruido.wasm plugin.wasm
+cp target/wasm32-unknown-unknown/release/openpaintr_noise_effect.wasm plugin.wasm
 ```
 
-Empacote e valide com a CLI do OpenPaintR (prevista na entrega da Fase 4):
+Package and validate with the OpenPaintR CLI planned for phase 4.
 
 ```sh
-# Verifica manifesto, exports WIT e shaders WGSL via naga
+# Validate the manifest, WIT exports, and WGSL shaders through naga
 openpaintr plugin check .
 
-# Gera o pacote portátil meu-efeito.rpdn-plugin
-openpaintr plugin pack . -o meu-efeito.rpdn-plugin
+# Build the portable my-effect.rpdn-plugin package
+openpaintr plugin pack . -o my-effect.rpdn-plugin
 
-# Executa bateria headless (prévia, seleção SSAA, bordas alfa e paridade CPU/GPU)
-openpaintr plugin test meu-efeito.rpdn-plugin
+# Run headless checks for preview, SSAA selection, alpha edges, and CPU/GPU parity
+openpaintr plugin test my-effect.rpdn-plugin
 ```
 
-### Onde instalar pacotes `.rpdn-plugin`
+### Where to install `.rpdn-plugin` packages
 
-Para testar no editor em qualquer sistema operacional, basta copiar o arquivo `.rpdn-plugin` para a pasta do usuário correspondente:
+To test a package in the editor, copy the `.rpdn-plugin` file to the user directory for your operating system.
 
-- **Linux:** `~/.local/share/openpaintr/plugins/`
-- **Windows:** `%APPDATA%\OpenPaintR\plugins\`
-- **macOS:** `~/Library/Application Support/OpenPaintR/plugins/`
+- **Linux** — `~/.local/share/openpaintr/plugins/`
+- **Windows** — `%APPDATA%\OpenPaintR\plugins\`
+- **macOS** — `~/Library/Application Support/OpenPaintR/plugins/`

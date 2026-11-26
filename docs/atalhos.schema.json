@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Configuração de atalhos do OpenPaintR",
+  "title": "OpenPaintR Shortcut Configuration",
   "type": "object",
   "required": [
     "version",
