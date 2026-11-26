@@ -248,6 +248,11 @@ struct StrokeGesture {
     waiting_for_drag: bool,
 }
 
+struct PanGesture {
+    button: PointerButton,
+    last_position: Option<egui::Pos2>,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum CanvasResizeDrag {
     BottomRight,
@@ -287,7 +292,7 @@ struct DocumentTab {
     selection_gesture: Option<SelectionGesture>,
     selection_path: Vec<Point>,
     stroke_gesture: Option<StrokeGesture>,
-    pan_button: Option<PointerButton>,
+    pan_gesture: Option<PanGesture>,
     opacity_edit: Option<(usize, LayerMeta)>,
 }
 
@@ -317,7 +322,7 @@ impl DocumentTab {
             selection_gesture: None,
             selection_path: Vec::new(),
             stroke_gesture: None,
-            pan_button: None,
+            pan_gesture: None,
             opacity_edit: None,
         }
     }
@@ -502,7 +507,9 @@ impl App {
             return;
         }
         self.finish_opacity();
-        self.tab_mut().editor.finish_stroke();
+        let tab = self.tab_mut();
+        tab.editor.finish_stroke();
+        tab.pan_gesture = None;
         self.active_tab = index;
         self.notice = None;
     }
@@ -2757,7 +2764,7 @@ impl App {
             tab.selection_path.clear();
             tab.stroke_gesture = None;
             tab.zoom_drag = None;
-            tab.pan_button = None;
+            tab.pan_gesture = None;
             self.tool = tool;
         }
         self.shortcuts.remember_tool(tool.shortcut());
@@ -3125,6 +3132,30 @@ impl App {
             let tab = self.tab_mut();
             tab.view.centered = true;
             tab.view.scroll_to.get_or_insert(max_offset * 0.5);
+        }
+        // Apply active pan movement before laying out and painting the scroll area.
+        let can_pan = !modal_open && !self.has_active_session();
+        let tab = self.tab_mut();
+        if let Some(gesture) = tab.pan_gesture.as_mut() {
+            let (position, down, released) = ui.input(|input| {
+                (
+                    input.pointer.latest_pos(),
+                    input.pointer.button_down(gesture.button),
+                    input.pointer.button_released(gesture.button),
+                )
+            });
+            if can_pan && (down || released)
+                && let Some((previous, current)) = gesture.last_position.zip(position)
+                && current != previous
+            {
+                let offset = tab.view.scroll_to.unwrap_or(tab.view.offset);
+                tab.view.scroll_to =
+                    Some((offset - (current - previous)).clamp(Vec2::ZERO, max_offset));
+            }
+            gesture.last_position = position;
+            if !can_pan || !down {
+                tab.pan_gesture = None;
+            }
         }
         let mut scroll = egui::ScrollArea::both()
             .auto_shrink([false; 2])
@@ -3525,7 +3556,7 @@ impl App {
                     tab.selection_path.clear();
                     tab.stroke_gesture = None;
                     tab.zoom_drag = None;
-                    tab.pan_button = None;
+                    tab.pan_gesture = None;
                     tab.canvas_resize = Some(CanvasResizeSession {
                         original: (width, height),
                         preview_size: (width, height),
@@ -3576,8 +3607,8 @@ impl App {
                     None
                 } else {
                     ui.ctx().input(|input| {
-                        if let Some(btn) = self.tab().pan_button {
-                            return input.pointer.button_down(btn).then_some(btn);
+                        if let Some(gesture) = &self.tab().pan_gesture {
+                            return Some(gesture.button);
                         }
                         if response.hovered() || response.is_pointer_button_down_on() {
                             for btn in BUTTONS {
@@ -3613,7 +3644,14 @@ impl App {
                     tab.editor.finish_stroke();
                     tab.selection_gesture = None;
                     tab.selection_path.clear();
-                    tab.pan_button = pan_trigger;
+                    if tab.pan_gesture.is_none()
+                        && let Some(button) = pan_trigger
+                    {
+                        tab.pan_gesture = Some(PanGesture {
+                            button,
+                            last_position: ui.input(|input| input.pointer.latest_pos()),
+                        });
+                    }
                     self.paint_canvas_guides(ui, &painter, rect, zoom, (width, height));
                     if response.hovered() || pan_trigger.is_some() {
                         ui.ctx().set_cursor_icon(if pan_trigger.is_some() {
@@ -3622,22 +3660,7 @@ impl App {
                             egui::CursorIcon::Grab
                         });
                     }
-                    if pan_trigger.is_some() {
-                        let delta = ui.input(|input| input.pointer.delta());
-                        if delta != Vec2::ZERO {
-                            let tab = self.tab_mut();
-                            let target = (tab.view.offset - delta).clamp(Vec2::ZERO, max_offset);
-                            if (target - tab.view.offset).length_sq() > 1e-4 {
-                                tab.view.scroll_to = Some(target);
-                                ui.ctx().request_repaint();
-                            }
-                        }
-                    }
-                    if pan_trigger.is_some() || self.tool == Tool::Pan || temp_pan_held {
-                        return;
-                    }
-                } else {
-                    self.tab_mut().pan_button = None;
+                    return;
                 }
 
                 // Temporary Zoom click (Ctrl+Space+Left / Alt+Space+Left) or Zoom tool (click / marquee / scrubby)
@@ -4501,7 +4524,7 @@ impl App {
                 }
             }
             if let Some(selection) = preview {
-                paint_selection_outline(&painter, rect, zoom, (width, height), &selection);
+                paint_selection_overlay(&painter, rect, zoom, (width, height), &selection);
             }
             let dpi = self.tab().editor.document.resolution_dpi();
             self.tab().view.guides(ui, rect, zoom, dpi);
@@ -4520,7 +4543,7 @@ impl App {
     ) {
         let tab = self.tab();
         if let Some(selection) = tab.editor.selection.as_ref() {
-            paint_selection_outline(painter, rect, zoom, size, selection);
+            paint_selection_overlay(painter, rect, zoom, size, selection);
         }
         tab.view
             .guides(ui, rect, zoom, tab.editor.document.resolution_dpi());
@@ -4735,19 +4758,40 @@ fn rectangle_outline(rect: Rect) -> [egui::Pos2; 5] {
     ]
 }
 
-fn paint_selection_outline(
+fn paint_selection_overlay(
     painter: &egui::Painter,
     canvas: Rect,
     zoom: f32,
     size: Point,
     selection: &Selection,
 ) {
+    let clip = painter.clip_rect();
+    let from = (clip.min - canvas.min) / zoom;
+    let to = (clip.max - canvas.min) / zoom;
+    let start = (from.x.floor() as u32, from.y.floor() as u32);
+    let end = (
+        (to.x.ceil() as u32).min(size.0),
+        (to.y.ceil() as u32).min(size.1),
+    );
+    let stride = (2.0 / zoom).ceil().max(1.0) as u32;
+
     match &selection.region {
         Region::Shape(shape, (min, max)) => {
             let bounds = Rect::from_min_max(
                 canvas.min + zoom * vec2(min.0 as f32, min.1 as f32),
                 canvas.min + zoom * vec2(max.0 as f32 + 1.0, max.1 as f32 + 1.0),
             );
+            let stride = (1.0 / zoom).ceil().max(1.0) as u32;
+            if selection.inverted {
+                paint_selection_coverage(painter, canvas, zoom, (start, end), stride, selection);
+            } else if *shape == Shape::Rectangle {
+                painter.rect_filled(bounds, 0, selection_tint(255 / 3));
+            } else {
+                // Restrict ellipse coverage sampling to its visible bounds.
+                let start = (start.0.max(min.0), start.1.max(min.1));
+                let end = (end.0.min(max.0 + 1), end.1.min(max.1 + 1));
+                paint_selection_coverage(painter, canvas, zoom, (start, end), stride, selection);
+            }
             match shape {
                 Shape::Rectangle => paint_dashed_line(painter, &rectangle_outline(bounds)),
                 Shape::Ellipse => {
@@ -4762,43 +4806,7 @@ fn paint_selection_outline(
             }
         }
         Region::Mask(_) => {
-            let clip = painter.clip_rect();
-            let from = (clip.min - canvas.min) / zoom;
-            let to = (clip.max - canvas.min) / zoom;
-            let start = (from.x.floor() as u32, from.y.floor() as u32);
-            let end = (
-                (to.x.ceil() as u32).min(size.0),
-                (to.y.ceil() as u32).min(size.1),
-            );
-            let stride = (2.0 / zoom).ceil().max(1.0) as u32;
-            let mut gradient = egui::Mesh::default();
-            for y in (start.1..end.1).step_by(stride as usize) {
-                let mut x = start.0;
-                while x < end.0 {
-                    let opacity = selection.coverage_u8((x, y)).div_ceil(3);
-                    let mut next = x.saturating_add(stride);
-                    while next < end.0 && selection.coverage_u8((next, y)).div_ceil(3) == opacity {
-                        next = next.saturating_add(stride);
-                    }
-                    if opacity > 0 {
-                        let top_left = canvas.min + zoom * vec2(x as f32, y as f32);
-                        let bottom_right = canvas.min
-                            + zoom
-                                * vec2(
-                                    next.min(size.0) as f32,
-                                    y.saturating_add(stride).min(size.1) as f32,
-                                );
-                        gradient.add_colored_rect(
-                            Rect::from_min_max(top_left, bottom_right),
-                            Color32::from_rgba_unmultiplied(105, 80, 230, opacity),
-                        );
-                    }
-                    x = next;
-                }
-            }
-            if !gradient.is_empty() {
-                painter.add(egui::Shape::mesh(gradient));
-            }
+            paint_selection_coverage(painter, canvas, zoom, (start, end), stride, selection);
             for y in (start.1..end.1).step_by(stride as usize) {
                 for x in (start.0..end.0).step_by(stride as usize) {
                     let here = selection.contains((x, y));
@@ -4839,6 +4847,48 @@ fn paint_selection_outline(
     }
 }
 
+fn selection_tint(opacity: u8) -> Color32 {
+    Color32::from_rgba_unmultiplied(105, 80, 230, opacity)
+}
+
+fn paint_selection_coverage(
+    painter: &egui::Painter,
+    canvas: Rect,
+    zoom: f32,
+    (start, end): (Point, Point),
+    stride: u32,
+    selection: &Selection,
+) {
+    let mut mesh = egui::Mesh::default();
+    for y in (start.1..end.1).step_by(stride as usize) {
+        let mut x = start.0;
+        while x < end.0 {
+            let opacity = selection.coverage_u8((x, y)).div_ceil(3);
+            let mut next = x.saturating_add(stride);
+            while next < end.0 && selection.coverage_u8((next, y)).div_ceil(3) == opacity {
+                next = next.saturating_add(stride);
+            }
+            if opacity > 0 {
+                let top_left = canvas.min + zoom * vec2(x as f32, y as f32);
+                let bottom_right = canvas.min
+                    + zoom
+                        * vec2(
+                            next.min(end.0) as f32,
+                            y.saturating_add(stride).min(end.1) as f32,
+                        );
+                mesh.add_colored_rect(
+                    Rect::from_min_max(top_left, bottom_right),
+                    selection_tint(opacity),
+                );
+            }
+            x = next;
+        }
+    }
+    if !mesh.is_empty() {
+        painter.add(egui::Shape::mesh(mesh));
+    }
+}
+
 fn has_extension(path: &Path, extension: &str) -> bool {
     path.extension()
         .is_some_and(|ext| ext.eq_ignore_ascii_case(extension))
@@ -4847,6 +4897,7 @@ fn has_extension(path: &Path, extension: &str) -> bool {
 fn new_document(width: u32, height: u32) -> io::Result<Document> {
     let mut document = Document::new(width, height)?;
     document.set_layer_name(0, i18n::logical_text("background"))?;
+    document.fill_layer(0, Pixel([255, 255, 255, 255]))?;
     Ok(document)
 }
 
@@ -5167,22 +5218,23 @@ impl App {
             .show_separator_line(false)
             .show(ctx, |ui| self.command_bar(ui));
 
+        let ribbon_frame = egui::Frame::new()
+            .fill(self.theme.toolbar_fill())
+            .stroke(egui::Stroke::new(1.0_f32, self.theme.border_color()))
+            .inner_margin(egui::Margin::symmetric(6, 4));
         let ribbon = egui::TopBottomPanel::top("color_ribbon")
-            .exact_height(32.0)
-            .frame(
-                egui::Frame::new()
-                    .fill(self.theme.toolbar_fill())
-                    .stroke(egui::Stroke::new(1.0_f32, self.theme.border_color()))
-                    .inner_margin(egui::Margin {
-                        left: 6,
-                        right: 6,
-                        top: 4,
-                        bottom: 4,
-                    }),
-            )
+            // Include the stroke in the initial clip height and let the content size the panel.
+            .default_height(colors::RIBBON_CONTENT_HEIGHT + ribbon_frame.total_margin().sum().y)
+            .frame(ribbon_frame)
             .show_separator_line(false)
             .show(ctx, |ui| {
-                colors::ribbon(ui, &mut self.palette, self.colors_open, self.theme, &self.checker)
+                colors::ribbon(
+                    ui,
+                    &mut self.palette,
+                    self.colors_open,
+                    self.theme,
+                    &self.checker,
+                )
             })
             .inner;
         if ribbon.toggle_clicked {
@@ -5372,6 +5424,117 @@ impl eframe::App for App {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn color_ribbon_background_reaches_the_workspace() -> io::Result<()> {
+        for theme in [Theme::Light, Theme::Dark] {
+            let ctx = egui::Context::default();
+            let mut app = App::new(&ctx, new_document(32, 24)?);
+            app.theme = theme;
+            theme.apply(&ctx);
+            let screen = Rect::from_min_size(pos2(0.0, 0.0), vec2(1120.0, 760.0));
+            let output = ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(screen),
+                    ..Default::default()
+                },
+                |ctx| app.ui_frame(ctx),
+            );
+
+            let backgrounds = |fill| {
+                output.shapes.iter().filter_map(move |shape| {
+                    let egui::Shape::Rect(rect) = &shape.shape else {
+                        return None;
+                    };
+                    let visible = rect.rect.intersect(shape.clip_rect);
+                    (rect.fill == fill && visible.x_range().contains(screen.center().x))
+                        .then_some(visible)
+                })
+            };
+            let ribbon_bottom = backgrounds(theme.toolbar_fill())
+                .map(|rect| rect.bottom())
+                .max_by(f32::total_cmp)
+                .expect("color ribbon background");
+            let workspace_top = backgrounds(theme.workspace())
+                .map(|rect| rect.top())
+                .min_by(f32::total_cmp)
+                .expect("workspace background");
+            assert_eq!(ribbon_bottom, workspace_top);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn new_document_has_one_opaque_white_background_layer() -> io::Result<()> {
+        let document = new_document(32, 24)?;
+        assert_eq!(document.layer_count(), 1);
+        assert_eq!(document.layer_name(0), Some(i18n::logical_text("background")));
+        assert!(
+            document
+                .layer_pixels(0)
+                .expect("background pixels")
+                .iter()
+                .all(|pixel| *pixel == Pixel([255, 255, 255, 255]))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn selection_overlay_tints_only_covered_pixels() -> io::Result<()> {
+        let ctx = egui::Context::default();
+        let canvas = Rect::from_min_size(pos2(0.0, 0.0), vec2(24.0, 24.0));
+        for mut selection in [
+            Selection::new(Shape::Rectangle, (4, 4), (19, 19)),
+            Selection::new(Shape::Ellipse, (4, 4), (19, 19)),
+            Selection::new_with_aa(Shape::Ellipse, (4, 4), (19, 19), AaMode::Ssaa4x4),
+            Selection::lasso((24, 24), &[(4, 4), (19, 4), (19, 19), (4, 19)])?,
+        ] {
+            for inverted in [false, true] {
+                selection.inverted = inverted;
+                let output = ctx.run(
+                    egui::RawInput {
+                        screen_rect: Some(canvas),
+                        ..Default::default()
+                    },
+                    |ctx| {
+                        let painter = ctx.layer_painter(egui::LayerId::background());
+                        paint_selection_overlay(&painter, canvas, 1.0, (24, 24), &selection);
+                    },
+                );
+                // At 100% zoom the rectangle and ellipse tint can be sampled pixel by pixel.
+                // Mask previews use 2×2 samples, so sample their grid origins.
+                let step = if matches!(selection.region, Region::Mask(_)) {
+                    2
+                } else {
+                    1
+                };
+                for y in (0..24).step_by(step) {
+                    for x in (0..24).step_by(step) {
+                        let point = pos2(x as f32 + 0.5, y as f32 + 0.5);
+                        let alpha = output.shapes.iter().find_map(|shape| match &shape.shape {
+                            egui::Shape::Rect(rect) if rect.rect.contains(point) => {
+                                Some(rect.fill.a())
+                            }
+                            egui::Shape::Mesh(mesh) => {
+                                mesh.vertices.chunks_exact(4).find_map(|quad| {
+                                    Rect::from_min_max(quad[0].pos, quad[3].pos)
+                                        .contains(point)
+                                        .then(|| quad[0].color.a())
+                                })
+                            }
+                            _ => None,
+                        });
+                        assert_eq!(
+                            alpha.unwrap_or(0),
+                            selection.coverage_u8((x, y)).div_ceil(3),
+                            "wrong tint opacity at ({x}, {y}) for {selection:?}"
+                        );
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
 
     #[test]
     fn language_switch_updates_an_open_document_and_keeps_its_history_and_layer_names()
@@ -6925,12 +7088,28 @@ mod tests {
         };
 
         let _ = run(&mut app, Vec::new());
-        let _ = run(&mut app, Vec::new());
-        let initial_rect = ctx.read_response(egui::Id::new(CANVAS_ID)).unwrap().rect;
+        let texture_id = app.tab().image.as_ref().unwrap().id();
+        let painted_canvas = |output: egui::FullOutput| {
+            output
+                .shapes
+                .into_iter()
+                .find_map(|shape| match shape.shape {
+                    egui::Shape::Mesh(mesh) if mesh.texture_id == texture_id => {
+                        Some(mesh.calc_bounds())
+                    }
+                    _ => None,
+                })
+                .expect("painted canvas")
+        };
+        let initial_rect = painted_canvas(run(&mut app, Vec::new()));
         let start = initial_rect.center();
+        let _ = run(
+            &mut app,
+            vec![egui::Event::PointerMoved(start - vec2(80.0, 30.0))],
+        );
 
         // Dragging with Hand tool pans even when the 640x480 canvas fits inside the viewport.
-        let _ = run(
+        let pressed = run(
             &mut app,
             vec![
                 egui::Event::PointerMoved(start),
@@ -6942,8 +7121,17 @@ mod tests {
                 },
             ],
         );
+        assert_eq!(painted_canvas(pressed), initial_rect);
+        assert_eq!(painted_canvas(run(&mut app, Vec::new())), initial_rect);
+        for delta in [vec2(10.0, 6.0), vec2(25.0, 18.0), vec2(40.0, 30.0)] {
+            let rect = painted_canvas(run(
+                &mut app,
+                vec![egui::Event::PointerMoved(start + delta)],
+            ));
+            assert_eq!(rect, initial_rect.translate(delta));
+            assert_eq!(painted_canvas(run(&mut app, Vec::new())), rect);
+        }
         let dragged = start + vec2(40.0, 30.0);
-        let _ = run(&mut app, vec![egui::Event::PointerMoved(dragged)]);
         let _ = run(
             &mut app,
             vec![egui::Event::PointerButton {

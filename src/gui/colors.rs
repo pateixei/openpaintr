@@ -304,6 +304,8 @@ pub struct RibbonOutput {
     pub toggle_clicked: bool,
 }
 
+pub const RIBBON_CONTENT_HEIGHT: f32 = 24.0;
+
 pub fn ribbon(
     ui: &mut egui::Ui,
     palette: &mut ColorPalette,
@@ -311,15 +313,15 @@ pub fn ribbon(
     theme: Theme,
     checker: &egui::TextureHandle,
 ) -> RibbonOutput {
-    ui.set_height(24.0);
+    ui.set_height(RIBBON_CONTENT_HEIGHT);
     let (preview_rect, bar_rect, chevron_rect, toggle_clicked) = ui
         .horizontal(|ui| {
-            ui.set_height(24.0);
+            ui.set_height(RIBBON_CONTENT_HEIGHT);
             ui.spacing_mut().item_spacing.x = 6.0;
 
             // Left: 18x18 primary color preview square
             let (preview_slot, preview_resp) =
-                ui.allocate_exact_size(vec2(18.0, 24.0), Sense::click());
+                ui.allocate_exact_size(vec2(18.0, RIBBON_CONTENT_HEIGHT), Sense::click());
             let preview_rect = Rect::from_center_size(preview_slot.center(), vec2(18.0, 18.0));
             let px = palette.primary;
             let p = ui.painter();
@@ -354,7 +356,10 @@ pub fn ribbon(
             let chevron_w = 26.0_f32;
             let gap = ui.spacing().item_spacing.x;
             let bar_w = (ui.available_width() - chevron_w - gap).max(32.0);
-            let (bar_slot, bar_resp) = ui.allocate_exact_size(vec2(bar_w, 24.0), Sense::click_and_drag());
+            let (bar_slot, bar_resp) = ui.allocate_exact_size(
+                vec2(bar_w, RIBBON_CONTENT_HEIGHT),
+                Sense::click_and_drag(),
+            );
             let bar_rect = Rect::from_center_size(bar_slot.center(), vec2(bar_w, 16.0));
             let radius = 8.0_f32.min(bar_rect.width() * 0.25);
 
@@ -423,7 +428,7 @@ pub fn ribbon(
                 },
                 true,
                 open,
-                vec2(chevron_w, 24.0),
+                vec2(chevron_w, RIBBON_CONTENT_HEIGHT),
                 if open {
                     tr("close-colors")
                 } else {
