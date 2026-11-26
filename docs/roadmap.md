@@ -2,9 +2,9 @@
 
 **Status** — Approved on November 25, 2026. Last updated on November 26, 2026.
 
-The first GitHub publication uses **OpenPaintR** as the project name and `openpaintr` as the executable. Layered editing, phase 2 selection and geometry, and phase 3 tools are implemented. Paint.NET 5.2 compatibility validation continues in phase 1. Plugin infrastructure, adjustments, and effects are next. [GitHub repository](https://github.com/pateixei/openpaintr)
+The first GitHub publication uses **OpenPaintR** as the project name and `openpaintr` as the executable. Layered editing, phase 2 selection and geometry, and phase 3 tools are implemented. Paint.NET 5.2 compatibility validation is complete in phase 1 (`Borderless window` remains open). Color profiles, broader format support, desktop integration, and performance are next in phase 4, followed by the plugin infrastructure, adjustments, and effects in phase 5. [GitHub repository](https://github.com/pateixei/openpaintr)
 
-The roadmap starts with a Linux baseline and a layered PDN editing and saving workflow. Human usability (SUS) and broader layout redesign decisions run after phase 4 once adjustments and `.rpdn-plugin` effects are integrated into the workspace. Later phases cover selection, tools, transforms, the 13 adjustments and 48 effects shown in Paint.NET 5.2, and broader format support, performance, and extensibility. Milestones specify dependencies and acceptance criteria.
+The roadmap starts with a Linux baseline and a layered PDN editing and saving workflow. Human usability (SUS) and broader layout redesign decisions run after phase 5 once adjustments and `.rpdn-plugin` effects are integrated into the workspace. Later phases cover selection, tools, transforms, color profiles, broader format support, desktop integration, performance, and the 13 adjustments and 48 effects shown in Paint.NET 5.2. Milestones specify dependencies and acceptance criteria.
 
 OpenPaintR creates images, opens PNG and PDN, exports PNG, and supports brush and eraser strokes, zoom, layers, visibility, opacity, and undo and redo. PDN import preserves layer properties, including blend modes. Opening a layered file and viewing its layers was confirmed on one document. Paint.NET 5.2 compatibility and compositing equivalence still need measurement. [Current capabilities](../README.md)
 
@@ -22,7 +22,7 @@ OpenPaintR creates images, opens PNG and PDN, exports PNG, and supports brush an
 - [x] **History.** Undo and redo document, layer, and selection operations. Navigate to any state from the panel, group each gesture into one entry, and bound memory use. Evaluate temporary diff storage for large documents.
 - [x] **Editable persistence.** Use atomic replacement for Save and Save As. Reopening a PDN must preserve dimensions, RGBA pixels, layer order, names, visibility, opacity, and blend modes, and allow editing to continue. Track the last saved revision independently of undo history. Preserve the open document and last valid save if the operation fails or is canceled. Decide which session state to persist, including zoom, selection, and history.
 - [x] **Compatibility and export.** Test PDN import (including existing legacy fixtures) and round-trip compatibility against Paint.NET 5.2, and verify PNG compositing and alpha separately. Preserve the original when using Save As. Reopen generated files in OpenPaintR and in Paint.NET 5.2.
-- [x] **Workspace interface.** Define access to the operations delivered in this phase with original icons, Color Ribbon, menus, contextual toolbar, and status bar. Validate the five phase 1 workflows automatically via headless UI tests, and defer broader panel placement and layout redesign evaluation until the post-phase 4 usability study. Expose selection, adjustment, and effect commands as they become available.
+- [x] **Workspace interface.** Define access to the operations delivered in this phase with original icons, Color Ribbon, menus, contextual toolbar, and status bar. Validate the five phase 1 workflows automatically via headless UI tests, and defer broader panel placement and layout redesign evaluation until the post-phase 5 usability study. Expose selection, adjustment, and effect commands as they become available.
 - [ ] **Borderless window.** Integrate the light and dark theme buttons and the minimize, maximize or restore, and close controls in the menu bar. Keep window dragging, edge and corner resizing, fullscreen, and unsaved-document prompts available.
 - [x] **Linux baseline.** Pin the `openpaintr` release build (`target/release/openpaintr`) and verify the five phase 1 tasks automatically before human testing. Record CLI and interactive Linux performance baselines below.
 
@@ -61,10 +61,10 @@ The five phase 1 workflows below, plus `Ctrl+double-click` bottom-right corner r
 - [x] **Selection feather.** Share the control across Rectangle Select, Ellipse Select, Lasso, and Magic Wand. At 0%, preserve the original SSAA selection. At 100%, fade coverage linearly to zero outside the selection over half the shorter side of its bounding box. Apply feather to each new gesture before combining it with an existing selection. Show partial coverage and preserve it when filling, erasing, copying, or moving the mask.
 - [x] **Editing.** Cut, copy, copy flattened, paste, paste into a new layer or image, copy the selection mask, and paste masks with the applicable combination modes. Erase, fill, invert, select all, and deselect. Expose shortcuts and resolve the `Ctrl+Shift+Z` conflict between Redo and Rotate/Zoom.
 - [x] **Viewing and navigation.** Zoom in and out, fit the window or selection, return to actual size, and support continuous zoom and a Zoom tool. Pan with the Hand tool or temporarily with Space. Provide a pixel grid and rulers, using document resolution to switch between pixels, inches, and centimeters.
-- [x] **Image operations.** Crop to selection, resize with resampling and optional aspect lock, change canvas size with an anchor, flip horizontally or vertically, rotate 90° clockwise or counterclockwise or 180°, and flatten. Color Profile is planned for phase 5.
+- [x] **Image operations.** Crop to selection, resize with resampling and optional aspect lock, change canvas size with an anchor, flip horizontally or vertically, rotate 90° clockwise or counterclockwise or 180°, and flatten. Color Profile is planned for phase 4.
 - [x] **Layer geometry.** Flip horizontally or vertically, rotate 180°, and provide Rotate/Zoom with preview, translation, scale, and rotation. Validate interpolation, edges, transparency, and the distinction between layer and document operations.
 
-**Validation** — In Linux/X11, a UI test selected an irregular region with the lasso, filled it from the keyboard, copied the composite, and opened it in another tab. A separate X11 client received the clipboard PNG. The flow also verified moving the mask without touching pixels, previewing and applying a pixel transform, undo, rulers, and zoom to selection. Automated tests cover combination modes, Magic Wand, DPI, rotation, anchors, aspect ratio, transparency during resampling and cropping, and independent tab history. Native Wayland clipboard integration remains part of phase 5 platform validation.
+**Validation** — In Linux/X11, a UI test selected an irregular region with the lasso, filled it from the keyboard, copied the composite, and opened it in another tab. A separate X11 client received the clipboard PNG. The flow also verified moving the mask without touching pixels, previewing and applying a pixel transform, undo, rulers, and zoom to selection. Automated tests cover combination modes, Magic Wand, DPI, rotation, anchors, aspect ratio, transparency during resampling and cropping, and independent tab history. Native Wayland clipboard integration remains part of phase 4 platform validation.
 
 **Acceptance criteria** — Select an irregular region, copy the composite into another image, move the mask without changing pixels, transform the pixels separately, and undo each step. Test selection, DPI, anchor, and dimensions at boundaries. [Paint.NET Image menu](https://paint.net/doc/latest/ImageMenu.html) · [v5 tools](https://paint.net/doc/latest/ToolsWindow.html) · [v3 source code](https://github.com/nakijun/OpenPDN-1/tree/cca476b0df2a2f70996e6b9486ec45327631568c/src)
 
@@ -101,12 +101,47 @@ Switching to Adobe, creating a custom profile, and restoring its binding after a
 
 - [x] **Localized interface before phase 4.** Provide English, French, Spanish, German, Brazilian Portuguese, Italian, Russian, Arabic, Simplified Chinese, and Japanese. Keep one JSON catalog per locale under `translations/` and discover additional catalogs at startup. Allow changing the interface language without restarting, persist the choice, and use English as a fallback. Keep open documents, history, and shortcut bindings usable across a language switch. Verify catalog coverage, placeholders, glyphs, right-to-left Arabic labels, language selection, and file workflows. Owner sign-off received on November 26, 2026.
 
-## Phase 4 — Plugin engine, adjustments, and effects catalog
+## Phase 4 — Color, formats, desktop integration, and performance
 
-- [ ] **Shared infrastructure and plugin engine.** Implement the portable **`.rpdn-plugin`** package for Windows, macOS, and Linux on `x86_64` and `aarch64`. Provide a sandboxed hybrid runtime using **`wasmtime`** with `simd128`, optional **WGSL** compute shaders via `wgpu` and `naga`, and a deterministic CPU fallback. Implement the WIT contract `rustpdn:plugin@1.0.0`, the `egui` **`PluginUiHost`** for theme-aware declarative UI (`UiSchema`), and the minimal **`rustpdn-plugin-sdk`**. Pass the layer, 4×4 SSAA `TMask`, declarative parameters, and seed to operations. Provide cancelable asynchronous tile previews, one history entry per commit, reset to defaults, CLI verification (`plugin check/pack/test`), and Repeat Last Effect (`Ctrl+F`).
-- [ ] **4A — Adjustments.** Auto-Level, Black and White, Brightness / Contrast, Curves, Exposure, Highlights / Shadows, Hue / Saturation, Invert Alpha, Invert Colors, Levels, Posterize, Sepia, and Temperature / Tint. Share `PluginUiHost`, asynchronous previews, and a single history entry per edit.
-- [ ] **4B — First effect plugins.** Ship official `.rpdn-plugin` packages using only the public API and `rustpdn-plugin-sdk`. Start with Gaussian Blur (two separable Wasm and WGSL passes), Square Blur, Sharpen, Pixelate, Add Noise (deterministic `Seed`), and Edge Detect. These cover kernels, halos, borders, SSAA selections, declarative UI, asynchronous previews, and CPU/GPU parity.
-- [ ] **4C — Full effects catalog.** Deliver all 48 effects below as `.rpdn-plugin` packages loaded through the same registry as external plugins. This catalog includes the phase 4B effects.
+- [ ] **Color and metadata.** Add Color Profile to the Image menu with assignment and conversion for sRGB, Adobe RGB, Display P3, ProPhoto RGB, and imported ICC/ICM profiles. Preserve profiles, print resolution, and metadata in formats that support them. Cover PNG text, EXIF orientation, and CICP. Evaluate HDR-to-SDR conversion on import for relevant codecs.
+- [ ] **Common formats.** Complete PNG options and the read/write matrix for JPEG, BMP/DIB/RLE, GIF, TGA, and TIFF. Test palettes, transparency, quality, compression, and metadata where supported. Define handling for animated formats, including GIF and APNG.
+- [ ] **Additional formats.** DDS, WebP, AVIF, HEIC/HEIF, JPEG XL, and JPEG XR. Document read and write support, variants, available Linux dependencies, and round-trip criteria for each codec. [v5 file formats](https://paint.net/doc/latest/index.html)
+- [ ] **Desktop and support.** Add printing and scanner or camera acquisition using Linux integrations, file associations and drag-and-drop, tool defaults and settings, themes, help, tutorials, About, and support and feedback links. Use the Linux distribution channel for updates.
+- [ ] **Performance.** Extend phase 1 interactive benchmarks to compositing, clipboard operations, and large layer stacks (and later to effects in phase 5). Use observed bottlenecks to prioritize region updates, caching, and parallelism. Assess FP32 compositing, SIMD, and a portable GPU backend using precision comparisons and benchmarks. [Rendering, color, and extension changes in 5.2](https://paint.net/roadmap.html)
+
+**Acceptance criteria** — Publish the format and metadata support matrix, test file and clipboard integration on Wayland and X11, and record reproducible interactive benchmarks.
+
+### Formats shown in the Paint.NET 5.2 Open dialog
+
+The screenshot shows 13 format families and 24 extensions. **All Image Types** includes the extensions below. Verify write support and individual format variants separately from the Open dialog filters.
+
+| Family | Extensions shown | OpenPaintR today |
+| --- | --- | --- |
+| Paint.NET | `.pdn` | Reads and writes layers |
+| PNG | `.png` | Imports static PNG and exports the composite |
+| JPEG | `.jpg`, `.jpeg`, `.jpe`, `.jfif`, `.exif` | Planned for phase 4 |
+| JPEG XL | `.jxl` | Planned for phase 4 |
+| AV1 (AVIF) | `.avif` | Planned for phase 4 |
+| HEIC | `.heic`, `.heif`, `.hif` | Planned for phase 4 |
+| WebP | `.webp` | Planned for phase 4 |
+| DirectDraw Surface (DDS) | `.dds` | Planned for phase 4 |
+| TIFF | `.tiff`, `.tif` | Planned for phase 4 |
+| GIF | `.gif` | Planned for phase 4 |
+| BMP | `.bmp`, `.dib`, `.rle` | Planned for phase 4 |
+| TGA | `.tga` | Planned for phase 4 |
+| JPEG XR | `.jxr`, `.wdp`, `.wmp` | Planned for phase 4 |
+
+### Photoshop PSD
+
+- [ ] **PSD import in phase 4.** Start with 8-bit-per-channel RGB. Preserve raster-layer pixels, transparency, position, order, names, visibility, and opacity. Map blend modes already represented by OpenPaintR. Validate compositing and properties against files generated in Photoshop. [Adobe PSD specification](https://www.adobe.com/devnet-apps/photoshop/fileformatashtml/)
+- [ ] **Additional compatibility.** Warn when editable text, smart objects, masks, groups, adjustment layers, or other content cannot be preserved. Offer a flattened import when an embedded composite is available. Evaluate writing PSD, PSB support, and other bit depths in later compatibility work.
+
+## Phase 5 — Plugin engine, adjustments, effects catalog, and extensibility
+
+- [ ] **Shared infrastructure and plugin engine.** Implement the portable **`.rpdn-plugin`** package for Windows, macOS, and Linux on `x86_64` and `aarch64`. Provide a sandboxed hybrid runtime using **`wasmtime`** with `simd128`, optional **WGSL** compute shaders via `wgpu` and `naga`, and a deterministic CPU fallback. Implement the WIT contract `rustpdn:plugin@1.0.0`, the `egui` **`PluginUiHost`** for theme-aware declarative UI (`UiSchema`), and the minimal **`rustpdn-plugin-sdk`**. Pass the layer, 4×4 SSAA `TMask`, declarative parameters, and seed to operations. Provide cancelable asynchronous tile previews, one history entry per commit, reset to defaults, CLI verification (`plugin check/pack/test`), Repeat Last Effect (`Ctrl+F`), an installed plugin manager, actionable `.rpdn-plugin` load and execution errors, and access to the extension catalog.
+- [ ] **5A — Adjustments.** Auto-Level, Black and White, Brightness / Contrast, Curves, Exposure, Highlights / Shadows, Hue / Saturation, Invert Alpha, Invert Colors, Levels, Posterize, Sepia, and Temperature / Tint. Share `PluginUiHost`, asynchronous previews, and a single history entry per edit.
+- [ ] **5B — First effect plugins.** Ship official `.rpdn-plugin` packages using only the public API and `rustpdn-plugin-sdk`. Start with Gaussian Blur (two separable Wasm and WGSL passes), Square Blur, Sharpen, Pixelate, Add Noise (deterministic `Seed`), and Edge Detect. These cover kernels, halos, borders, SSAA selections, declarative UI, asynchronous previews, and CPU/GPU parity.
+- [ ] **5C — Full effects catalog.** Deliver all 48 effects below as `.rpdn-plugin` packages loaded through the same registry as external plugins. This catalog includes the phase 5B effects.
 
 | Category | Effects shown in Paint.NET 5.2 |
 | --- | --- |
@@ -120,52 +155,17 @@ Switching to Adobe, creating a custom profile, and restoring its binding after a
 | Render (4) | Clouds, Julia Fractal, Mandelbrot Fractal, Turbulence. |
 | Stylize (5) | Edge Detect, Emboss, Halftone, Outline, Relief. |
 
-- [ ] **4D — Historical compatibility.** Evaluate Unfocus as a historical blur variant. Document the obsolete blur as a legacy Gaussian implementation and check whether classes such as Color Fill and Color Difference are exposed before adding menu commands. Rotate/Zoom is delivered in phase 2. [v3 effect source](https://github.com/nakijun/OpenPDN-1/tree/cca476b0df2a2f70996e6b9486ec45327631568c/src/Effects)
+- [ ] **5D — Historical compatibility.** Evaluate Unfocus as a historical blur variant. Document the obsolete blur as a legacy Gaussian implementation and check whether classes such as Color Fill and Color Difference are exposed before adding menu commands. Rotate/Zoom is delivered in phase 2. [v3 effect source](https://github.com/nakijun/OpenPDN-1/tree/cca476b0df2a2f70996e6b9486ec45327631568c/src/Effects)
+- [ ] **5E — Advanced extensibility (codecs and adjustments).** Extend the versioned `rustpdn:plugin@1.x` API and `rustpdn-plugin-sdk` from phase 5 to support third-party file codecs (`FileTypes`) and adjustments in the same `.rpdn-plugin` format. Evaluate Paint.NET 5.2 framework pixel formats and operations, including channel extraction and replacement, conversion, and interpolation. Support `RGBA16`, `RGBA32Float`, CMYK, and HDR at the import boundary as codecs require. Legacy .NET plugin binary compatibility remains a separate scope decision.
 
 **Acceptance criteria** — Each adjustment and effect exposes parameters or a direct action, respects the 4×4 SSAA `TMask` selection and alpha, and creates one undo entry. Keep reference images for representative settings and use controlled seeds for noise and procedural effects. Compare against Paint.NET 5.2 to establish operation-specific tolerances. Every effect must load from the same `.rpdn-plugin` file on Windows, macOS, and Linux, include a CPU Wasm reference path, and match WGSL within the documented numerical tolerance. Verify that a third-party plugin can be built from scratch with the SDK and guide. [Extensibility guide](extensibilidade.md)
 
-## Post-Phase 4 — Usability study (SUS) and workspace redesign
+## Post-Phase 5 — Usability study (SUS) and workspace redesign
 
-Once phase 4 adjustments and `.rpdn-plugin` effects are integrated into the interface, run participant sessions in a controlled Linux environment (recording app version, fixtures, display scale, and input device, with counterbalanced ordering when comparing layouts and explicit start/end/time/help rules across the five core workflows plus adjustments and effects).
+Once phase 5 adjustments and `.rpdn-plugin` effects are integrated into the interface, run participant sessions in a controlled Linux environment (recording app version, fixtures, display scale, and input device, with counterbalanced ordering when comparing layouts and explicit start/end/time/help rules across the five core workflows plus adjustments and effects).
 
 - [ ] **Usability.** Record unaided completion, time, and errors per task. Administer the 10-item SUS after the tasks for each version and before discussing the test. The redesign target is a **mean SUS above 80/100**. Interpret the mean with sample size, uncertainty, and task results. Define participants and sample size before the acceptance study. [Original SUS questionnaire](https://germanupa.de/sites/default/files/2021-12/brooke1996sus.pdf) · [Validated Brazilian Portuguese version](https://aquichan.unisabana.edu.co/index.php/aquichan/article/view/16497)
 - [ ] **Redesign.** Use the problems that most affect task completion in the SUS sessions and baseline measurements to decide between targeted improvements and a broader workspace redesign. Keep the application's visual identity, preserve document, editing, and history behavior, and repeat comparable evaluation runs on updated builds.
-
-## Phase 5 — Color, formats, integration, and extensibility
-
-- [ ] **Color and metadata.** Add Color Profile to the Image menu with assignment and conversion for sRGB, Adobe RGB, Display P3, ProPhoto RGB, and imported ICC/ICM profiles. Preserve profiles, print resolution, and metadata in formats that support them. Cover PNG text, EXIF orientation, and CICP. Evaluate HDR-to-SDR conversion on import for relevant codecs.
-- [ ] **Common formats.** Complete PNG options and the read/write matrix for JPEG, BMP/DIB/RLE, GIF, TGA, and TIFF. Test palettes, transparency, quality, compression, and metadata where supported. Define handling for animated formats, including GIF and APNG.
-- [ ] **Additional formats.** DDS, WebP, AVIF, HEIC/HEIF, JPEG XL, and JPEG XR. Document read and write support, variants, available Linux dependencies, and round-trip criteria for each codec. [v5 file formats](https://paint.net/doc/latest/index.html)
-- [ ] **Desktop and support.** Add printing and scanner or camera acquisition using Linux integrations, file associations and drag-and-drop, tool defaults and settings, themes, help, tutorials, About, and support and feedback links. Use the Linux distribution channel for updates. Provide an installed plugin manager, actionable `.rpdn-plugin` load and execution errors, and access to the extension catalog.
-- [ ] **Advanced extensibility (codecs and adjustments).** Extend the versioned `rustpdn:plugin@1.x` API and `rustpdn-plugin-sdk` from phase 4 to support third-party file codecs (`FileTypes`) and adjustments in the same `.rpdn-plugin` format. Evaluate Paint.NET 5.2 framework pixel formats and operations, including channel extraction and replacement, conversion, and interpolation. Support `RGBA16`, `RGBA32Float`, CMYK, and HDR at the import boundary as codecs require. Legacy .NET plugin binary compatibility remains a separate scope decision.
-- [ ] **Performance.** Extend phase 1 interactive benchmarks to compositing, clipboard operations, effects, and large layer stacks. Use observed bottlenecks to prioritize region updates, caching, and parallelism. Assess FP32 compositing, SIMD, and a portable GPU backend using precision comparisons and benchmarks. [Rendering, color, and extension changes in 5.2](https://paint.net/roadmap.html)
-
-**Acceptance criteria** — Publish the format and metadata support matrix, test file and clipboard integration on Wayland and X11, and record reproducible interactive benchmarks.
-
-### Formats shown in the Paint.NET 5.2 Open dialog
-
-The screenshot shows 13 format families and 24 extensions. **All Image Types** includes the extensions below. Verify write support and individual format variants separately from the Open dialog filters.
-
-| Family | Extensions shown | OpenPaintR today |
-| --- | --- | --- |
-| Paint.NET | `.pdn` | Reads and writes layers |
-| PNG | `.png` | Imports static PNG and exports the composite |
-| JPEG | `.jpg`, `.jpeg`, `.jpe`, `.jfif`, `.exif` | Planned for phase 5 |
-| JPEG XL | `.jxl` | Planned for phase 5 |
-| AV1 (AVIF) | `.avif` | Planned for phase 5 |
-| HEIC | `.heic`, `.heif`, `.hif` | Planned for phase 5 |
-| WebP | `.webp` | Planned for phase 5 |
-| DirectDraw Surface (DDS) | `.dds` | Planned for phase 5 |
-| TIFF | `.tiff`, `.tif` | Planned for phase 5 |
-| GIF | `.gif` | Planned for phase 5 |
-| BMP | `.bmp`, `.dib`, `.rle` | Planned for phase 5 |
-| TGA | `.tga` | Planned for phase 5 |
-| JPEG XR | `.jxr`, `.wdp`, `.wmp` | Planned for phase 5 |
-
-### Photoshop PSD
-
-- [ ] **PSD import in phase 5.** Start with 8-bit-per-channel RGB. Preserve raster-layer pixels, transparency, position, order, names, visibility, and opacity. Map blend modes already represented by OpenPaintR. Validate compositing and properties against files generated in Photoshop. [Adobe PSD specification](https://www.adobe.com/devnet-apps/photoshop/fileformatashtml/)
-- [ ] **Additional compatibility.** Warn when editable text, smart objects, masks, groups, adjustment layers, or other content cannot be preserved. Offer a flattened import when an embedded composite is available. Evaluate writing PSD, PSB support, and other bit depths in later compatibility work.
 
 ## Evidence and scope decisions
 

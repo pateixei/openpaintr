@@ -31,6 +31,12 @@ pub enum ActionIcon {
     ZoomOut,
     ZoomIn,
     Move,
+    Sun,
+    Moon,
+    MinimizeWindow,
+    MaximizeWindow,
+    RestoreWindow,
+    CloseWindow,
 }
 
 pub fn paint_logo(ui: &mut egui::Ui) {
@@ -151,9 +157,10 @@ pub fn paint_shape_icon(ui: &mut egui::Ui, kind: super::ShapeKind) {
     let icon = match kind {
         ShapeKind::RoundedRect => Icon::ShapeRoundRect,
         ShapeKind::Ellipse | ShapeKind::CalloutOval => Icon::ShapeEllipse,
-        ShapeKind::Pentagon | ShapeKind::Hexagon | ShapeKind::Triangle | ShapeKind::RightTriangle => {
-            Icon::ShapePolygon
-        }
+        ShapeKind::Pentagon
+        | ShapeKind::Hexagon
+        | ShapeKind::Triangle
+        | ShapeKind::RightTriangle => Icon::ShapePolygon,
         ShapeKind::Star4 | ShapeKind::Star5 | ShapeKind::Star6 => Icon::ShapeStar,
         _ => Icon::ShapeRect,
     };
@@ -177,9 +184,14 @@ pub fn icon_button(
         egui::Sense::hover()
     };
     let (rect, response) = ui.allocate_exact_size(size, sense);
+    let close_hovered = matches!(icon, ActionIcon::CloseWindow)
+        && enabled
+        && (response.hovered() || response.has_focus());
     let fill = if enabled && active {
         theme.pill_active_fill()
-    } else if enabled && response.hovered() {
+    } else if close_hovered {
+        Color32::from_rgb(184, 45, 65)
+    } else if enabled && (response.hovered() || response.has_focus()) {
         theme.hover_fill()
     } else {
         Color32::TRANSPARENT
@@ -194,7 +206,9 @@ pub fn icon_button(
             enabled,
         );
     } else {
-        let color = if !enabled {
+        let color = if close_hovered {
+            Color32::WHITE
+        } else if !enabled {
             theme.text_muted().gamma_multiply(0.45)
         } else if active {
             theme.pill_active_fg()
@@ -405,6 +419,54 @@ fn paint_action_icon(painter: &Painter, rect: Rect, color: Color32, icon: Action
         ActionIcon::ChevronRight => {
             painter.line_segment([c + vec2(-2.0, -4.0), c + vec2(2.2, 0.0)], thin);
             painter.line_segment([c + vec2(2.2, 0.0), c + vec2(-2.0, 4.0)], thin);
+        }
+        ActionIcon::Sun => {
+            painter.circle_stroke(c, 3.0, thin);
+            for spoke in 0..8 {
+                let angle = spoke as f32 * std::f32::consts::FRAC_PI_4;
+                let dir = vec2(angle.cos(), angle.sin());
+                painter.line_segment([c + 4.9 * dir, c + 6.6 * dir], thin);
+            }
+        }
+        ActionIcon::Moon => {
+            let arc = |center: egui::Pos2, radius: f32, start: f32, sweep: f32| {
+                (0..=16).map(move |step| {
+                    let angle = (start + sweep * step as f32 / 16.0).to_radians();
+                    center + radius * vec2(angle.cos(), angle.sin())
+                })
+            };
+            let outer = arc(c, 6.0, -90.0, -270.0);
+            let inner = arc(c + vec2(4.0, -4.0), 20.0_f32.sqrt(), 63.435, 143.13);
+            painter.add(PaintShape::line(outer.chain(inner).collect(), thin));
+        }
+        ActionIcon::MinimizeWindow => {
+            painter.line_segment([c + vec2(-5.0, 3.5), c + vec2(5.0, 3.5)], thin);
+        }
+        ActionIcon::MaximizeWindow => {
+            painter.rect_stroke(
+                Rect::from_center_size(c, vec2(10.0, 10.0)),
+                1.0,
+                thin,
+                StrokeKind::Middle,
+            );
+        }
+        ActionIcon::RestoreWindow => {
+            let front = Rect::from_center_size(c + vec2(-1.5, 1.5), vec2(8.0, 8.0));
+            painter.add(PaintShape::line(
+                vec![
+                    pos2(front.left() + 3.0, front.top()),
+                    pos2(front.left() + 3.0, front.top() - 3.0),
+                    pos2(front.right() + 3.0, front.top() - 3.0),
+                    pos2(front.right() + 3.0, front.bottom() - 3.0),
+                    pos2(front.right(), front.bottom() - 3.0),
+                ],
+                thin,
+            ));
+            painter.rect_stroke(front, 1.0, thin, StrokeKind::Middle);
+        }
+        ActionIcon::CloseWindow => {
+            painter.line_segment([c + vec2(-4.5, -4.5), c + vec2(4.5, 4.5)], thin);
+            painter.line_segment([c + vec2(4.5, -4.5), c + vec2(-4.5, 4.5)], thin);
         }
         _ => unreachable!("ícone com textura no atlas"),
     }

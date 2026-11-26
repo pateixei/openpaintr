@@ -89,6 +89,7 @@ pub fn run() -> io::Result<()> {
     let mut options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_decorations(false)
+            .with_transparent(true)
             .with_inner_size([1120.0, 760.0])
             .with_min_inner_size([720.0, 480.0]),
         ..Default::default()
@@ -2194,8 +2195,9 @@ impl App {
                 let meta = self.tab().editor.layer_meta(selected).unwrap();
                 let mut blend = meta.blend;
                 ui.horizontal(|ui| {
+                    let blend_width = 96.0;
                     egui::ComboBox::from_id_salt("layer_blend_mode")
-                        .width(105.0)
+                        .width(blend_width)
                         .selected_text(i18n::blend_name(blend))
                         .show_ui(ui, |ui| {
                             for mode in 0..openpaintr::BLEND_MODES.len() as u8 {
@@ -2218,7 +2220,11 @@ impl App {
                     }
 
                     let mut opacity = meta.opacity;
-                    ui.spacing_mut().slider_width = 78.0;
+                    ui.spacing_mut().slider_width = (ui.available_width()
+                        - blend_width
+                        - 46.0
+                        - ui.spacing().item_spacing.x * 2.0)
+                        .clamp(36.0, 78.0);
                     let response = ui
                         .add(
                             egui::Slider::new(&mut opacity, 0..=255)
@@ -2997,6 +3003,8 @@ impl App {
         let fit = ((usable.x - padding) / pixels.x)
             .min((usable.y - padding) / pixels.y)
             .clamp(0.001, 1.0);
+        let overscroll = (usable * 0.35).max(Vec2::splat(padding));
+        let canvas_space = |scaled: Vec2| scaled.max(usable) + overscroll * 2.0 + insets;
         let fit_selection = std::mem::take(&mut self.tab_mut().view.fit_selection);
         if fit_selection
             && let Some((min, max)) = self
@@ -3013,7 +3021,7 @@ impl App {
             let tab = self.tab_mut();
             tab.zoom = Some(zoom);
             let scaled = pixels * zoom;
-            let space = (scaled + Vec2::splat(padding)).max(usable) + insets;
+            let space = canvas_space(scaled);
             let center = vec2(min.0 as f32, min.1 as f32) + region * 0.5;
             tab.view.scroll_to = Some((space - scaled) * 0.5 + center * zoom - available * 0.5);
         }
@@ -3083,7 +3091,7 @@ impl App {
                         (current * 1.0025_f32.powf(magnify).clamp(0.5, 2.0)).clamp(0.01, 32.0);
                     let origin = |gain: f32| {
                         let scaled = pixels * gain;
-                        let space = (scaled + Vec2::splat(padding)).max(usable) + insets;
+                        let space = canvas_space(scaled);
                         panel_rect.min + (space - scaled) * 0.5 + insets * 0.5
                     };
                     let tab = self.tab_mut();
@@ -3093,14 +3101,31 @@ impl App {
                         offset = document_point * next - (pos - origin(next));
                         tab.zoom = Some(next);
                     }
-                    tab.view.scroll_to = Some(offset - scroll);
-                    ui.ctx().request_repaint();
+                    let target_zoom = tab.zoom.unwrap_or(fit);
+                    let target_max = (canvas_space(pixels * target_zoom) - available).max(Vec2::ZERO);
+                    let next_offset = (offset - scroll).clamp(Vec2::ZERO, target_max);
+                    if magnify != 0.0 || (next_offset - tab.view.offset).length_sq() > 1e-4 {
+                        tab.view.scroll_to = Some(next_offset);
+                        ui.ctx().request_repaint();
+                    }
                 }
             }
         }
 
         let zoom = self.tab().zoom.unwrap_or(fit);
         let size = pixels * zoom;
+        let base_space = canvas_space(size);
+        let mut space = base_space;
+        if let Some(cr) = &self.tab().canvas_resize {
+            let preview_px = vec2(cr.preview_size.0 as f32, cr.preview_size.1 as f32) * zoom;
+            space = space.max(canvas_space(preview_px));
+        }
+        let max_offset = (space - available).max(Vec2::ZERO);
+        if !self.tab().view.centered {
+            let tab = self.tab_mut();
+            tab.view.centered = true;
+            tab.view.scroll_to.get_or_insert(max_offset * 0.5);
+        }
         let mut scroll = egui::ScrollArea::both()
             .auto_shrink([false; 2])
             .scroll_source(egui::scroll_area::ScrollSource {
@@ -3109,16 +3134,10 @@ impl App {
                 ..Default::default()
             });
         if let Some(offset) = self.tab_mut().view.scroll_to.take() {
-            scroll = scroll.scroll_offset(offset.max(Vec2::ZERO));
+            scroll = scroll.scroll_offset(offset.clamp(Vec2::ZERO, max_offset));
         }
 
         let output = scroll.show(ui, |ui| {
-            let base_space = (size + Vec2::splat(padding)).max(usable) + insets;
-            let mut space = base_space;
-            if let Some(cr) = &self.tab().canvas_resize {
-                let preview_px = vec2(cr.preview_size.0 as f32, cr.preview_size.1 as f32) * zoom;
-                space = space.max((preview_px + Vec2::splat(padding)).max(usable) + insets);
-            }
             let (area, _) = ui.allocate_exact_size(space, egui::Sense::hover());
             let rect = Rect::from_center_size(area.min + base_space * 0.5 + insets * 0.5, size);
             let guide_margin = ui.clip_rect().min + insets;
@@ -3607,8 +3626,11 @@ impl App {
                         let delta = ui.input(|input| input.pointer.delta());
                         if delta != Vec2::ZERO {
                             let tab = self.tab_mut();
-                            tab.view.scroll_to = Some(tab.view.offset - delta);
-                            ui.ctx().request_repaint();
+                            let target = (tab.view.offset - delta).clamp(Vec2::ZERO, max_offset);
+                            if (target - tab.view.offset).length_sq() > 1e-4 {
+                                tab.view.scroll_to = Some(target);
+                                ui.ctx().request_repaint();
+                            }
                         }
                     }
                     if pan_trigger.is_some() || self.tool == Tool::Pan || temp_pan_held {
@@ -3645,7 +3667,7 @@ impl App {
                     tab.zoom = Some(next);
                     if let Some(pos) = response.interact_pointer_pos() {
                         let scaled = pixels * next;
-                        let space = (scaled + Vec2::splat(padding)).max(usable) + insets;
+                        let space = canvas_space(scaled);
                         tab.view.scroll_to = Some(
                             (space - scaled) * 0.5 + (pos - rect.min) / zoom * next
                                 - available * 0.5,
@@ -3675,7 +3697,7 @@ impl App {
                                 let factor = 2.0_f32.powf((pos.x - press_pos.x) / 80.0);
                                 let next = (start_zoom * factor).clamp(0.01, 32.0);
                                 let scaled = pixels * next;
-                                let space = (scaled + Vec2::splat(padding)).max(usable) + insets;
+                                let space = canvas_space(scaled);
                                 let tab = self.tab_mut();
                                 tab.zoom = Some(next);
                                 tab.view.scroll_to = Some(
@@ -3703,8 +3725,7 @@ impl App {
                                         .clamp(0.01, 32.0);
                                     let center_doc = (p0 + p1) * 0.5;
                                     let scaled = pixels * next;
-                                    let space =
-                                        (scaled + Vec2::splat(padding)).max(usable) + insets;
+                                    let space = canvas_space(scaled);
                                     let tab = self.tab_mut();
                                     tab.zoom = Some(next);
                                     tab.view.scroll_to = Some(
@@ -3727,8 +3748,7 @@ impl App {
                                 if let Some(factor) = factor {
                                     let next = (start_zoom * factor).clamp(0.01, 32.0);
                                     let scaled = pixels * next;
-                                    let space =
-                                        (scaled + Vec2::splat(padding)).max(usable) + insets;
+                                    let space = canvas_space(scaled);
                                     let tab = self.tab_mut();
                                     tab.zoom = Some(next);
                                     tab.view.scroll_to = Some(
@@ -5118,6 +5138,7 @@ impl App {
         self.refresh_thumbnails(ctx);
 
         let workspace_frame = egui::Frame::new().fill(self.theme.workspace());
+        let window_radius = window_chrome::corner_radius(ctx, self.fullscreen);
 
         window_chrome::resize_edges(ctx, self.fullscreen);
 
@@ -5125,6 +5146,12 @@ impl App {
             .frame(
                 egui::Frame::new()
                     .fill(self.theme.menubar_fill())
+                    .corner_radius(egui::CornerRadius {
+                        nw: window_radius,
+                        ne: window_radius,
+                        sw: 0,
+                        se: 0,
+                    })
                     .inner_margin(egui::Margin::symmetric(8, 3)),
             )
             .show_separator_line(false)
@@ -5171,6 +5198,12 @@ impl App {
                 egui::Frame::new()
                     .fill(self.theme.status_fill())
                     .stroke(egui::Stroke::new(1.0_f32, self.theme.border_color()))
+                    .corner_radius(egui::CornerRadius {
+                        nw: 0,
+                        ne: 0,
+                        sw: window_radius,
+                        se: window_radius,
+                    })
                     .inner_margin(egui::Margin::symmetric(10, 4)),
             )
             .show_separator_line(false)
@@ -5322,12 +5355,13 @@ impl App {
         {
             self.shortcut_dialog = Some(dialog);
         }
+        window_chrome::window_border(ctx, self.theme, self.fullscreen);
     }
 }
 
 impl eframe::App for App {
-    fn clear_color(&self, visuals: &egui::Visuals) -> [f32; 4] {
-        visuals.panel_fill.to_normalized_gamma_f32()
+    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
+        egui::Rgba::TRANSPARENT.to_array()
     }
 
     fn update(&mut self, ctx: &egui::Context, _: &mut eframe::Frame) {
@@ -6869,5 +6903,153 @@ mod tests {
         measure_workload("typical", 800, 600, 4)?;
         measure_workload("large", 2560, 1440, 8)?;
         Ok(())
+    }
+
+    #[test]
+    fn hand_pan_and_wheel_clamp_without_flicker_and_allow_overscroll() -> io::Result<()> {
+        let ctx = egui::Context::default();
+        let doc = Document::new(640, 480)?;
+        let mut app = App::new(&ctx, doc);
+        app.tool = Tool::Pan;
+        let screen = Rect::from_min_size(pos2(0.0, 0.0), vec2(1280.0, 800.0));
+        let mut time = 0.0_f64;
+        let mut run = |app: &mut App, events| {
+            let input = egui::RawInput {
+                screen_rect: Some(screen),
+                time: Some(time),
+                events,
+                ..Default::default()
+            };
+            time += 0.016;
+            ctx.run(input, |ctx| app.ui_frame(ctx))
+        };
+
+        let _ = run(&mut app, Vec::new());
+        let _ = run(&mut app, Vec::new());
+        let initial_rect = ctx.read_response(egui::Id::new(CANVAS_ID)).unwrap().rect;
+        let start = initial_rect.center();
+
+        // Dragging with Hand tool pans even when the 640x480 canvas fits inside the viewport.
+        let _ = run(
+            &mut app,
+            vec![
+                egui::Event::PointerMoved(start),
+                egui::Event::PointerButton {
+                    pos: start,
+                    button: PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+        );
+        let dragged = start + vec2(40.0, 30.0);
+        let _ = run(&mut app, vec![egui::Event::PointerMoved(dragged)]);
+        let _ = run(
+            &mut app,
+            vec![egui::Event::PointerButton {
+                pos: dragged,
+                button: PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+        let _ = run(&mut app, Vec::new());
+        let panned_rect = ctx.read_response(egui::Id::new(CANVAS_ID)).unwrap().rect;
+        assert!(
+            (panned_rect.min.x - (initial_rect.min.x + 40.0)).abs() < 1.0
+                && (panned_rect.min.y - (initial_rect.min.y + 30.0)).abs() < 1.0,
+            "expected canvas to pan with overscroll margin: before={:?}, after={:?}",
+            initial_rect.min,
+            panned_rect.min
+        );
+
+        // Scrolling far past the max_offset limit clamps cleanly and never flickers on further input.
+        let _ = run(
+            &mut app,
+            vec![
+                egui::Event::PointerMoved(panned_rect.center()),
+                egui::Event::MouseWheel {
+                    unit: egui::MouseWheelUnit::Point,
+                    delta: vec2(-10_000.0, -10_000.0),
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+        );
+        let _ = run(&mut app, Vec::new());
+        let clamped_offset = app.tab().view.offset;
+        let clamped_rect = ctx.read_response(egui::Id::new(CANVAS_ID)).unwrap().rect;
+        // Repeatedly scrolling past the boundary must not overshoot or oscillate on any frame.
+        for _ in 0..3 {
+            let _ = run(
+                &mut app,
+                vec![
+                    egui::Event::PointerMoved(clamped_rect.center()),
+                    egui::Event::MouseWheel {
+                        unit: egui::MouseWheelUnit::Point,
+                        delta: vec2(-200.0, -200.0),
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ],
+            );
+            assert_eq!(app.tab().view.offset, clamped_offset);
+            assert_eq!(
+                ctx.read_response(egui::Id::new(CANVAS_ID)).unwrap().rect,
+                clamped_rect
+            );
+            let _ = run(&mut app, Vec::new());
+            assert_eq!(app.tab().view.offset, clamped_offset);
+            assert_eq!(
+                ctx.read_response(egui::Id::new(CANVAS_ID)).unwrap().rect,
+                clamped_rect
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn inspector_cards_stay_within_right_panel_bounds() -> io::Result<()> {
+        let ctx = egui::Context::default();
+        let doc = Document::new(640, 480)?;
+        let mut app = App::new(&ctx, doc);
+        let screen = Rect::from_min_size(pos2(0.0, 0.0), vec2(1120.0, 760.0));
+        let mut output = egui::FullOutput::default();
+        for _ in 0..2 {
+            output = ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(screen),
+                    ..Default::default()
+                },
+                |ctx| app.ui_frame(ctx),
+            );
+        }
+        let inspector_left = screen.right() - 246.0;
+        let max_allowed_right = screen.right() - f32::from(CARD_GAP) + 2.0;
+        for clipped in &output.shapes {
+            let bounds = clipped.shape.visual_bounding_rect();
+            // Skip the SidePanel's full-width background rect (874..1120) and inspect the cards inside.
+            if bounds.is_positive()
+                && bounds.left() >= inspector_left
+                && (bounds.width() < 245.0 || bounds.left() > inspector_left + 1.0)
+                && bounds.top() > 100.0
+                && bounds.bottom() < screen.bottom() - 30.0
+            {
+                assert!(
+                    bounds.right() <= max_allowed_right,
+                    "inspector shape overflows right panel bound: {bounds:?} > {max_allowed_right}"
+                );
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn window_corner_radius_matches_windowed_and_fullscreen_states() {
+        let ctx = egui::Context::default();
+        assert_eq!(
+            window_chrome::corner_radius(&ctx, false),
+            window_chrome::WINDOW_CORNER_RADIUS
+        );
+        assert_eq!(window_chrome::corner_radius(&ctx, false), 4);
+        assert_eq!(window_chrome::corner_radius(&ctx, true), 0);
     }
 }

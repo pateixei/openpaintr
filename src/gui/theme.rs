@@ -274,6 +274,8 @@ impl Theme {
         body: impl FnOnce(&mut egui::Ui),
     ) {
         let radius = CornerRadius::same(8);
+        let card_width = ui.available_width();
+        let inner_width = (card_width - 2.0).max(0.0);
         Frame::new()
             .fill(self.card_fill())
             .stroke(Stroke::new(1.0_f32, self.border_color()))
@@ -288,6 +290,8 @@ impl Theme {
                 }),
             })
             .show(ui, |ui| {
+                ui.set_min_width(inner_width);
+                ui.set_max_width(inner_width);
                 ui.spacing_mut().item_spacing = Vec2::ZERO;
                 Frame::new()
                     .fill(self.card_header_fill())

@@ -451,7 +451,6 @@ impl App {
             Fullscreen => {
                 let next = !self.fullscreen;
                 self.fullscreen = next;
-                ctx.send_viewport_cmd(egui::ViewportCommand::Decorations(!next));
                 ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(next));
             }
             Grid => {

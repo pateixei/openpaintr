@@ -40,6 +40,7 @@ impl Unit {
 pub struct View {
     pub offset: Vec2,
     pub scroll_to: Option<Vec2>,
+    pub centered: bool,
     pub fit_selection: bool,
     pub grid: bool,
     pub rulers: bool,
