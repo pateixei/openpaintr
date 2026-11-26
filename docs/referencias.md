@@ -26,10 +26,6 @@ The installation at `C:\Program Files\Paint.NET` exposes the following DLLs as .
 
 The modern license restricts adaptations and derivative works. Use public documentation and observations from our own test documents to specify compatibility. OpenPaintR has its own interface, visual assets, and implementation. [Paint.NET license](https://www.getpaint.net/license.html)
 
-## Ghidra and REA study
-
-The tools were absent from the locations and commands checked in the initial environment. The inventory above identifies the managed assemblies. For a first integrated session, use a native component built from authorized source, confirm the result in Ghidra, and record the version, hash, architecture, and evidence returned by REA. Evaluate managed IL support before using the workflow on a .NET target authorized for analysis. [Ghidra](https://github.com/NationalSecurityAgency/ghidra) · [REA](https://github.com/Darwin-Liang/REA)
-
 ## Compatibility experiments
 
 | Experiment | Evidence to retain |
