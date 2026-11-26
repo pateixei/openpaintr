@@ -1,6 +1,6 @@
 use openpaintr::Pixel;
 
-use super::{selection::Point, stroke_raster};
+use super::{app_settings::AaMode, selection::Point, stroke_raster};
 
 pub const NEIGHBORS: [(i64, i64); 4] = [(1, 0), (-1, 0), (0, 1), (0, -1)];
 
@@ -12,22 +12,32 @@ pub fn offset((x, y): Point, (dx, dy): (i64, i64), size: Point) -> Option<Point>
 
 pub struct Edge {
     foreground: Pixel,
-    samples: u32,
+    coverage: u8,
 }
 
 impl Edge {
     pub fn over(&self, background: Pixel) -> Pixel {
-        stroke_raster::apply(self.foreground, background, (1_u16 << self.samples) - 1)
+        stroke_raster::apply_u8(self.foreground, background, self.coverage)
     }
 
-    pub fn deeper(&self, observed: Pixel, background: Pixel) -> Option<Self> {
-        let next = Self::fit(observed, background, self.foreground)?;
-        // A second SSAA fringe pixel can occur on a diagonal. It must have
+    pub fn deeper(
+        &self,
+        observed: Pixel,
+        background: Pixel,
+        aa_mode: AaMode,
+    ) -> Option<Self> {
+        let next = Self::fit(observed, background, self.foreground, aa_mode)?;
+        // A second antialiased fringe pixel can occur on a diagonal. It must have
         // more foreground coverage, so this never tracks a falling edge.
-        (next.samples > self.samples).then_some(next)
+        (next.coverage > self.coverage).then_some(next)
     }
 
-    fn fit(observed: Pixel, background: Pixel, foreground: Pixel) -> Option<Self> {
+    fn fit(
+        observed: Pixel,
+        background: Pixel,
+        foreground: Pixel,
+        aa_mode: AaMode,
+    ) -> Option<Self> {
         if background.0[3] != 255
             || observed.0[3] != 255
             || foreground.0[3] != 255
@@ -44,16 +54,47 @@ impl Edge {
         if contrast.abs() < 32.0 {
             return None;
         }
-        let samples = (16.0 * (f32::from(observed.0[channel]) - base) / contrast).round() as u32;
-        if !(1..16).contains(&samples) {
+
+        if aa_mode == AaMode::Ssaa4x4 {
+            let samples = (16.0 * (f32::from(observed.0[channel]) - base) / contrast).round() as u32;
+            if (1..16).contains(&samples) {
+                let coverage = ((samples * 255 + 8) / 16) as u8;
+                let edge = Self {
+                    foreground,
+                    coverage,
+                };
+                if edge
+                    .over(background)
+                    .0
+                    .iter()
+                    .zip(observed.0)
+                    .all(|(&a, b)| a.abs_diff(b) <= 1)
+                {
+                    return Some(edge);
+                }
+            }
+        }
+
+        let mut num = 0.0_f32;
+        let mut den = 0.0_f32;
+        for i in 0..3 {
+            let fg_bg = f32::from(foreground.0[i]) - f32::from(background.0[i]);
+            let obs_bg = f32::from(observed.0[i]) - f32::from(background.0[i]);
+            num += obs_bg * fg_bg;
+            den += fg_bg * fg_bg;
+        }
+        if den <= 0.0 {
+            return None;
+        }
+        let cov = (255.0 * num / den).round() as i32;
+        if !(1..=254).contains(&cov) {
             return None;
         }
         let edge = Self {
             foreground,
-            samples,
+            coverage: cov as u8,
         };
-        let reconstructed = edge.over(background);
-        reconstructed
+        edge.over(background)
             .0
             .iter()
             .zip(observed.0)
@@ -62,13 +103,14 @@ impl Edge {
     }
 }
 
-/// Recover an opaque SSAA transition only when a nearby solid foreground
+/// Recover an opaque antialiased transition only when a nearby solid foreground
 /// reproduces the original edge sample. The flood itself never enters it.
 pub fn detect(
     edge: Point,
     direction: (i64, i64),
     size: Point,
     background: Pixel,
+    aa_mode: AaMode,
     sample: impl Fn(Point) -> Pixel,
 ) -> Option<Edge> {
     if background.0[3] != 255 {
@@ -82,7 +124,7 @@ pub fn detect(
             continue;
         };
         let foreground = sample(interior);
-        if let Some(edge) = Edge::fit(observed, background, foreground)
+        if let Some(edge) = Edge::fit(observed, background, foreground, aa_mode)
             && NEIGHBORS.iter().any(|&delta| {
                 offset(interior, delta, size).is_some_and(|near| sample(near) == foreground)
             })

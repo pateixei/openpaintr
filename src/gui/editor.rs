@@ -8,6 +8,7 @@ use openpaintr::{Document, LayerData, Pixel};
 
 use super::selection::{Bounds, Point, Selection, Shape};
 use super::{
+    app_settings::AaMode,
     bucket_edges,
     clipboard::Image,
     geometry::{self, Affine, Resampling},
@@ -398,6 +399,7 @@ struct Stroke {
     tiles: HashMap<(u16, u16), StrokeTile>,
     spec: StrokeSpec,
     size: u32,
+    aa_mode: AaMode,
     carry: f64,
     last: Option<Point>,
 }
@@ -817,6 +819,7 @@ impl Editor {
         alpha_mode: AlphaMatchMode,
         contiguous: bool,
         sample_composite: bool,
+        aa_mode: AaMode,
     ) -> io::Result<bool> {
         self.finish_stroke();
         let Some(target_layer) = self.document.pixel(self.selected, seed.0, seed.1) else {
@@ -895,9 +898,14 @@ impl Editor {
                         continue;
                     }
                     let local_bg = source[i];
-                    if let Some(transition) =
-                        bucket_edges::detect(edge, direction, size, local_bg, |p| source[index(p)])
-                    {
+                    if let Some(transition) = bucket_edges::detect(
+                        edge,
+                        direction,
+                        size,
+                        local_bg,
+                        aa_mode,
+                        |p| source[index(p)],
+                    ) {
                         let edge_fg = paint_at(edge, local_bg, mask);
                         let recolored = transition.over(edge_fg);
                         changed |= recolored != source[edge_index];
@@ -909,7 +917,8 @@ impl Editor {
                             if dmask != 0
                                 && !matches(deeper)
                                 && pixels[di] == source[di]
-                                && let Some(deeper_edge) = transition.deeper(source[di], local_bg)
+                                && let Some(deeper_edge) =
+                                    transition.deeper(source[di], local_bg, aa_mode)
                             {
                                 let deeper_fg = paint_at(deeper, local_bg, dmask);
                                 let recolored = deeper_edge.over(deeper_fg);
@@ -1388,6 +1397,11 @@ impl Editor {
 
     #[cfg(test)]
     pub fn begin_stroke(&mut self, color: Pixel, size: u32) {
+        self.begin_stroke_with_aa(color, size, AaMode::default());
+    }
+
+    #[cfg(test)]
+    pub fn begin_stroke_with_aa(&mut self, color: Pixel, size: u32, aa_mode: AaMode) {
         let spec = StrokeSpec::Paint {
             primary: color,
             secondary: Pixel::default(),
@@ -1397,16 +1411,17 @@ impl Editor {
             spacing: 15,
             is_eraser: color == Pixel::default(),
         };
-        self.begin_stroke_with(spec, size);
+        self.begin_stroke_with(spec, size, aa_mode);
     }
 
-    pub fn begin_stroke_with(&mut self, spec: StrokeSpec, size: u32) {
+    pub fn begin_stroke_with(&mut self, spec: StrokeSpec, size: u32, aa_mode: AaMode) {
         self.finish_stroke();
         self.stroke = Some(Stroke {
             layer: self.selected,
             tiles: HashMap::new(),
             spec,
             size: size.max(1),
+            aa_mode,
             carry: 0.0,
             last: None,
         });
@@ -1470,41 +1485,100 @@ impl Editor {
             }
         };
 
-        if hardness >= 100 && spacing <= 15 {
-            stroke_raster::capsule(
-                previous.unwrap_or(point),
-                point,
-                stroke_size,
-                dimensions,
-                |pt, mask| {
-                    apply_sample(document, stroke, &mut dirty_points, &mut changed, pt, mask, 0);
-                },
-            );
-        } else {
-            let is_first = previous.is_none();
-            let mut carry = stroke.carry;
-            stroke_raster::segment_dabs(
-                previous.unwrap_or(point),
-                point,
-                &mut carry,
-                stroke_size,
-                hardness,
-                spacing,
-                dimensions,
-                is_first,
-                |pt, alpha| {
-                    apply_sample(
-                        document,
-                        stroke,
-                        &mut dirty_points,
-                        &mut changed,
-                        pt,
-                        0,
-                        alpha,
+        match stroke.aa_mode {
+            AaMode::Ssaa4x4 => {
+                if hardness >= 100 && spacing <= 15 {
+                    stroke_raster::capsule(
+                        previous.unwrap_or(point),
+                        point,
+                        stroke_size,
+                        dimensions,
+                        |pt, mask| {
+                            apply_sample(
+                                document,
+                                stroke,
+                                &mut dirty_points,
+                                &mut changed,
+                                pt,
+                                mask,
+                                0,
+                            );
+                        },
                     );
-                },
-            );
-            stroke.carry = carry;
+                } else {
+                    let is_first = previous.is_none();
+                    let mut carry = stroke.carry;
+                    stroke_raster::segment_dabs(
+                        previous.unwrap_or(point),
+                        point,
+                        &mut carry,
+                        stroke_size,
+                        hardness,
+                        spacing,
+                        dimensions,
+                        is_first,
+                        |pt, alpha| {
+                            apply_sample(
+                                document,
+                                stroke,
+                                &mut dirty_points,
+                                &mut changed,
+                                pt,
+                                0,
+                                alpha,
+                            );
+                        },
+                    );
+                    stroke.carry = carry;
+                }
+            }
+            AaMode::Analytical => {
+                if spacing <= 15 {
+                    stroke_raster::capsule_analytical(
+                        previous.unwrap_or(point),
+                        point,
+                        stroke_size,
+                        hardness,
+                        dimensions,
+                        |pt, alpha| {
+                            apply_sample(
+                                document,
+                                stroke,
+                                &mut dirty_points,
+                                &mut changed,
+                                pt,
+                                0,
+                                alpha,
+                            );
+                        },
+                    );
+                } else {
+                    let is_first = previous.is_none();
+                    let mut carry = stroke.carry;
+                    stroke_raster::segment_dabs_analytical(
+                        previous.unwrap_or(point),
+                        point,
+                        &mut carry,
+                        stroke_size,
+                        hardness,
+                        spacing,
+                        dimensions,
+                        is_first,
+                        |pt, alpha| {
+                            apply_sample(
+                                document,
+                                stroke,
+                                &mut dirty_points,
+                                &mut changed,
+                                pt,
+                                0,
+                                alpha,
+                            );
+                        },
+                    );
+                    stroke.carry = carry;
+                }
+            }
         }
         for pt in dirty_points {
             self.mark_dirty_point(pt);
@@ -1560,6 +1634,15 @@ mod tests {
     use super::*;
 
     fn fill_exact(editor: &mut Editor, seed: Point, color: Pixel) -> io::Result<bool> {
+        fill_exact_with_aa(editor, seed, color, AaMode::default())
+    }
+
+    fn fill_exact_with_aa(
+        editor: &mut Editor,
+        seed: Point,
+        color: Pixel,
+        aa_mode: AaMode,
+    ) -> io::Result<bool> {
         editor.bucket_fill(
             seed,
             color,
@@ -1570,6 +1653,7 @@ mod tests {
             AlphaMatchMode::Premultiplied,
             true,
             false,
+            aa_mode,
         )
     }
 
@@ -1607,56 +1691,72 @@ mod tests {
         let green = Pixel([50, 220, 75, 255]);
         let orange = Pixel([255, 130, 16, 255]);
         let blue = Pixel([10, 40, 240, 255]);
-        let mut editor = Editor::new(Document::new(12, 8)?);
-        editor.document.fill_layer(0, green)?;
-        editor.begin_stroke(orange, 4);
-        editor.draw_to(Some((4, 0)));
-        editor.draw_to(Some((8, 7)));
-        editor.finish_stroke();
+        for mode in AaMode::ALL {
+            let mut editor = Editor::new(Document::new(12, 8)?);
+            editor.document.fill_layer(0, green)?;
+            editor.begin_stroke_with_aa(orange, 4, mode);
+            editor.draw_to(Some((4, 0)));
+            editor.draw_to(Some((8, 7)));
+            editor.finish_stroke();
 
-        // For an actual rendered stroke, compare against the same SSAA geometry.
-        let mut on_blue = Editor::new(Document::new(12, 8)?);
-        on_blue.document.fill_layer(0, blue)?;
-        on_blue.begin_stroke(orange, 4);
-        on_blue.draw_to(Some((4, 0)));
-        on_blue.draw_to(Some((8, 7)));
-        on_blue.finish_stroke();
-        let before = editor.document.layer_pixels(0).unwrap().to_vec();
+            // Compare against the same geometry rendered directly over blue.
+            let mut on_blue = Editor::new(Document::new(12, 8)?);
+            on_blue.document.fill_layer(0, blue)?;
+            on_blue.begin_stroke_with_aa(orange, 4, mode);
+            on_blue.draw_to(Some((4, 0)));
+            on_blue.draw_to(Some((8, 7)));
+            on_blue.finish_stroke();
+            let before = editor.document.layer_pixels(0).unwrap().to_vec();
 
-        assert!(fill_exact(&mut editor, (0, 3), blue)?);
-        assert_eq!(editor.document.pixel(0, 0, 3), Some(blue));
-        assert_eq!(editor.document.pixel(0, 11, 3), Some(green));
-        assert_eq!(editor.document.pixel(0, 5, 3), Some(orange));
-        let mut mixed = 0;
-        let mut expected = before.clone();
-        for y in 0..8 {
-            let mut before_solid_line = true;
-            for x in 0..12 {
-                let i = y * 12 + x;
-                if before[i] == orange {
-                    before_solid_line = false;
-                }
-                if before_solid_line {
-                    expected[i] = on_blue.document.pixel(0, x as u32, y as u32).unwrap();
-                    mixed += usize::from(expected[i] != blue);
+            assert!(fill_exact_with_aa(&mut editor, (0, 3), blue, mode)?);
+            assert_eq!(editor.document.pixel(0, 0, 3), Some(blue));
+            assert_eq!(editor.document.pixel(0, 11, 3), Some(green));
+            assert_eq!(editor.document.pixel(0, 5, 3), Some(orange));
+            let mut mixed = 0;
+            let mut expected = before.clone();
+            for y in 0..8 {
+                let mut before_solid_line = true;
+                for x in 0..12 {
+                    let i = y * 12 + x;
+                    if before[i] == orange {
+                        before_solid_line = false;
+                    }
+                    if before_solid_line {
+                        expected[i] = on_blue.document.pixel(0, x as u32, y as u32).unwrap();
+                        mixed += usize::from(expected[i] != blue);
+                    }
                 }
             }
+            assert!(mixed > 0);
+            let tol = if mode == AaMode::Ssaa4x4 { 0 } else { 2 };
+            for (i, (&actual, &expected)) in editor
+                .document
+                .layer_pixels(0)
+                .unwrap()
+                .iter()
+                .zip(&expected)
+                .enumerate()
+            {
+                assert!(
+                    actual.0.iter().zip(expected.0).all(|(&a, b)| a.abs_diff(b) <= tol),
+                    "mode {mode:?} pixel {},{}: actual {actual:?} vs expected {expected:?}",
+                    i % 12,
+                    i / 12
+                );
+            }
+            assert!(editor.undo()?);
+            assert_eq!(editor.document.layer_pixels(0).unwrap(), before);
+            assert!(editor.redo()?);
+            let after_redo = editor.document.layer_pixels(0).unwrap();
+            for (i, (&actual, &expected)) in after_redo.iter().zip(&expected).enumerate() {
+                assert!(
+                    actual.0.iter().zip(expected.0).all(|(&a, b)| a.abs_diff(b) <= tol),
+                    "mode {mode:?} redo pixel {},{}",
+                    i % 12,
+                    i / 12
+                );
+            }
         }
-        assert!(mixed > 0);
-        for (i, (&actual, &expected)) in editor
-            .document
-            .layer_pixels(0)
-            .unwrap()
-            .iter()
-            .zip(&expected)
-            .enumerate()
-        {
-            assert_eq!(actual, expected, "pixel {},{}", i % 12, i / 12);
-        }
-        assert!(editor.undo()?);
-        assert_eq!(editor.document.layer_pixels(0).unwrap(), before);
-        assert!(editor.redo()?);
-        assert_eq!(editor.document.layer_pixels(0).unwrap(), expected);
         Ok(())
     }
 
@@ -1868,56 +1968,60 @@ mod tests {
 
     #[test]
     fn diagonal_stroke_saves_partial_alpha_and_retracing_keeps_coverage() -> io::Result<()> {
-        let mut editor = Editor::new(Document::new(12, 12)?);
-        let color = Pixel([103, 75, 195, 255]);
-        editor.begin_stroke(color, 5);
-        editor.draw_to(Some((2, 2)));
-        editor.draw_to(Some((9, 9)));
-        let pixels = editor.document.layer_pixels(0).unwrap().to_vec();
-        assert!(pixels.iter().any(|pixel| (1..255).contains(&pixel.0[3])));
-        assert_eq!(editor.document.pixel(0, 5, 5), Some(color));
-        assert!(!editor.draw_to(Some((2, 2))));
-        editor.finish_stroke();
-        assert!(editor.undo()?);
-        assert_eq!(editor.document.pixel(0, 5, 5), Some(Pixel::default()));
-        assert!(editor.redo()?);
-        assert_eq!(editor.document.layer_pixels(0).unwrap(), pixels);
-        let mut bytes = Vec::new();
-        editor.document.write_pdn(&mut bytes)?;
-        assert_eq!(
-            Document::read_pdn(bytes.as_slice())?
-                .layer_pixels(0)
-                .unwrap(),
-            pixels
-        );
+        for mode in AaMode::ALL {
+            let mut editor = Editor::new(Document::new(12, 12)?);
+            let color = Pixel([103, 75, 195, 255]);
+            editor.begin_stroke_with_aa(color, 5, mode);
+            editor.draw_to(Some((2, 2)));
+            editor.draw_to(Some((9, 9)));
+            let pixels = editor.document.layer_pixels(0).unwrap().to_vec();
+            assert!(pixels.iter().any(|pixel| (1..255).contains(&pixel.0[3])));
+            assert_eq!(editor.document.pixel(0, 5, 5), Some(color));
+            assert!(!editor.draw_to(Some((2, 2))));
+            editor.finish_stroke();
+            assert!(editor.undo()?);
+            assert_eq!(editor.document.pixel(0, 5, 5), Some(Pixel::default()));
+            assert!(editor.redo()?);
+            assert_eq!(editor.document.layer_pixels(0).unwrap(), pixels);
+            let mut bytes = Vec::new();
+            editor.document.write_pdn(&mut bytes)?;
+            assert_eq!(
+                Document::read_pdn(bytes.as_slice())?
+                    .layer_pixels(0)
+                    .unwrap(),
+                pixels
+            );
+        }
         Ok(())
     }
 
     #[test]
-    fn diagonal_1px_stroke_uses_ssaa_and_selection_normalization_works() -> io::Result<()> {
-        let mut editor = Editor::new(Document::new(12, 12)?);
-        let color = Pixel([40, 120, 220, 255]);
-        editor.begin_stroke(color, 1);
-        editor.draw_to(Some((1, 1)));
-        editor.draw_to(Some((8, 8)));
-        editor.finish_stroke();
-        let pixels = editor.document.layer_pixels(0).unwrap().to_vec();
-        assert!(pixels.iter().any(|p| (1..255).contains(&p.0[3])));
-        let mut bytes = Vec::new();
-        editor.document.write_pdn(&mut bytes)?;
-        assert_eq!(
-            Document::read_pdn(bytes.as_slice())?
-                .layer_pixels(0)
-                .unwrap(),
-            pixels
-        );
+    fn diagonal_1px_stroke_uses_aa_and_selection_normalization_works() -> io::Result<()> {
+        for mode in AaMode::ALL {
+            let mut editor = Editor::new(Document::new(12, 12)?);
+            let color = Pixel([40, 120, 220, 255]);
+            editor.begin_stroke_with_aa(color, 1, mode);
+            editor.draw_to(Some((1, 1)));
+            editor.draw_to(Some((8, 8)));
+            editor.finish_stroke();
+            let pixels = editor.document.layer_pixels(0).unwrap().to_vec();
+            assert!(pixels.iter().any(|p| (1..255).contains(&p.0[3])));
+            let mut bytes = Vec::new();
+            editor.document.write_pdn(&mut bytes)?;
+            assert_eq!(
+                Document::read_pdn(bytes.as_slice())?
+                    .layer_pixels(0)
+                    .unwrap(),
+                pixels
+            );
 
-        editor.select_all();
-        editor.invert_selection();
-        assert_eq!(editor.selection, None);
-        editor.invert_selection();
-        assert!(editor.selection.is_some());
-        assert!(editor.undo_bytes() > 0);
+            editor.select_all();
+            editor.invert_selection();
+            assert_eq!(editor.selection, None);
+            editor.invert_selection();
+            assert!(editor.selection.is_some());
+            assert!(editor.undo_bytes() > 0);
+        }
         Ok(())
     }
 

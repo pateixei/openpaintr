@@ -1,3 +1,4 @@
+mod app_settings;
 mod bucket_edges;
 mod clipboard;
 mod colors;
@@ -20,6 +21,7 @@ mod tool_icons;
 mod transform;
 mod vector_tools;
 mod view;
+mod window_chrome;
 
 use std::{
     fs::File,
@@ -34,6 +36,7 @@ use eframe::egui::{
 use openpaintr::{Document, Pixel};
 use rfd::FileDialog;
 
+use app_settings::{AaMode, GlobalSettings};
 use colors::{ColorPalette, PaletteAction};
 use dialogs::{
     LayerDialogAction, LayerPropertiesDialog, RecentFiles, SaveDialogAction, SaveOptionsDialog,
@@ -85,6 +88,7 @@ pub fn run() -> io::Result<()> {
     let document = locale.with(|| new_document(DEFAULT_SIZE.0, DEFAULT_SIZE.1))?;
     let mut options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
+            .with_decorations(false)
             .with_inner_size([1120.0, 760.0])
             .with_min_inner_size([720.0, 480.0]),
         ..Default::default()
@@ -121,6 +125,7 @@ pub fn run() -> io::Result<()> {
         Box::new(move |creation| {
             let mut app = App::new(&creation.egui_ctx, document);
             app.locale = locale;
+            app.settings = GlobalSettings::load();
             creation.egui_ctx.set_fonts(i18n::fonts(locale));
             app.font_catalog = FontCatalog::for_locale(locale);
             app.locale.with(|| {
@@ -377,6 +382,7 @@ struct App {
     shape_fill_mode: ShapeFillMode,
     shape_corner_radius: f32,
     font_catalog: FontCatalog,
+    settings: GlobalSettings,
     text_family: String,
     text_size: f32,
     text_bold: bool,
@@ -456,6 +462,7 @@ impl App {
             shape_fill_mode: ShapeFillMode::Both,
             shape_corner_radius: 8.0,
             font_catalog: FontCatalog::new(),
+            settings: GlobalSettings::default(),
             text_family: "Padrão (Sans)".to_owned(),
             text_size: 28.0,
             text_bold: false,
@@ -870,6 +877,23 @@ impl App {
     }
 
     fn menu_bar(&mut self, ui: &mut egui::Ui) {
+        ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+            if window_chrome::controls(ui, &mut self.theme, self.fullscreen) {
+                self.request(ui.ctx(), Action::Close);
+            }
+            ui.with_layout(egui::Layout::left_to_right(Align::Center), |ui| {
+                let menus_width = ui.available_width() - 24.0;
+                egui::ScrollArea::horizontal()
+                    .id_salt("main_menu_scroll")
+                    .max_width(menus_width)
+                    .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+                    .show(ui, |ui| self.main_menus(ui));
+                window_chrome::drag_space(ui, self.fullscreen);
+            });
+        });
+    }
+
+    fn main_menus(&mut self, ui: &mut egui::Ui) {
         egui::MenuBar::new()
             .style(Theme::menu_bar_style as fn(&mut egui::Style))
             .config(
@@ -931,16 +955,28 @@ impl App {
                             }
                         }
                     });
+                    ui.menu_button(tr("antialiasing"), |ui| {
+                        for mode in AaMode::ALL {
+                            if ui
+                                .selectable_label(self.settings.antialiasing == mode, mode.label())
+                                .clicked()
+                            {
+                                if self.settings.antialiasing != mode {
+                                    self.settings.antialiasing = mode;
+                                    self.notice = self.locale.with(|| {
+                                        self.settings.save().err().map(|error| {
+                                            (i18n::format("settings-save-error", &[&error]), true)
+                                        })
+                                    });
+                                    self.tab_mut().editor.mark_full_refresh();
+                                }
+                                ui.close();
+                                ui.ctx().request_repaint();
+                            }
+                        }
+                    });
                 });
-                ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
-                    let previous = self.theme;
-                    ui.selectable_value(&mut self.theme, Theme::Dark, tr("dark"));
-                    ui.selectable_value(&mut self.theme, Theme::Light, tr("light"));
-                    if previous != self.theme {
-                        self.theme.apply(ui.ctx());
-                        ui.ctx().request_repaint();
-                    }
-                });
+                window_chrome::drag_space(ui, self.fullscreen);
             });
     }
 
@@ -2620,11 +2656,9 @@ impl App {
     fn selection_candidate(&self, selection: Selection, mode: Combine) -> io::Result<Selection> {
         let editor = &self.tab().editor;
         let size = editor.document.dimensions();
-        selection.feather(size, self.selection_feather)?.combine(
-            editor.selection.as_ref(),
-            size,
-            mode,
-        )
+        selection
+            .feather_with_aa(size, self.selection_feather, self.settings.antialiasing)?
+            .combine(editor.selection.as_ref(), size, mode)
     }
 
     fn wand(&self, seed: Point, contiguous: bool) -> io::Result<Selection> {
@@ -2670,6 +2704,7 @@ impl App {
             return;
         }
         let size = self.tab().editor.document.dimensions();
+        let aa_mode = self.settings.antialiasing;
         let (preview, label) = {
             let tab = &mut self.tabs[self.active_tab];
             tab.session_creation = None;
@@ -2679,9 +2714,9 @@ impl App {
             if let Some(grad) = tab.gradient.take() {
                 (Some(grad.render_preview(src, size, selection)), "gradient")
             } else if let Some(lc) = tab.line_curve.take() {
-                (Some(lc.render_preview(src, size, selection)), "line-curve")
+                (Some(lc.render_preview(src, size, selection, aa_mode)), "line-curve")
             } else if let Some(shape) = tab.shape_session.take() {
-                (Some(shape.render_preview(src, size, selection)), "shape")
+                (Some(shape.render_preview(src, size, selection, aa_mode)), "shape")
             } else if let Some(mut text) = tab.text_session.take() {
                 let empty = text.text.trim().is_empty();
                 let buf = (!empty)
@@ -2744,6 +2779,7 @@ impl App {
         let tolerance = self.color_tolerance;
         let alpha_mode = self.alpha_match;
         let composite = self.bucket_composite;
+        let aa_mode = self.settings.antialiasing;
         match self.tab_mut().editor.bucket_fill(
             seed,
             primary,
@@ -2754,6 +2790,7 @@ impl App {
             alpha_mode,
             contiguous,
             composite,
+            aa_mode,
         ) {
             Ok(changed) => self.tab_mut().thumbs_dirty |= changed,
             Err(error) => self.report(Err(error), ""),
@@ -2803,6 +2840,7 @@ impl App {
 
     fn refresh_image(&mut self, ctx: &egui::Context) {
         let font_catalog = &mut self.font_catalog;
+        let aa_mode = self.settings.antialiasing;
         let tab = &mut self.tabs[self.active_tab];
         let dirty = tab.editor.take_dirty();
         if !dirty.full && dirty.rect.is_none() {
@@ -2871,9 +2909,9 @@ impl App {
             } else if let Some(grad) = &tab.gradient {
                 grad.render_preview(src, (width, height), sel)
             } else if let Some(lc) = &tab.line_curve {
-                lc.render_preview(src, (width, height), sel)
+                lc.render_preview(src, (width, height), sel, aa_mode)
             } else if let Some(shape) = &tab.shape_session {
-                shape.render_preview(src, (width, height), sel)
+                shape.render_preview(src, (width, height), sel, aa_mode)
             } else if let Some(text) = tab.text_session.as_mut() {
                 text.render_preview(font_catalog, src, (width, height), sel)
             } else {
@@ -3194,7 +3232,7 @@ impl App {
                     let drag_resp = ui.interact(
                         ui.clip_rect(),
                         ui.id().with("canvas_resize_drag"),
-                        egui::Sense::drag(),
+                        egui::Sense::click_and_drag(),
                     );
                     let handle_hit = |pos: egui::Pos2| {
                         let box_for = |c: egui::Pos2| Rect::from_center_size(c, Vec2::splat(18.0));
@@ -3206,8 +3244,12 @@ impl App {
                             CanvasResizeDrag::BottomRight
                         }
                     };
-                    if drag_resp.drag_started()
-                        && let Some(ptr) = drag_resp.interact_pointer_pos()
+                    if self.tab().canvas_resize.as_ref().unwrap().dragging.is_none()
+                        && (drag_resp.drag_started()
+                            || ui.input(|i| i.pointer.button_pressed(PointerButton::Primary)))
+                        && let Some(ptr) = ui
+                            .input(|i| i.pointer.interact_pos())
+                            .filter(|p| ui.clip_rect().contains(*p))
                         && let Some(cr) = self.tab_mut().canvas_resize.as_mut()
                     {
                         cr.dragging = Some(handle_hit(ptr));
@@ -3219,10 +3261,11 @@ impl App {
                             CanvasResizeDrag::BottomEdge => egui::CursorIcon::ResizeVertical,
                             CanvasResizeDrag::BottomRight => egui::CursorIcon::ResizeNwSe,
                         });
-                        let (down, stopped, ptr, shift) = ui.input(|i| {
+                        let (down, released, ptr, shift) = ui.input(|i| {
                             (
                                 i.pointer.button_down(PointerButton::Primary),
-                                drag_resp.drag_stopped(),
+                                i.pointer.button_released(PointerButton::Primary)
+                                    || drag_resp.drag_stopped(),
                                 i.pointer.interact_pos(),
                                 i.modifiers.shift,
                             )
@@ -3259,7 +3302,7 @@ impl App {
                             );
                             ui.ctx().request_repaint();
                         }
-                        if (!down || stopped)
+                        if (!down || released)
                             && let Some(cr) = self.tab_mut().canvas_resize.as_mut()
                         {
                             cr.dragging = None;
@@ -3965,7 +4008,12 @@ impl App {
                             }
                             match self.tool {
                                 Tool::Select(shape) => {
-                                    let candidate = Selection::new(shape, anchor, end);
+                                    let candidate = Selection::new_with_aa(
+                                        shape,
+                                        anchor,
+                                        end,
+                                        self.settings.antialiasing,
+                                    );
                                     if released {
                                         self.commit_selection_with(
                                             Ok(candidate),
@@ -3985,9 +4033,10 @@ impl App {
                                         || (self.selection_feather > 0
                                             && self.tab().selection_path.len() >= 3)
                                     {
-                                        let selection = Selection::lasso(
+                                        let selection = Selection::lasso_with_aa(
                                             (width, height),
                                             &self.tab().selection_path,
+                                            self.settings.antialiasing,
                                         );
                                         if released {
                                             self.commit_selection_with(
@@ -4377,6 +4426,7 @@ impl App {
                                     };
                                     if let Some((spec, diameter)) = spec_and_size {
                                         self.finish_opacity();
+                                        let aa_mode = self.settings.antialiasing;
                                         let tab = self.tab_mut();
                                         let waiting_for_drag =
                                             tab.editor.selection.as_ref().is_some_and(|selection| {
@@ -4386,7 +4436,7 @@ impl App {
                                             button: btn,
                                             waiting_for_drag,
                                         });
-                                        tab.editor.begin_stroke_with(spec, diameter);
+                                        tab.editor.begin_stroke_with(spec, diameter, aa_mode);
                                         if !waiting_for_drag {
                                             tab.editor.draw_to(Some(start_pt));
                                         }
@@ -4843,7 +4893,6 @@ impl App {
             self.observed_fullscreen = os_fullscreen;
             if let Some(full) = os_fullscreen {
                 self.fullscreen = full;
-                ctx.send_viewport_cmd(egui::ViewportCommand::Decorations(!full));
             }
         }
         if !ctx.input(|input| input.pointer.primary_down()) {
@@ -5069,6 +5118,8 @@ impl App {
         self.refresh_thumbnails(ctx);
 
         let workspace_frame = egui::Frame::new().fill(self.theme.workspace());
+
+        window_chrome::resize_edges(ctx, self.fullscreen);
 
         egui::TopBottomPanel::top("menubar")
             .frame(
@@ -5814,6 +5865,7 @@ mod tests {
         // Shared tolerance governs Recolor stroke and preserves shading
         let tol = app.color_tolerance;
         let alpha_mode = app.alpha_match;
+        let aa_mode = app.settings.antialiasing;
         app.tab_mut().editor.begin_stroke_with(
             StrokeSpec::Recolor {
                 target: soft_blue,
@@ -5824,6 +5876,7 @@ mod tests {
                 spacing: 15,
             },
             4,
+            aa_mode,
         );
         app.tab_mut().editor.draw_to(Some((5, 5)));
         app.tab_mut().editor.finish_stroke();
@@ -5865,6 +5918,7 @@ mod tests {
             .layer_pixels(1)
             .unwrap()
             .to_vec();
+        let aa_mode = app.settings.antialiasing;
         app.tab_mut().editor.begin_stroke_with(
             StrokeSpec::Clone {
                 source_pixels: src,
@@ -5875,6 +5929,7 @@ mod tests {
                 spacing: 15,
             },
             3,
+            aa_mode,
         );
         app.tab_mut().editor.draw_to(Some((8, 8)));
         app.tab_mut().editor.finish_stroke();
@@ -6134,7 +6189,7 @@ mod tests {
     }
 
     #[test]
-    fn wslg_prefers_x11_and_fullscreen_hides_csd_decorations() {
+    fn wslg_prefers_x11_and_fullscreen_keeps_the_window_borderless() {
         assert_eq!(linux_backend_choice(None, true, true), Some(true));
         assert_eq!(linux_backend_choice(None, true, false), None);
         assert_eq!(linux_backend_choice(Some("wayland"), true, true), Some(false));
@@ -6174,21 +6229,23 @@ mod tests {
         assert!(output.viewport_output[&egui::ViewportId::ROOT]
             .commands
             .contains(&egui::ViewportCommand::Fullscreen(true)));
-        assert!(output.viewport_output[&egui::ViewportId::ROOT]
+        assert!(!output.viewport_output[&egui::ViewportId::ROOT]
             .commands
-            .contains(&egui::ViewportCommand::Decorations(false)));
+            .iter()
+            .any(|command| matches!(command, egui::ViewportCommand::Decorations(_))));
 
         // Intermediate frame before OS ack must keep fullscreen & decorations hidden.
         let _ = run_frame(&mut app, Vec::new(), Some(false));
         assert!(app.fullscreen);
 
-        // OS-initiated exit from fullscreen must re-enable decorations.
+        // The native fullscreen state can change without the app requesting it.
         let _ = run_frame(&mut app, Vec::new(), Some(true));
         let exit_out = run_frame(&mut app, Vec::new(), Some(false));
         assert!(!app.fullscreen);
-        assert!(exit_out.viewport_output[&egui::ViewportId::ROOT]
+        assert!(!exit_out.viewport_output[&egui::ViewportId::ROOT]
             .commands
-            .contains(&egui::ViewportCommand::Decorations(true)));
+            .iter()
+            .any(|command| matches!(command, egui::ViewportCommand::Decorations(_))));
     }
 
     #[test]
@@ -6371,6 +6428,11 @@ mod tests {
         assert!(app.tab().canvas_resize.is_none());
         assert_eq!(app.tab().editor.document.dimensions(), (100, 80));
 
+        // Let egui's multi-click streak reset before starting a fresh Ctrl + Double-Click
+        for _ in 0..10 {
+            let _ = run(&mut app, Vec::new(), egui::Modifiers::NONE);
+        }
+
         // Re-enter via Ctrl + Double-Click, shrink canvas, and confirm with Ctrl rising edge
         for pressed in [true, false, true, false] {
             let _ = run(
@@ -6455,6 +6517,357 @@ mod tests {
         );
         assert!(app.tab().canvas_resize.is_none());
         assert_eq!(app.tab().editor.document.dimensions(), (110, 90));
+        Ok(())
+    }
+
+    #[test]
+    fn editable_persistence_atomic_save_as_preserves_original_and_handles_failure_or_cancel()
+    -> io::Result<()> {
+        let dir = tempfile::tempdir()?;
+        let orig_path = dir.path().join("orig.pdn");
+        let copy_path = dir.path().join("copy.pdn");
+
+        let mut initial = Document::new(8, 8)?;
+        initial.set_layer_name(0, "Base")?;
+        initial.fill_layer(0, Pixel([10, 20, 30, 255]))?;
+        let top = initial.add_layer("Camada 2")?;
+        initial.set_layer_blend_mode(top, 1)?;
+        initial.set_layer_properties(top, true, 180)?;
+        initial.set_pixel(top, 3, 4, Pixel([200, 100, 50, 220]))?;
+        write_pdn_atomically(&initial, &orig_path, false)?;
+
+        let ctx = egui::Context::default();
+        let mut app = App::new(&ctx, Document::new(4, 4)?);
+        app.open_path(&ctx, orig_path.clone());
+        assert_eq!(app.tab().project_path.as_deref(), Some(orig_path.as_path()));
+        assert!(!app.tab().editor.has_unsaved_edits());
+
+        // Modify layer 1 and perform atomic Save
+        app.tab_mut().editor.selected = 1;
+        app.tab_mut()
+            .editor
+            .begin_stroke(Pixel([120, 220, 40, 255]), 1);
+        app.tab_mut().editor.draw_to(Some((1, 1)));
+        app.tab_mut().editor.finish_stroke();
+        assert!(app.tab().editor.has_unsaved_edits());
+        assert!(app.save_project(&ctx, false));
+        assert!(!app.tab().editor.has_unsaved_edits());
+
+        // Saved revision tracks across undo/redo
+        assert!(app.tab_mut().editor.undo()?);
+        assert!(app.tab().editor.has_unsaved_edits());
+        assert!(app.tab_mut().editor.redo()?);
+        assert!(!app.tab().editor.has_unsaved_edits());
+
+        // Further edit, test Cancel vs Save As preserving original on disk
+        let orig_bytes_before_copy = std::fs::read(&orig_path)?;
+        app.tab_mut()
+            .editor
+            .begin_stroke(Pixel([250, 10, 10, 255]), 1);
+        app.tab_mut().editor.draw_to(Some((6, 6)));
+        app.tab_mut().editor.finish_stroke();
+        let edited_pixel = app.tab().editor.document.pixel(1, 6, 6);
+        assert!(app.tab().editor.has_unsaved_edits());
+
+        // Simulate Save As dialog opened & canceled: state and disk must remain unchanged
+        let _canceled_dialog =
+            SaveOptionsDialog::new_pdn(copy_path.clone(), false, &app.tab().editor.document, &ctx);
+        assert!(!copy_path.exists());
+        assert_eq!(app.tab().project_path.as_deref(), Some(orig_path.as_path()));
+        assert!(app.tab().editor.has_unsaved_edits());
+
+        // Complete Save As to copy_path: original orig.pdn stays byte-identical
+        let save_as_dialog =
+            SaveOptionsDialog::new_pdn(copy_path.clone(), false, &app.tab().editor.document, &ctx);
+        save_as_dialog.write_to_disk()?;
+        app.tab_mut().name = display_name(&copy_path);
+        app.tab_mut().project_path = Some(copy_path.clone());
+        app.tab_mut().editor.mark_saved();
+        assert_eq!(std::fs::read(&orig_path)?, orig_bytes_before_copy);
+        let reopened_copy = Document::read_pdn(File::open(&copy_path)?)?;
+        assert_eq!(reopened_copy.pixel(1, 6, 6), edited_pixel);
+        assert_ne!(reopened_copy.pixel(1, 6, 6), initial.pixel(1, 6, 6));
+
+        // Simulate write failure into missing directory: in-memory edits & last valid file survive
+        let copy_bytes_before_fail = std::fs::read(&copy_path)?;
+        let before_fail_px = app.tab().editor.document.pixel(1, 2, 2);
+        app.tab_mut()
+            .editor
+            .begin_stroke(Pixel([15, 25, 240, 255]), 1);
+        app.tab_mut().editor.draw_to(Some((2, 2)));
+        app.tab_mut().editor.finish_stroke();
+        let after_fail_px = app.tab().editor.document.pixel(1, 2, 2);
+        assert_ne!(after_fail_px, before_fail_px);
+        let failed_target = dir.path().join("missing_dir").join("fail.pdn");
+        app.tab_mut().project_path = Some(failed_target);
+        assert!(!app.save_project(&ctx, false));
+        assert!(app.notice.as_ref().is_some_and(|(_, is_err)| *is_err));
+        assert!(app.tab().editor.has_unsaved_edits());
+        assert_eq!(app.tab().editor.document.pixel(1, 2, 2), after_fail_px);
+        assert_eq!(std::fs::read(&copy_path)?, copy_bytes_before_fail);
+        Ok(())
+    }
+
+    #[test]
+    fn phase1_five_workflows_end_to_end() -> io::Result<()> {
+        let fixture_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/pdn/pdn52_roundtrip_layers.pdn");
+        let dir = tempfile::tempdir()?;
+        let export_png = dir.path().join("workflow_export.png");
+        let saved_pdn = dir.path().join("workflow_resumed.pdn");
+
+        let ctx = egui::Context::default();
+        let mut app = App::new(&ctx, Document::new(4, 4)?);
+        let screen = Rect::from_min_size(pos2(0.0, 0.0), vec2(1280.0, 800.0));
+
+        // 1. Open and understand a layered project (locate layer + hidden layer)
+        app.open_path(&ctx, fixture_path);
+        assert_eq!(app.tab().editor.document.dimensions(), (96, 64));
+        assert_eq!(app.tab().editor.document.layer_count(), 4);
+        assert_eq!(app.tab().editor.document.layer_name(1), Some("Sombra 50"));
+        assert_eq!(
+            app.tab().editor.document.layer_name(2),
+            Some("Camada oculta")
+        );
+        assert_eq!(
+            app.tab().editor.document.layer_properties(2),
+            Some((false, 255))
+        );
+
+        // Acceptance check: reorder, duplicate, merge down, then undo all three
+        app.tab_mut().editor.move_layer(1, 3, "move-layer")?;
+        app.tab_mut().editor.duplicate_layer(3)?;
+        app.tab_mut().editor.merge_layer_down(4)?;
+        assert_eq!(app.tab().editor.document.layer_count(), 4);
+        for _ in 0..3 {
+            assert!(app.tab_mut().editor.undo()?);
+        }
+        assert_eq!(app.tab().editor.document.layer_name(1), Some("Sombra 50"));
+        assert_eq!(
+            app.tab().editor.document.layer_name(2),
+            Some("Camada oculta")
+        );
+
+        // 2. Edit a layer: change opacity, draw a stroke, undo ONLY the stroke
+        let before_meta = app.tab().editor.layer_meta(1).unwrap();
+        let px_before_stroke = app.tab().editor.document.pixel(1, 20, 20);
+        app.tab_mut().editor.selected = 1;
+        app.tab_mut()
+            .editor
+            .set_properties(1, (before_meta.visible, 180))?;
+        app.tab_mut()
+            .editor
+            .record_properties(1, (before_meta.visible, before_meta.opacity));
+        app.tab_mut()
+            .editor
+            .begin_stroke(Pixel([250, 20, 20, 255]), 1);
+        app.tab_mut().editor.draw_to(Some((20, 20)));
+        app.tab_mut().editor.finish_stroke();
+        assert_ne!(
+            app.tab().editor.document.pixel(1, 20, 20),
+            px_before_stroke
+        );
+        app.step_history(false);
+        assert_eq!(
+            app.tab().editor.document.pixel(1, 20, 20),
+            px_before_stroke
+        );
+        assert_eq!(
+            app.tab().editor.document.layer_properties(1),
+            Some((true, 180))
+        );
+
+        // 3. Navigate and edit a detail via zoom + scroll, then return to overview
+        app.tab_mut().zoom = Some(4.0);
+        app.tab_mut().view.scroll_to = Some(vec2(40.0, 30.0));
+        let _ = ctx.run(
+            egui::RawInput {
+                screen_rect: Some(screen),
+                ..Default::default()
+            },
+            |ctx| app.ui_frame(ctx),
+        );
+        app.tab_mut()
+            .editor
+            .begin_stroke(Pixel([10, 230, 40, 255]), 1);
+        app.tab_mut().editor.draw_to(Some((35, 35)));
+        app.tab_mut().editor.finish_stroke();
+        let detail_pixel = app.tab().editor.document.pixel(1, 35, 35);
+        app.tab_mut().zoom = None;
+        let _ = ctx.run(
+            egui::RawInput {
+                screen_rect: Some(screen),
+                ..Default::default()
+            },
+            |ctx| app.ui_frame(ctx),
+        );
+
+        // 4. Export PNG and verify compositing + transparency + hidden-layer exclusion
+        let expected_composite = app.tab().editor.document.composite()?;
+        SaveOptionsDialog::new_png(export_png.clone(), false, &app.tab().editor.document, &ctx)
+            .write_to_disk()?;
+        let exported = Document::read_png(BufReader::new(File::open(&export_png)?))?;
+        assert_eq!(exported.composite()?, expected_composite);
+
+        // 5. Save, close, reopen, verify all properties, and continue editing
+        app.tab_mut().project_path = Some(saved_pdn.clone());
+        assert!(app.save_project(&ctx, false));
+        app.close_tab_at(0);
+        app.open_path(&ctx, saved_pdn);
+        assert_eq!(app.tab().editor.document.dimensions(), (96, 64));
+        assert_eq!(app.tab().editor.document.layer_count(), 4);
+        assert_eq!(app.tab().editor.document.layer_name(1), Some("Sombra 50"));
+        assert_eq!(
+            app.tab().editor.document.layer_properties(1),
+            Some((true, 180))
+        );
+        assert_eq!(
+            app.tab().editor.document.layer_properties(2),
+            Some((false, 255))
+        );
+        assert_eq!(app.tab().editor.document.pixel(1, 35, 35), detail_pixel);
+
+        app.tab_mut().editor.selected = 0;
+        let before_resume_px = app.tab().editor.document.pixel(0, 2, 2);
+        app.tab_mut()
+            .editor
+            .begin_stroke(Pixel([99, 88, 77, 255]), 1);
+        app.tab_mut().editor.draw_to(Some((2, 2)));
+        app.tab_mut().editor.finish_stroke();
+        assert_ne!(app.tab().editor.document.pixel(0, 2, 2), before_resume_px);
+        assert!(app.tab_mut().editor.undo()?);
+        assert_eq!(app.tab().editor.document.pixel(0, 2, 2), before_resume_px);
+        Ok(())
+    }
+
+    #[test]
+    #[ignore]
+    fn phase1_interactive_performance_baseline() -> io::Result<()> {
+        fn build_workload_pdn(width: u32, height: u32, layers: usize) -> io::Result<Vec<u8>> {
+            let mut doc = Document::new(width, height)?;
+            doc.fill_layer(0, Pixel([48, 84, 140, 255]))?;
+            for idx in 1..layers {
+                let l = doc.add_layer(format!("Camada {idx}"))?;
+                doc.set_layer_blend_mode(l, (idx % 4) as u8)?;
+                doc.set_layer_properties(l, idx != 2, if idx % 2 == 0 { 255 } else { 168 })?;
+                let fill = Pixel([
+                    ((idx * 53) % 256) as u8,
+                    ((idx * 97) % 256) as u8,
+                    ((idx * 37) % 256) as u8,
+                    192,
+                ]);
+                doc.fill_layer(l, fill)?;
+            }
+            let mut bytes = Vec::new();
+            doc.write_pdn(&mut bytes)?;
+            Ok(bytes)
+        }
+
+        fn stats(samples: &[f64]) -> (f64, f64) {
+            let mut sorted = samples.to_vec();
+            sorted.sort_by(f64::total_cmp);
+            let mid = sorted.len() / 2;
+            let median = if sorted.len().is_multiple_of(2) {
+                (sorted[mid - 1] + sorted[mid]) * 0.5
+            } else {
+                sorted[mid]
+            };
+            (median, *sorted.last().unwrap_or(&0.0))
+        }
+
+        fn measure_workload(name: &str, width: u32, height: u32, layers: usize) -> io::Result<()> {
+            let pdn_bytes = build_workload_pdn(width, height, layers)?;
+            let screen = Rect::from_min_size(pos2(0.0, 0.0), vec2(1280.0, 800.0));
+            let ctx = egui::Context::default();
+
+            let warmups = 2;
+            let runs = 10;
+            let mut open_ms = Vec::with_capacity(runs);
+            let mut stroke_ms = Vec::with_capacity(runs);
+            let mut nav_ms = Vec::with_capacity(runs);
+            let mut export_ms = Vec::with_capacity(runs);
+
+            for iter in 0..(warmups + runs) {
+                let t0 = std::time::Instant::now();
+                let doc = Document::read_pdn(pdn_bytes.as_slice())?;
+                let mut app = App::new(&ctx, doc);
+                let _ = ctx.run(
+                    egui::RawInput {
+                        screen_rect: Some(screen),
+                        ..Default::default()
+                    },
+                    |ctx| app.ui_frame(ctx),
+                );
+                let dt_open = t0.elapsed().as_secs_f64() * 1000.0;
+
+                let mut total_stroke = 0.0;
+                for step in 0..8_u32 {
+                    let t1 = std::time::Instant::now();
+                    app.tab_mut()
+                        .editor
+                        .begin_stroke(Pixel([220, 40, 40, 255]), 24);
+                    app.tab_mut()
+                        .editor
+                        .draw_to(Some((40 + step * 8, 40 + step * 4)));
+                    app.tab_mut().editor.finish_stroke();
+                    let _ = ctx.run(
+                        egui::RawInput {
+                            screen_rect: Some(screen),
+                            ..Default::default()
+                        },
+                        |ctx| app.ui_frame(ctx),
+                    );
+                    total_stroke += t1.elapsed().as_secs_f64() * 1000.0;
+                }
+                let dt_stroke = total_stroke / 8.0;
+
+                let mut total_nav = 0.0;
+                for step in 0..10_u32 {
+                    let t2 = std::time::Instant::now();
+                    app.tab_mut().zoom = Some(1.0 + step as f32 * 0.2);
+                    app.tab_mut().view.scroll_to = Some(vec2(step as f32 * 16.0, step as f32 * 12.0));
+                    let _ = ctx.run(
+                        egui::RawInput {
+                            screen_rect: Some(screen),
+                            ..Default::default()
+                        },
+                        |ctx| app.ui_frame(ctx),
+                    );
+                    total_nav += t2.elapsed().as_secs_f64() * 1000.0;
+                }
+                let dt_nav = total_nav / 10.0;
+
+                let t3 = std::time::Instant::now();
+                let mut png_out = Vec::new();
+                app.tab().editor.document.write_png(&mut png_out)?;
+                let dt_export = t3.elapsed().as_secs_f64() * 1000.0;
+
+                if iter >= warmups {
+                    open_ms.push(dt_open);
+                    stroke_ms.push(dt_stroke);
+                    nav_ms.push(dt_nav);
+                    export_ms.push(dt_export);
+                }
+            }
+
+            let status = std::fs::read_to_string("/proc/self/status").unwrap_or_default();
+            let vm_hwm = status
+                .lines()
+                .find(|line| line.starts_with("VmHWM:"))
+                .map_or("n/a", str::trim);
+
+            let (o_med, o_max) = stats(&open_ms);
+            let (s_med, s_max) = stats(&stroke_ms);
+            let (n_med, n_max) = stats(&nav_ms);
+            let (e_med, e_max) = stats(&export_ms);
+            println!(
+                "BENCH {name} ({width}x{height} x{layers}): open={o_med:.2}/{o_max:.2} ms | stroke={s_med:.2}/{s_max:.2} ms | nav={n_med:.2}/{n_max:.2} ms | export={e_med:.2}/{e_max:.2} ms | {vm_hwm}"
+            );
+            Ok(())
+        }
+
+        measure_workload("typical", 800, 600, 4)?;
+        measure_workload("large", 2560, 1440, 8)?;
         Ok(())
     }
 }

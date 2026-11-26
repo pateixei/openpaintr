@@ -1,3 +1,4 @@
+use super::app_settings::AaMode;
 use super::i18n::text as tr;
 use std::{collections::VecDeque, io, rc::Rc};
 
@@ -132,10 +133,15 @@ impl Mask {
 pub struct Selection {
     pub region: Region,
     pub inverted: bool,
+    pub aa_mode: AaMode,
 }
 
 impl Selection {
     pub fn new(shape: Shape, start: Point, end: Point) -> Self {
+        Self::new_with_aa(shape, start, end, AaMode::default())
+    }
+
+    pub fn new_with_aa(shape: Shape, start: Point, end: Point, aa_mode: AaMode) -> Self {
         Self {
             region: Region::Shape(
                 shape,
@@ -145,6 +151,7 @@ impl Selection {
                 ),
             ),
             inverted: false,
+            aa_mode,
         }
     }
 
@@ -177,27 +184,60 @@ impl Selection {
         Ok(Self {
             region: Region::Mask(Rc::new(mask)),
             inverted: false,
+            aa_mode: AaMode::default(),
         })
     }
 
+    #[cfg(test)]
     pub fn lasso(size: Point, path: &[Point]) -> io::Result<Self> {
+        Self::lasso_with_aa(size, path, AaMode::default())
+    }
+
+    pub fn lasso_with_aa(size: Point, path: &[Point], aa_mode: AaMode) -> io::Result<Self> {
         if path.len() < 3 {
             let point = path.first().copied().unwrap_or_default();
-            return Ok(Self::new(Shape::Rectangle, point, point));
+            return Ok(Self::new_with_aa(Shape::Rectangle, point, point, aa_mode));
         }
         let mut mask = Mask::empty(size)?;
         let mut gfx_path = GfxPath::default();
-        let mut ras = Raster::default();
         let pts: Vec<(f32, f32)> = path
             .iter()
             .map(|&(x, y)| (x as f32 + 0.5, y as f32 + 0.5))
             .collect();
-        mask.inner
-            .raster_polygon(&mut gfx_path, &mut ras, &pts, gfx::RULE_EVENODD, TM_REPLACE);
+        match aa_mode {
+            AaMode::Analytical => {
+                let mut ras = Raster::default();
+                mask.inner.raster_polygon(
+                    &mut gfx_path,
+                    &mut ras,
+                    &pts,
+                    gfx::RULE_EVENODD,
+                    TM_REPLACE,
+                );
+            }
+            AaMode::Ssaa4x4 => {
+                if let Some(&(fx, fy)) = pts.first() {
+                    gfx_path.move_f(fx * 4.0, fy * 4.0);
+                    for &(px, py) in &pts[1..] {
+                        gfx_path.line_f(px * 4.0, py * 4.0);
+                    }
+                    gfx_path.close();
+                }
+                let cov_map =
+                    super::vector_tools::rasterize_path_ssaa(&gfx_path, gfx::RULE_EVENODD, size);
+                for (pt, cov_mask) in cov_map {
+                    let cov = ((cov_mask.count_ones() * 255 + 8) / 16) as u8;
+                    if cov > 0 {
+                        mask.set(pt, cov);
+                    }
+                }
+            }
+        }
         mask.inner.optimize();
         Ok(Self {
             region: Region::Mask(Rc::new(mask)),
             inverted: false,
+            aa_mode,
         })
     }
 
@@ -221,6 +261,7 @@ impl Selection {
         Ok(Self {
             region: Region::Mask(Rc::new(mask)),
             inverted: false,
+            aa_mode: AaMode::default(),
         })
     }
 
@@ -276,7 +317,7 @@ impl Selection {
                 let mut m = Mask::empty(size)?.inner;
                 for y in min.1..=max.1 {
                     for x in min.0..=max.0 {
-                        let val = ellipse_coverage((x, y), *min, *max);
+                        let val = ellipse_coverage((x, y), *min, *max, self.aa_mode);
                         if val > 0
                             && let Some(row) = m.row_w(x as i32, y as i32)
                             && !row.is_empty()
@@ -299,6 +340,7 @@ impl Selection {
         if mode == Combine::Replace {
             return Ok(self);
         }
+        let aa_mode = self.aa_mode;
         let mut dst = match previous {
             Some(prev) => prev.to_tmask(size)?,
             None => Mask::empty(size)?.inner,
@@ -309,10 +351,17 @@ impl Selection {
         Ok(Self {
             region: Region::Mask(Rc::new(Mask { inner: dst })),
             inverted: false,
+            aa_mode,
         })
     }
 
+    #[cfg(test)]
     pub fn feather(self, size: Point, percent: u8) -> io::Result<Self> {
+        let aa_mode = self.aa_mode;
+        self.feather_with_aa(size, percent, aa_mode)
+    }
+
+    pub fn feather_with_aa(self, size: Point, percent: u8, aa_mode: AaMode) -> io::Result<Self> {
         if percent == 0 {
             return Ok(self);
         }
@@ -338,6 +387,7 @@ impl Selection {
         super::feather::expand(
             (end.0 - origin.0 + 1, end.1 - origin.1 + 1),
             radius,
+            aa_mode,
             |(x, y)| self.coverage_u8((origin.0 + x, origin.1 + y)),
             |(x, y), coverage| mask.set((origin.0 + x, origin.1 + y), coverage),
         )?;
@@ -345,6 +395,7 @@ impl Selection {
         Ok(Self {
             region: Region::Mask(Rc::new(mask)),
             inverted: false,
+            aa_mode,
         })
     }
 
@@ -426,7 +477,9 @@ impl Selection {
                     0
                 }
             }
-            Region::Shape(Shape::Ellipse, (min, max)) => ellipse_coverage(point, *min, *max),
+            Region::Shape(Shape::Ellipse, (min, max)) => {
+                ellipse_coverage(point, *min, *max, self.aa_mode)
+            }
         };
         if self.inverted { 255 - raw } else { raw }
     }
@@ -456,8 +509,8 @@ fn ellipse_contains((x, y): Point, min: Point, max: Point) -> bool {
     nx * nx + ny * ny <= 1.0
 }
 
-fn ellipse_coverage((x, y): Point, min: Point, max: Point) -> u8 {
-    use super::stroke_raster::samples;
+fn ellipse_coverage((x, y): Point, min: Point, max: Point, aa_mode: AaMode) -> u8 {
+    use super::stroke_raster::{half_plane_coverage, samples};
 
     if !(min.0..=max.0).contains(&x) || !(min.1..=max.1).contains(&y) {
         return 0;
@@ -473,6 +526,17 @@ fn ellipse_coverage((x, y): Point, min: Point, max: Point) -> u8 {
         255
     } else if nearest > 1.0 {
         0
+    } else if aa_mode == AaMode::Analytical && width > 2.0 && height > 2.0 {
+        let f = nx * nx + ny * ny - 1.0;
+        let gx = 4.0 * nx / width;
+        let gy = 4.0 * ny / height;
+        let g_len = gx.hypot(gy);
+        if g_len < 1e-12 {
+            if f <= 0.0 { 255 } else { 0 }
+        } else {
+            let cov = half_plane_coverage(gx / g_len, gy / g_len, -f / g_len);
+            (cov * 255.0).round().clamp(0.0, 255.0) as u8
+        }
     } else {
         let count = samples(|sx, sy| {
             (nx + 2.0 * sx / width).powi(2) + (ny + 2.0 * sy / height).powi(2) <= 1.0
@@ -570,18 +634,28 @@ mod tests {
     }
 
     #[test]
-    fn inverted_full_rectangle_has_empty_bounds_and_ellipse_ssaa_is_smooth() {
+    fn inverted_full_rectangle_has_empty_bounds_and_ellipse_aa_is_smooth() {
         let mut all = Selection::new(Shape::Rectangle, (0, 0), (7, 7));
         all.inverted = true;
         assert_eq!(all.bounds((8, 8)), None);
 
-        let ellipse = Selection::new(Shape::Ellipse, (0, 0), (6, 6));
-        let mut covs = Vec::new();
-        for y in 0..=6 {
-            for x in 0..=6 {
-                covs.push(ellipse.coverage_u8((x, y)));
+        for mode in AaMode::ALL {
+            let ellipse = Selection::new_with_aa(Shape::Ellipse, (0, 0), (6, 6), mode);
+            let mut covs = Vec::new();
+            for y in 0..=6 {
+                for x in 0..=6 {
+                    covs.push(ellipse.coverage_u8((x, y)));
+                }
             }
+            assert!(covs.iter().any(|&v| (1..255).contains(&v)));
+
+            let lasso = Selection::lasso_with_aa((10, 10), &[(1, 1), (8, 2), (2, 8)], mode)
+                .expect("valid lasso");
+            assert!(lasso.contains((2, 2)));
+            let feathered = Selection::new_with_aa(Shape::Rectangle, (2, 2), (5, 5), mode)
+                .feather_with_aa((10, 10), 100, mode)
+                .expect("valid feather");
+            assert!((1..255).contains(&feathered.coverage_u8((2, 6))));
         }
-        assert!(covs.iter().any(|&v| (1..255).contains(&v)));
     }
 }

@@ -1,3 +1,4 @@
+use super::app_settings::AaMode;
 use super::i18n::text as tr;
 use std::collections::HashMap;
 
@@ -323,23 +324,64 @@ pub fn rasterize_path_ssaa(path_4x: &GfxPath, rule: u32, size: Point) -> HashMap
     map
 }
 
-fn apply_ssaa_map(
+pub fn rasterize_path_analytical(path_1x: &GfxPath, rule: u32, size: Point) -> HashMap<Point, u8> {
+    let mut map = HashMap::new();
+    if size.0 == 0 || size.1 == 0 || path_1x.is_empty() {
+        return map;
+    }
+    let mut ras = Raster::default();
+    path_1x.fill_lines(&mut ras);
+    ras.fill_rows(
+        [0, 0, size.0 as i32, size.1 as i32],
+        rule,
+        &mut |y, x, covs| {
+            let py = y as u32;
+            if py >= size.1 {
+                return;
+            }
+            for (i, &cov) in covs.iter().enumerate() {
+                if cov == 0 {
+                    continue;
+                }
+                let px = (x + i as i32) as u32;
+                if px < size.0 {
+                    map.insert((px, py), cov);
+                }
+            }
+        },
+    );
+    map
+}
+
+fn rasterize_path(path: &GfxPath, rule: u32, size: Point, aa_mode: AaMode) -> HashMap<Point, u8> {
+    match aa_mode {
+        AaMode::Analytical => rasterize_path_analytical(path, rule, size),
+        AaMode::Ssaa4x4 => rasterize_path_ssaa(path, rule, size)
+            .into_iter()
+            .filter_map(|(pt, mask)| {
+                let alpha = ((mask.count_ones() * 255 + 8) / 16) as u8;
+                (alpha > 0).then_some((pt, alpha))
+            })
+            .collect(),
+    }
+}
+
+fn apply_coverage_map(
     out: &mut [Pixel],
     base_layer: &[Pixel],
     size: Point,
     selection: Option<&Selection>,
-    cov_map: &HashMap<Point, u16>,
+    cov_map: &HashMap<Point, u8>,
     blend: StrokeBlend,
     mut color_at: impl FnMut(Point) -> Pixel,
 ) {
     let w = size.0 as usize;
-    for (&pt @ (x, y), &mask) in cov_map {
+    for (&pt @ (x, y), &cov) in cov_map {
         let sel_cov = selection.map_or(255, |sel| sel.coverage_u8(pt));
         if sel_cov == 0 {
             continue;
         }
-        let ssaa_alpha = ((mask.count_ones() * 255 + 8) / 16) as u8;
-        let eff = ((u32::from(ssaa_alpha) * u32::from(sel_cov) + 127) / 255) as u8;
+        let eff = ((u32::from(cov) * u32::from(sel_cov) + 127) / 255) as u8;
         if eff == 0 {
             continue;
         }
@@ -411,10 +453,15 @@ impl LineCurveSession {
         base_layer: &[Pixel],
         size: Point,
         selection: Option<&Selection>,
+        aa_mode: AaMode,
     ) -> Vec<Pixel> {
         let mut out = base_layer.to_vec();
         let mut path = GfxPath::default();
-        let s = |v: Vec2| (v.x * 4.0, v.y * 4.0);
+        let scale = match aa_mode {
+            AaMode::Analytical => 1.0_f32,
+            AaMode::Ssaa4x4 => 4.0_f32,
+        };
+        let s = |v: Vec2| (v.x * scale, v.y * scale);
         let [p0, p1, p2, p3] = self.points;
         let (ax, ay) = s(p0);
         path.move_f(ax, ay);
@@ -435,7 +482,7 @@ impl LineCurveSession {
             }
         }
         let style = DStyle {
-            width: (f64::from(self.thickness.max(1)) * 4.0).max(0.2),
+            width: (f64::from(self.thickness.max(1)) * f64::from(scale)).max(0.2),
             pat: dash_pattern(self.dash.code()),
             join: JOIN_ROUND,
             cap0: self.start_cap.code(),
@@ -445,8 +492,8 @@ impl LineCurveSession {
             miter: 4.0,
         };
         dash_stroke(&mut path, &style);
-        let cov_map = rasterize_path_ssaa(&path, RULE_NONZERO, size);
-        apply_ssaa_map(&mut out, base_layer, size, selection, &cov_map, self.blend, |_| {
+        let cov_map = rasterize_path(&path, RULE_NONZERO, size, aa_mode);
+        apply_coverage_map(&mut out, base_layer, size, selection, &cov_map, self.blend, |_| {
             self.color
         });
         out
@@ -641,6 +688,7 @@ impl ShapeSession {
         base_layer: &[Pixel],
         size: Point,
         selection: Option<&Selection>,
+        aa_mode: AaMode,
     ) -> Vec<Pixel> {
         let mut out = base_layer.to_vec();
         let (min, max) = self.bounds;
@@ -651,14 +699,24 @@ impl ShapeSession {
             return out;
         }
 
-        let mut fill_path =
-            build_shape_path(self.kind, self.bounds, self.corner_radius, &self.freeform_pts, self.affine);
+        let scale = match aa_mode {
+            AaMode::Analytical => 1.0_f32,
+            AaMode::Ssaa4x4 => 4.0_f32,
+        };
+        let mut fill_path = build_shape_path(
+            self.kind,
+            self.bounds,
+            self.corner_radius,
+            &self.freeform_pts,
+            self.affine,
+            scale,
+        );
         let do_fill = matches!(self.fill_mode, ShapeFillMode::Fill | ShapeFillMode::Both)
             && !(self.kind == ShapeKind::Freeform && self.freeform_pts.len() < 3);
         let do_outline = matches!(self.fill_mode, ShapeFillMode::Outline | ShapeFillMode::Both);
 
         if do_fill {
-            let fill_map = rasterize_path_ssaa(&fill_path, RULE_EVENODD, size);
+            let fill_map = rasterize_path(&fill_path, RULE_EVENODD, size, aa_mode);
             let fg = if self.fill_mode == ShapeFillMode::Fill {
                 self.outline_color
             } else {
@@ -669,13 +727,13 @@ impl ShapeSession {
             } else {
                 self.outline_color
             };
-            apply_ssaa_map(&mut out, base_layer, size, selection, &fill_map, self.blend, |pt| {
+            apply_coverage_map(&mut out, base_layer, size, selection, &fill_map, self.blend, |pt| {
                 self.pattern.sample(pt.0, pt.1, fg, bg)
             });
         }
         if do_outline {
             let style = DStyle {
-                width: (f64::from(self.thickness.max(1)) * 4.0).max(0.2),
+                width: (f64::from(self.thickness.max(1)) * f64::from(scale)).max(0.2),
                 pat: dash_pattern(DASH_SOLID),
                 join: JOIN_ROUND,
                 cap0: LCAP_ROUND,
@@ -685,9 +743,9 @@ impl ShapeSession {
                 miter: 4.0,
             };
             dash_stroke(&mut fill_path, &style);
-            let stroke_map = rasterize_path_ssaa(&fill_path, RULE_NONZERO, size);
+            let stroke_map = rasterize_path(&fill_path, RULE_NONZERO, size, aa_mode);
             let base_after_fill = out.clone();
-            apply_ssaa_map(
+            apply_coverage_map(
                 &mut out,
                 &base_after_fill,
                 size,
@@ -873,13 +931,14 @@ fn build_shape_path(
     corner_radius: f32,
     freeform_pts: &[Vec2],
     affine: Affine,
+    scale: f32,
 ) -> GfxPath {
     let mut path = GfxPath::default();
     if kind == ShapeKind::Freeform {
         if let Some(&first) = freeform_pts.first() {
-            path.move_f(first.x * 4.0, first.y * 4.0);
+            path.move_f(first.x * scale, first.y * scale);
             for &pt in &freeform_pts[1..] {
-                path.line_f(pt.x * 4.0, pt.y * 4.0);
+                path.line_f(pt.x * scale, pt.y * scale);
             }
             if freeform_pts.len() >= 3 {
                 path.close();
@@ -894,7 +953,7 @@ fn build_shape_path(
     let tx = |nx: f32, ny: f32| -> (f32, f32) {
         let local = (f64::from(min.x + nx * w), f64::from(min.y + ny * h));
         let (wx, wy) = affine.forward(local);
-        (wx as f32 * 4.0, wy as f32 * 4.0)
+        (wx as f32 * scale, wy as f32 * scale)
     };
     let poly = |pts: &[(f32, f32)], closed: bool, p: &mut GfxPath| {
         if let Some(&(x, y)) = pts.first() {
@@ -1032,7 +1091,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn line_and_shape_rasterize_with_ssaa_partial_alpha() {
+    fn line_and_shape_rasterize_with_aa_partial_alpha() {
         let size = (16, 16);
         let base = vec![Pixel::default(); 256];
         let mut line = LineCurveSession::new(
@@ -1047,10 +1106,6 @@ mod tests {
             StrokeBlend::Normal,
         );
         line.points[1] = vec2(2.0, 12.0);
-        let rendered = line.render_preview(&base, size, None);
-        assert!(rendered.iter().any(|p| p.0[3] == 255));
-        assert!(rendered.iter().any(|p| (1..255).contains(&p.0[3])));
-
         let shape = ShapeSession::new(
             ShapeKind::Star5,
             vec2(1.0, 1.0),
@@ -1063,7 +1118,14 @@ mod tests {
             Pixel([0, 200, 0, 255]),
             StrokeBlend::Normal,
         );
-        let rendered_shape = shape.render_preview(&base, size, None);
-        assert!(rendered_shape.iter().any(|p| p.0[3] > 0));
+        for mode in AaMode::ALL {
+            let rendered = line.render_preview(&base, size, None, mode);
+            assert!(rendered.iter().any(|p| p.0[3] == 255));
+            assert!(rendered.iter().any(|p| (1..255).contains(&p.0[3])));
+
+            let rendered_shape = shape.render_preview(&base, size, None, mode);
+            assert!(rendered_shape.iter().any(|p| p.0[3] > 0));
+            assert!(rendered_shape.iter().any(|p| (1..255).contains(&p.0[3])));
+        }
     }
 }

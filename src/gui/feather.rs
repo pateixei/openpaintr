@@ -1,12 +1,13 @@
 use std::io;
 
-use super::{selection::Point, stroke_raster};
+use super::{app_settings::AaMode, selection::Point, stroke_raster};
 
 /// Each row first finds its nearest covered pixel horizontally. For each column,
 /// the lower envelope of the row-distance parabolas gives the nearest site.
 pub fn expand(
     (width, height): Point,
     radius: f64,
+    aa_mode: AaMode,
     coverage: impl Fn(Point) -> u8,
     mut set: impl FnMut(Point, u8),
 ) -> io::Result<()> {
@@ -86,11 +87,18 @@ pub fn expand(
                 // Estimate its footprint with an equal-area square for distance sampling.
                 let source_coverage = coverage((source_x, source_y as u32));
                 let half_side = 0.5 * (f64::from(source_coverage) / 255.0).sqrt();
-                let opacity = stroke_raster::average_samples(|sx, sy| {
-                    let edge_x = ((dx + sx).abs() - half_side).max(0.0);
-                    let edge_y = ((dy + sy).abs() - half_side).max(0.0);
-                    (1.0 - (edge_x * edge_x + edge_y * edge_y).sqrt() / radius).max(0.0)
-                });
+                let opacity = match aa_mode {
+                    AaMode::Analytical => {
+                        let edge_x = (dx.abs() - half_side).max(0.0);
+                        let edge_y = (dy.abs() - half_side).max(0.0);
+                        (1.0 - (edge_x * edge_x + edge_y * edge_y).sqrt() / radius).max(0.0)
+                    }
+                    AaMode::Ssaa4x4 => stroke_raster::average_samples(|sx, sy| {
+                        let edge_x = ((dx + sx).abs() - half_side).max(0.0);
+                        let edge_y = ((dy + sy).abs() - half_side).max(0.0);
+                        (1.0 - (edge_x * edge_x + edge_y * edge_y).sqrt() / radius).max(0.0)
+                    }),
+                };
                 value = base.max((opacity * 255.0).round() as u8);
             }
             if value > 0 {
