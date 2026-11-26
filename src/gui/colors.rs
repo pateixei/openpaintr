@@ -1,3 +1,4 @@
+use super::i18n::text as tr;
 use std::{
     f32::consts::TAU,
     fs, io,
@@ -103,9 +104,9 @@ impl PalettePreset {
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::Default => "Padrão",
-            Self::Pastel => "Pastel",
-            Self::Grayscale => "Tons de cinza",
+            Self::Default => tr("preset-default"),
+            Self::Pastel => tr("pastel"),
+            Self::Grayscale => tr("grayscale"),
         }
     }
 }
@@ -258,7 +259,7 @@ impl ColorPalette {
     }
 
     pub fn serialize_palette_txt(&self) -> String {
-        let mut out = String::from("; Paleta do OpenPaintR (AARRGGBB)\n");
+        let mut out = format!("; {} (AARRGGBB)\n", super::i18n::logical_text("palette-file-comment"));
         for [r, g, b, a] in &self.swatches {
             out.push_str(&format!("{a:02X}{r:02X}{g:02X}{b:02X}\n"));
         }
@@ -275,7 +276,7 @@ impl ColorPalette {
         if parsed.is_empty() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                "Nenhuma cor válida encontrada no arquivo de paleta",
+                tr("palette-undefined"),
             ));
         }
         self.swatches = parsed;
@@ -344,7 +345,10 @@ pub fn ribbon(
             if preview_resp.clicked() {
                 palette.editing_secondary = false;
             }
-            preview_resp.on_hover_text(format!("Cor primária: {}", format_hex(px.0)));
+            preview_resp.on_hover_text(super::i18n::format(
+                "primary-color-value",
+                &[&format_hex(px.0)],
+            ));
 
             // Middle: fill remaining space before the 26px right Chevron button
             let chevron_w = 26.0_f32;
@@ -421,9 +425,9 @@ pub fn ribbon(
                 open,
                 vec2(chevron_w, 24.0),
                 if open {
-                    "Fechar seletor de cores"
+                    tr("close-colors")
                 } else {
-                    "Abrir seletor de cores completo"
+                    tr("open-colors")
                 },
             );
             (
@@ -496,8 +500,8 @@ pub fn picker(
             draw_swatch(sec_rect, palette.secondary, false);
             draw_swatch(prim_rect, palette.primary, true);
         }
-        prim_resp.on_hover_text("Cor primária");
-        sec_resp.on_hover_text("Cor secundária");
+        prim_resp.on_hover_text(tr("primary-color"));
+        sec_resp.on_hover_text(tr("secondary-color"));
 
         if tool_icons::icon_button(
             ui,
@@ -506,7 +510,7 @@ pub fn picker(
             true,
             false,
             vec2(24.0, 24.0),
-            "Trocar cores primária e secundária (X)",
+            tr("swap-color-hint"),
         )
         .clicked()
         {
@@ -524,14 +528,18 @@ pub fn picker(
         }
         if ui
             .small_button("P/B")
-            .on_hover_text("Restaurar preto e branco")
+            .on_hover_text(tr("restore-black-white"))
             .clicked()
         {
             palette.reset();
         }
         if ui
-            .small_button(if palette.expanded { "Menos" } else { "Mais" })
-            .on_hover_text("Alternar controles numéricos RGB, HSV, Hex e Alfa")
+            .small_button(if palette.expanded {
+                tr("less")
+            } else {
+                tr("more")
+            })
+            .on_hover_text(tr("toggle-numeric-color"))
             .clicked()
         {
             palette.expanded = !palette.expanded;
@@ -639,7 +647,7 @@ pub fn picker(
         v_cur,
         None,
         |t| Hsva::new(h, s, t, 1.0).into(),
-        "Brilho",
+        tr("brightness"),
     ) {
         let (pixel, hsva) = palette.active_mut();
         hsva.v = next_v;
@@ -663,7 +671,7 @@ pub fn picker(
                 (t * 255.0).round() as u8,
             )
         },
-        "Opacidade",
+        tr("opacity"),
     ) {
         let (pixel, hsva) = palette.active_mut();
         hsva.a = next_a;
@@ -733,7 +741,11 @@ pub fn picker(
                 palette.set_active_rgba(parsed);
                 palette.hex_last = parsed;
             }
-            ui.label(RichText::new("Alfa").size(11.0).color(theme.text_muted()));
+            ui.label(
+                RichText::new(tr("alpha"))
+                    .size(11.0)
+                    .color(theme.text_muted()),
+            );
             if ui
                 .add(egui::DragValue::new(&mut alpha).speed(1).range(0..=255))
                 .changed()
@@ -750,12 +762,12 @@ pub fn picker(
         ui.spacing_mut().item_spacing.x = 3.0;
         if ui
             .small_button("+")
-            .on_hover_text("Adicionar cor atual à paleta")
+            .on_hover_text(tr("add-palette-color"))
             .clicked()
         {
             palette.add_current_swatch();
         }
-        ui.menu_button("Paleta", |ui| {
+        ui.menu_button(tr("palette"), |ui| {
             for preset in PalettePreset::ALL {
                 if ui.button(preset.label()).clicked() {
                     palette.apply_preset(preset);
@@ -763,11 +775,11 @@ pub fn picker(
                 }
             }
             ui.separator();
-            if ui.button("Carregar arquivo...").clicked() {
+            if ui.button(tr("load-file")).clicked() {
                 action = PaletteAction::LoadPalette;
                 ui.close();
             }
-            if ui.button("Salvar arquivo...").clicked() {
+            if ui.button(tr("save-file")).clicked() {
                 action = PaletteAction::SavePalette;
                 ui.close();
             }
@@ -821,7 +833,7 @@ pub fn picker(
                 } else if resp.secondary_clicked() && palette.swatches.len() > 1 {
                     remove_idx = Some(idx);
                 }
-                resp.on_hover_text("Clique: usar cor · Botão direito: remover da paleta");
+                resp.on_hover_text(tr("palette-swatch-help"));
             }
         });
     }

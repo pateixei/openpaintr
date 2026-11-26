@@ -1,3 +1,4 @@
+use super::i18n::text as tr;
 use std::{borrow::Cow, io};
 
 use openpaintr::Pixel;
@@ -66,7 +67,7 @@ impl Clipboard {
                 {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidData,
-                        "imagem da área de transferência inválida",
+                        tr("clipboard-image-invalid"),
                     ));
                 }
                 let pixels: Vec<_> = image
@@ -92,7 +93,7 @@ impl Clipboard {
         let local = self
             .local
             .as_ref()
-            .ok_or_else(|| io::Error::other("Área de transferência sem imagem acessível"))?;
+            .ok_or_else(|| io::Error::other(tr("clipboard-image-missing")))?;
         Ok(Image {
             size: local.size,
             origin: local.origin,

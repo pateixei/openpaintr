@@ -1,3 +1,4 @@
+use super::i18n::text as tr;
 use std::io;
 
 use eframe::egui::{self, Vec2, vec2};
@@ -54,10 +55,10 @@ pub fn menu_check_item(ui: &mut egui::Ui, checked: bool, label: &str, hint: &str
 
 impl App {
     pub fn phase2_menus(&mut self, ui: &mut egui::Ui) {
-        ui.menu_button("Editar", |ui| self.edit_menu(ui));
-        ui.menu_button("Exibir", |ui| self.view_menu(ui));
-        ui.menu_button("Imagem", |ui| self.image_menu(ui));
-        ui.menu_button("Camadas", |ui| self.layer_menu(ui));
+        ui.menu_button(tr("edit"), |ui| self.edit_menu(ui));
+        ui.menu_button(tr("view"), |ui| self.view_menu(ui));
+        ui.menu_button(tr("image"), |ui| self.image_menu(ui));
+        ui.menu_button(tr("layers"), |ui| self.layer_menu(ui));
     }
 
     pub fn shortcut_item(&mut self, ui: &mut egui::Ui, command: Command, enabled: bool) {
@@ -82,7 +83,7 @@ impl App {
         let selected = self.tab().editor.selection.is_some();
         self.shortcut_item(ui, CopyMask, selected);
         ui.add_enabled_ui(self.clipboard.mask.is_some(), |ui| {
-            ui.menu_button("Colar máscara", |ui| {
+            ui.menu_button(tr("paste-mask"), |ui| {
                 self.shortcut_item(ui, PasteMask, true);
                 for mode in super::selection::Combine::ALL.into_iter().skip(1) {
                     if ui.button(mode.label()).clicked() {
@@ -180,10 +181,7 @@ impl App {
         let size = (max.0 - min.0 + 1, max.1 - min.1 + 1);
         let limit = ctx.input(|input| input.max_texture_side);
         if size.0.max(size.1) as usize > limit {
-            self.report(
-                Err(io::Error::other("Seleção maior que o limite da tela")),
-                "",
-            );
+            self.report(Err(io::Error::other(tr("selection-too-large"))), "");
             return;
         }
         let selected = self.tab().editor.selected;
@@ -208,7 +206,7 @@ impl App {
                 }
             })
         };
-        self.install_geometry(result, selected, "Recortar à seleção");
+        self.install_geometry(result, selected, "crop-selection");
     }
 
     pub(super) fn install_geometry(
@@ -260,9 +258,9 @@ impl App {
                 self.report(
                     Ok(()),
                     if system {
-                        "Imagem copiada"
+                        tr("image-copied")
                     } else {
-                        "Imagem copiada para a área de transferência interna"
+                        tr("image-copied-internally")
                     },
                 );
             }
@@ -299,7 +297,7 @@ impl App {
                 let tab = self.tab_mut();
                 tab.editor.set_selection(
                     Some(Selection::new(Shape::Rectangle, image.origin, end)),
-                    "Colar",
+                    "paste",
                 );
                 tab.transform = Some(Transform::with_floating(affine, (min, max), image));
                 tab.editor.mark_full_refresh();
@@ -339,14 +337,12 @@ impl App {
             let (width, height) = image.size;
             let limit = ctx.input(|input| input.max_texture_side).min(8192);
             if width.max(height) as usize > limit {
-                return Err(io::Error::other(
-                    "Imagem da área de transferência maior que o limite da tela",
-                ));
+                return Err(io::Error::other(tr("clipboard-image-too-large")));
             }
-            let mut doc = Document::new(width, height)?;
+            let mut doc = super::new_document(width, height)?;
             let mut pixels = image.pixels;
             doc.swap_layer_pixels(0, &mut pixels)?;
-            self.open_in_new_tab(doc, "Imagem colada".into(), None);
+            self.open_in_new_tab(doc, super::i18n::logical_text("image-pasted").into(), None);
             self.tab_mut().editor.mark_new_content();
             Ok(())
         })();
@@ -372,7 +368,7 @@ impl App {
             Ok(mask) => self
                 .tab_mut()
                 .editor
-                .set_selection(Some(mask), "Colar máscara"),
+                .set_selection(Some(mask), "paste-mask"),
             Err(error) => self.report(Err(error), ""),
         }
     }
@@ -381,7 +377,7 @@ impl App {
         use Command::*;
         if matches!(command, Deselect) && self.has_active_session() {
             self.commit_active_session();
-            self.tab_mut().editor.set_selection(None, "Limpar seleção");
+            self.tab_mut().editor.set_selection(None, "deselect");
             return;
         }
         match command {
@@ -432,7 +428,7 @@ impl App {
             CopyMask => self.copy_mask(),
             PasteMask => self.paste_mask(super::selection::Combine::Replace),
             SelectAll => self.tab_mut().editor.select_all(),
-            Deselect => self.tab_mut().editor.set_selection(None, "Limpar seleção"),
+            Deselect => self.tab_mut().editor.set_selection(None, "deselect"),
             Invert => self.tab_mut().editor.invert_selection(),
             Fill | Erase => self.paint_selection(command == Erase),
             MovePixels | FreeTransform if self.tab().editor.selection.is_some() => {
@@ -495,8 +491,11 @@ impl App {
                 self.install_geometry(result, selected, operation.label());
             }
             Flatten => {
-                let result = self.tab().editor.document.flattened();
-                self.install_geometry(result, 0, "Achatar imagem");
+                let result = self.tab().editor.document.flattened().and_then(|mut document| {
+                    document.set_layer_name(0, super::i18n::logical_text("merged-image"))?;
+                    Ok(document)
+                });
+                self.install_geometry(result, 0, "flatten");
             }
             AddLayer => {
                 self.finish_opacity();
@@ -528,10 +527,10 @@ impl App {
                 let count = self.tab().editor.document.layer_count();
                 let selected = self.tab().editor.selected;
                 let (to, label) = match command {
-                    MoveLayerTop => (count - 1, "Mover camada para o topo"),
-                    MoveLayerUp => ((selected + 1).min(count - 1), "Subir camada"),
-                    MoveLayerDown => (selected.saturating_sub(1), "Descer camada"),
-                    _ => (0, "Mover camada para a base"),
+                    MoveLayerTop => (count - 1, "layer-to-top"),
+                    MoveLayerUp => ((selected + 1).min(count - 1), "layer-up"),
+                    MoveLayerDown => (selected.saturating_sub(1), "layer-down"),
+                    _ => (0, "layer-to-bottom"),
                 };
                 let result = self.tab_mut().editor.move_layer(selected, to, label);
                 self.finish_geometry(result);
@@ -614,12 +613,12 @@ impl App {
             let limit = ctx.input(|input| input.max_texture_side).min(8192) as u32;
             let response = egui::Modal::new(egui::Id::new("dimensoes")).show(ctx, |ui| {
                 ui.heading(if dialog.kind == SizeKind::Resize {
-                    "Redimensionar"
+                    tr("resize")
                 } else {
-                    "Tamanho da tela"
+                    tr("canvas-size")
                 });
                 ui.horizontal(|ui| {
-                    ui.label("Largura");
+                    ui.label(tr("width"));
                     let w = ui
                         .add(
                             egui::DragValue::new(&mut dialog.dimensions.0)
@@ -627,7 +626,7 @@ impl App {
                                 .suffix(" px"),
                         )
                         .changed();
-                    ui.label("Altura");
+                    ui.label(tr("height"));
                     let h = ui
                         .add(
                             egui::DragValue::new(&mut dialog.dimensions.1)
@@ -650,10 +649,10 @@ impl App {
                     }
                 });
                 if dialog.kind == SizeKind::Resize {
-                    ui.checkbox(&mut dialog.proportional, "Manter proporção");
+                    ui.checkbox(&mut dialog.proportional, tr("maintain-aspect"));
                     resampling_selector(ui, &mut dialog.method);
                 } else {
-                    ui.label("Âncora");
+                    ui.label(tr("anchor"));
                     for row in 0..3 {
                         ui.horizontal(|ui| {
                             for col in 0..3 {
@@ -669,8 +668,8 @@ impl App {
                 }
                 ui.horizontal(|ui| {
                     (
-                        ui.button("Aplicar").clicked(),
-                        ui.button("Cancelar").clicked(),
+                        ui.button(tr("apply")).clicked(),
+                        ui.button(tr("cancel")).clicked(),
                     )
                 })
                 .inner
@@ -681,13 +680,13 @@ impl App {
                 let (result, label) = if dialog.kind == SizeKind::Resize {
                     (
                         geometry::resize(&self.tab().editor.document, size, dialog.method),
-                        "Redimensionar",
+                        "resize",
                     )
                 } else {
                     let shift = anchor_offset(dialog.original, size, dialog.anchor);
                     (
                         geometry::canvas_size(&self.tab().editor.document, size, shift),
-                        "Tamanho da tela",
+                        "canvas-size",
                     )
                 };
                 self.install_geometry(result, selected, label);

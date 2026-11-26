@@ -1,3 +1,4 @@
+use super::i18n::text as tr;
 use std::io;
 
 use openpaintr::{Document, Pixel};
@@ -17,9 +18,9 @@ impl Resampling {
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::Nearest => "Vizinho mais próximo",
-            Self::Antialiased => "Vizinho mais próximo com antialiasing",
-            Self::Bilinear => "Bilinear",
+            Self::Nearest => tr("nearest"),
+            Self::Antialiased => tr("nearest-aa"),
+            Self::Bilinear => tr("bilinear"),
         }
     }
 }
@@ -36,11 +37,11 @@ pub enum Orthogonal {
 impl Orthogonal {
     pub fn label(self) -> &'static str {
         match self {
-            Self::FlipX => "Inverter horizontalmente",
-            Self::FlipY => "Inverter verticalmente",
-            Self::Clockwise => "Girar 90° horário",
-            Self::Counterclockwise => "Girar 90° anti-horário",
-            Self::HalfTurn => "Girar 180°",
+            Self::FlipX => "flip-horizontal",
+            Self::FlipY => "flip-vertical",
+            Self::Clockwise => "rotate-clockwise",
+            Self::Counterclockwise => "rotate-counterclockwise",
+            Self::HalfTurn => "rotate-half",
         }
     }
 

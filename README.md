@@ -42,6 +42,12 @@ The **Imagem** (Image) menu crops to a selection, resizes images or the canvas, 
 
 Open **Configurações → Atalhos de teclado e mouse** (Settings → Keyboard and Mouse Shortcuts). Select **Paint.NET** (the default) or **Adobe**, or duplicate a profile to customize keyboard and mouse bindings. Enter combinations such as `Ctrl+Shift+B` or `Ctrl+Wheel`, separate alternatives with `;`, and leave a field empty to remove its binding. Select **Salvar perfis** (Save Profiles) to apply changes. Profiles and the active profile are stored in `atalhos.json` next to the executable. If the directory is read-only, the application reports the save error. [JSON Schema](docs/atalhos.schema.json)
 
+### Interface language
+
+Choose a language under **Settings → Language**. The change takes effect immediately and is saved in `$XDG_CONFIG_HOME/openpaintr/language.json` (defaults to `~/.config/openpaintr/language.json`). The first launch uses a supported system language or falls back to English. The bundled catalogs cover English, French, Spanish, German, Brazilian Portuguese, Italian, Russian, Arabic, Simplified Chinese, and Japanese. Arabic labels read right to left within the existing editor layout. System file-picker controls use the desktop's language.
+
+At startup, OpenPaintR scans `translations/` in the working directory and beside the executable. Catalogs beside the executable take precedence. To add a language, save a flat JSON object under a lowercase locale filename such as `nl-nl.json` and restart. Use `language-name` to set its name in the language menu. Use [`en-us.json`](translations/en-us.json) as the key reference and keep numbered placeholders such as `{0}` intact. Missing messages in an additional language fall back to English.
+
 ## Core and command line
 
 The core provides an 8-bit-per-channel RGBA canvas, canvas-sized layers, pixel editing, and bottom-to-top compositing across all 14 Paint.NET blend modes, accelerated by SIMD kernels from `jflib-gfx`. Each layer has a name, visibility, opacity, and a blend mode. The demo generates a 320 × 240 image with two overlapping shapes on a transparent background.

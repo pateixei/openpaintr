@@ -1,3 +1,4 @@
+use super::i18n::text as tr;
 use std::{
     collections::{HashMap, VecDeque},
     io, mem,
@@ -101,7 +102,7 @@ impl Edit {
             | Self::LayerRemoved { label, .. }
             | Self::LayerMoved { label, .. }
             | Self::LayerMetadata { label, .. } => label,
-            Self::LayerMergedDown { .. } => "Mesclar com a camada abaixo",
+            Self::LayerMergedDown { .. } => "merge-layer-down",
         }
     }
 
@@ -288,10 +289,12 @@ pub enum StrokeSpec {
 impl StrokeSpec {
     fn label(&self) -> &'static str {
         match self {
-            Self::Paint { is_eraser: true, .. } => "Borracha",
-            Self::Paint { .. } => "Pincel",
-            Self::Recolor { .. } => "Recolorir",
-            Self::Clone { .. } => "Carimbo de clonagem",
+            Self::Paint {
+                is_eraser: true, ..
+            } => "eraser",
+            Self::Paint { .. } => "brush",
+            Self::Recolor { .. } => "recolor",
+            Self::Clone { .. } => "clone-stamp",
         }
     }
 
@@ -581,13 +584,13 @@ impl Editor {
 
     pub fn add_layer(&mut self) -> io::Result<()> {
         self.finish_stroke();
-        let name = format!("Camada {}", self.document.layer_count() + 1);
+        let name = super::i18n::format_logical("layer-number", &[&(self.document.layer_count() + 1)]);
         let index = self.document.add_layer(&name)?;
         let prev_selected = self.selected;
         self.selected = index;
         self.mark_full_refresh();
         self.record(Edit::LayerInserted {
-            label: "Adicionar camada",
+            label: "add-layer",
             index,
             data: None,
             prev_selected,
@@ -603,7 +606,7 @@ impl Editor {
         self.selected = index.min(self.document.layer_count() - 1);
         self.mark_full_refresh();
         self.record(Edit::LayerRemoved {
-            label: "Excluir camada",
+            label: "delete-layer",
             index,
             data: Some(removed),
             prev_selected,
@@ -614,11 +617,13 @@ impl Editor {
     pub fn duplicate_layer(&mut self, index: usize) -> io::Result<()> {
         self.finish_stroke();
         let prev_selected = self.selected;
-        let target = self.document.duplicate_layer(index)?;
+        let target = self
+            .document
+            .duplicate_layer_with_name(index, |name| super::i18n::format_logical("layer-copy", &[&name]))?;
         self.selected = target;
         self.mark_full_refresh();
         self.record(Edit::LayerInserted {
-            label: "Duplicar camada",
+            label: "duplicate-layer",
             index: target,
             data: None,
             prev_selected,
@@ -682,7 +687,7 @@ impl Editor {
             self.selected = index;
             self.mark_full_refresh();
             self.record(Edit::LayerInserted {
-                label: "Importar camada",
+                label: "import-layer",
                 index,
                 data: None,
                 prev_selected,
@@ -713,7 +718,7 @@ impl Editor {
             next.insert_layer_data(next.layer_count(), data)?;
         }
         let target_layer = next.layer_count() - 1;
-        self.replace_geometry(next, target_layer, "Importar camada")
+        self.replace_geometry(next, target_layer, "import-layer")
     }
 
     pub fn select_first_layer(&mut self) {
@@ -754,9 +759,9 @@ impl Editor {
             blend: after.blend,
         };
         let label = if prev.visible != after.visible {
-            "Visibilidade"
+            "visibility"
         } else {
-            "Opacidade"
+            "opacity"
         };
         self.record_layer_meta(layer, prev, label);
     }
@@ -783,7 +788,7 @@ impl Editor {
                 (0, 0),
                 (width - 1, height - 1),
             )),
-            "Selecionar tudo",
+            "select-all",
         );
     }
 
@@ -793,7 +798,7 @@ impl Editor {
             return;
         };
         selection.inverted = !selection.inverted;
-        self.set_selection(Some(selection), "Inverter seleção");
+        self.set_selection(Some(selection), "invert-selection");
     }
 
     pub fn fill_selection(&mut self, color: Pixel, label: &'static str) -> io::Result<bool> {
@@ -917,7 +922,7 @@ impl Editor {
             })?;
         }
         if changed {
-            self.replace_layer_pixels(pixels, self.selection.clone(), "Balde de tinta")?;
+            self.replace_layer_pixels(pixels, self.selection.clone(), "bucket")?;
         }
         Ok(changed)
     }
@@ -932,11 +937,11 @@ impl Editor {
         let source = self
             .document
             .layer_pixels(self.selected)
-            .ok_or_else(|| io::Error::other("camada ativa inexistente"))?;
+            .ok_or_else(|| io::Error::other(tr("missing-active-layer")))?;
         if after_pixels.len() != source.len() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                "tamanho de prévia inválido",
+                tr("invalid-preview-size"),
             ));
         }
         let mut pixels = Vec::new();
@@ -1030,7 +1035,7 @@ impl Editor {
         let (min, max) = match self.selection.as_ref() {
             Some(selection) => selection
                 .bounds(size)
-                .ok_or_else(|| io::Error::other("Seleção vazia"))?,
+                .ok_or_else(|| io::Error::other(tr("empty-selection")))?,
             None => ((0, 0), (size.0 - 1, size.1 - 1)),
         };
         let composite = flattened.then(|| self.document.composite()).transpose()?;
@@ -1071,7 +1076,7 @@ impl Editor {
 
     pub fn cut_image(&mut self) -> io::Result<bool> {
         if self.selection.is_some() {
-            self.edit_selection(Pixel::default(), "Recortar")
+            self.edit_selection(Pixel::default(), "cut")
         } else {
             let size = self.document.dimensions();
             let mut pixels = Vec::new();
@@ -1079,7 +1084,7 @@ impl Editor {
                 .try_reserve_exact(size.0 as usize * size.1 as usize)
                 .map_err(io::Error::other)?;
             pixels.resize(size.0 as usize * size.1 as usize, Pixel::default());
-            self.replace_layer_pixels(pixels, None, "Recortar")
+            self.replace_layer_pixels(pixels, None, "cut")
                 .map(|()| true)
         }
     }
@@ -1112,14 +1117,14 @@ impl Editor {
             }
         }
         if new_layer {
-            let index = self.document.add_layer("Colagem")?;
+            let index = self.document.add_layer(super::i18n::logical_text("paste-in-progress"))?;
             self.document.swap_layer_pixels(index, &mut pixels)?;
             let prev_selected = self.selected;
             self.selected = index;
             let prev_selection = self.selection.take();
             self.mark_full_refresh();
             self.record(Edit::LayerInserted {
-                label: "Colar em nova camada",
+                label: "paste-new-layer",
                 index,
                 data: None,
                 prev_selected,
@@ -1127,7 +1132,7 @@ impl Editor {
             });
             Ok(())
         } else {
-            self.replace_layer_pixels(pixels, None, "Colar")
+            self.replace_layer_pixels(pixels, None, "paste")
         }
     }
 
@@ -1167,7 +1172,7 @@ impl Editor {
 
     pub fn transform_mask(&mut self, transform: Affine) -> io::Result<()> {
         if let Some(selection) = self.transformed_mask(transform)? {
-            self.set_selection(Some(selection), "Transformar seleção");
+            self.set_selection(Some(selection), "transform-selection");
         }
         Ok(())
     }
@@ -1303,7 +1308,7 @@ impl Editor {
     ) -> io::Result<()> {
         let pixels = self.preview_floating(floating, transform, method)?;
         let selection = self.transformed_mask(transform)?;
-        self.replace_layer_pixels(pixels, selection, "Colar")
+        self.replace_layer_pixels(pixels, selection, "paste")
     }
 
     pub fn apply_transform(
@@ -1326,9 +1331,9 @@ impl Editor {
             pixels,
             selection,
             if use_selection {
-                "Transformar pixels"
+                "transform-pixels"
             } else {
-                "Girar/Zoom da camada"
+                "layer-rotate-zoom"
             },
         )
     }
@@ -1837,7 +1842,7 @@ mod tests {
         assert_eq!(editor.selected, 1);
 
         editor.move_layer(1, 2, "Mover camada para o topo")?;
-        assert_eq!(editor.document.layer_name(2), Some("Fundo (cópia)"));
+        assert_eq!(editor.document.layer_name(2), Some("Fundo (copy)"));
 
         let before = editor.layer_meta(2).unwrap();
         let mut next = before.clone();

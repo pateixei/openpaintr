@@ -9,3 +9,4 @@
 - Follow the [roadmap](docs/roadmap.md) for acceptance criteria and delivery order.
 - When a roadmap item meets its acceptance criteria, summarize the result and verification evidence and request the project owner's explicit sign-off. Keep the item open in the roadmap and hold its GitHub update until sign-off arrives. After approval, mark the item complete in the roadmap and push the approved changes to GitHub.
 - Keep repository documentation and GitHub project descriptions in English.
+- Use stable translation keys for every new or changed user-facing text, label, or feature. Update every bundled catalog in `translations/` in the same change. The bundled languages are English, French, Spanish, German, Brazilian Portuguese, Italian, Russian, Arabic, Simplified Chinese, and Japanese. Verify matching keys and placeholders across the catalogs before requesting sign-off.

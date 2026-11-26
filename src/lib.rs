@@ -4,9 +4,11 @@ use std::io::{self, Write};
 
 use gfx::blendmode::{BM_NORMAL, BM_OPAC_SHIFT, bm_row_inplace};
 
+mod diagnostic;
 mod pdn_io;
 mod png_io;
 
+pub use diagnostic::Diagnostic;
 pub use png_io::{PngCompression, PngDepth};
 
 pub const BLEND_MODES: [&str; 14] = [
@@ -113,7 +115,11 @@ pub struct Document {
 impl Document {
     pub fn new(width: u32, height: u32) -> io::Result<Self> {
         if width == 0 || height == 0 {
-            return Err(io::Error::new(io::ErrorKind::InvalidInput, "tela vazia"));
+            return Err(crate::Diagnostic::io(
+                io::ErrorKind::InvalidInput,
+                "error.empty-canvas",
+                "tela vazia",
+            ));
         }
         let mut document = Self {
             width,
@@ -158,8 +164,9 @@ impl Document {
     pub fn swap_layer_pixels(&mut self, layer: usize, pixels: &mut Vec<Pixel>) -> io::Result<()> {
         let layer = self.layer_mut(layer)?;
         if layer.pixels.len() != pixels.len() {
-            return Err(io::Error::new(
+            return Err(crate::Diagnostic::io(
                 io::ErrorKind::InvalidInput,
+                "error.invalid-layer-size",
                 "tamanho de camada inválido",
             ));
         }
@@ -174,11 +181,16 @@ impl Document {
         mut sample: impl FnMut(&[Pixel], u32, u32) -> Pixel,
     ) -> io::Result<Self> {
         if width == 0 || height == 0 {
-            return Err(io::Error::new(io::ErrorKind::InvalidInput, "tela vazia"));
+            return Err(crate::Diagnostic::io(
+                io::ErrorKind::InvalidInput,
+                "error.empty-canvas",
+                "tela vazia",
+            ));
         }
         if u64::from(width) * u64::from(height) > pdn_io::MAX_PIXELS / self.layers.len() as u64 {
-            return Err(io::Error::new(
+            return Err(crate::Diagnostic::io(
                 io::ErrorKind::InvalidInput,
+                "error.total-layer-limit",
                 "limite total de pixels das camadas excedido",
             ));
         }
@@ -253,8 +265,9 @@ impl Document {
     pub fn set_layer_name(&mut self, layer: usize, name: impl Into<String>) -> io::Result<()> {
         let name = name.into();
         if name.trim().is_empty() || name.contains('\0') {
-            return Err(io::Error::new(
+            return Err(crate::Diagnostic::io(
                 io::ErrorKind::InvalidInput,
+                "error.invalid-layer-name",
                 "nome de camada inválido",
             ));
         }
@@ -264,8 +277,9 @@ impl Document {
 
     pub fn set_layer_blend_mode(&mut self, layer: usize, blend: u8) -> io::Result<()> {
         if blend > img_pdn::PDNB_XOR {
-            return Err(io::Error::new(
+            return Err(crate::Diagnostic::io(
                 io::ErrorKind::InvalidInput,
+                "error.invalid-blend-mode",
                 "modo de mesclagem inválido",
             ));
         }
@@ -276,7 +290,13 @@ impl Document {
     pub fn clone_layer_data(&self, layer: usize) -> io::Result<LayerData> {
         self.layers
             .get(layer)
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "camada inexistente"))?
+            .ok_or_else(|| {
+                crate::Diagnostic::io(
+                    io::ErrorKind::InvalidInput,
+                    "error.layer-missing",
+                    "camada inexistente",
+                )
+            })?
             .to_data()
     }
 
@@ -290,8 +310,9 @@ impl Document {
 
     pub fn insert_layer_data(&mut self, index: usize, data: LayerData) -> io::Result<()> {
         if index > self.layers.len() {
-            return Err(io::Error::new(
+            return Err(crate::Diagnostic::io(
                 io::ErrorKind::InvalidInput,
+                "error.invalid-layer-position",
                 "posição de camada inválida",
             ));
         }
@@ -299,8 +320,9 @@ impl Document {
         let pixel_count = u64::from(self.width) * u64::from(self.height);
         let next_layers = (self.layers.len() + 1) as u64;
         if pixel_count > pdn_io::MAX_PIXELS / next_layers {
-            return Err(io::Error::new(
+            return Err(crate::Diagnostic::io(
                 io::ErrorKind::InvalidInput,
+                "error.total-layer-limit",
                 "limite total de pixels das camadas excedido",
             ));
         }
@@ -310,14 +332,16 @@ impl Document {
 
     pub fn remove_layer(&mut self, index: usize) -> io::Result<LayerData> {
         if self.layers.len() <= 1 {
-            return Err(io::Error::new(
+            return Err(crate::Diagnostic::io(
                 io::ErrorKind::InvalidInput,
+                "error.last-layer",
                 "o documento deve manter ao menos uma camada",
             ));
         }
         if index >= self.layers.len() {
-            return Err(io::Error::new(
+            return Err(crate::Diagnostic::io(
                 io::ErrorKind::InvalidInput,
+                "error.layer-missing",
                 "camada inexistente",
             ));
         }
@@ -334,8 +358,16 @@ impl Document {
     }
 
     pub fn duplicate_layer(&mut self, index: usize) -> io::Result<usize> {
+        self.duplicate_layer_with_name(index, |name| format!("{name} (cópia)"))
+    }
+
+    pub fn duplicate_layer_with_name(
+        &mut self,
+        index: usize,
+        name: impl FnOnce(&str) -> String,
+    ) -> io::Result<usize> {
         let mut copy = self.clone_layer_data(index)?;
-        copy.name = format!("{} (cópia)", copy.name);
+        copy.name = name(&copy.name);
         copy.pdn_background = 0;
         let target = index + 1;
         self.insert_layer_data(target, copy)?;
@@ -344,8 +376,9 @@ impl Document {
 
     pub fn move_layer(&mut self, from: usize, to: usize) -> io::Result<()> {
         if from >= self.layers.len() || to >= self.layers.len() {
-            return Err(io::Error::new(
+            return Err(crate::Diagnostic::io(
                 io::ErrorKind::InvalidInput,
+                "error.invalid-layer-index",
                 "índice de camada inválido",
             ));
         }
@@ -359,8 +392,9 @@ impl Document {
 
     pub fn merge_layer_down(&mut self, index: usize) -> io::Result<(LayerData, LayerData)> {
         if index == 0 || index >= self.layers.len() {
-            return Err(io::Error::new(
+            return Err(crate::Diagnostic::io(
                 io::ErrorKind::InvalidInput,
+                "error.no-layer-below",
                 "não há camada abaixo para mesclar",
             ));
         }
@@ -416,8 +450,9 @@ impl Document {
             || data.name.contains('\0')
             || data.blend > img_pdn::PDNB_XOR
         {
-            return Err(io::Error::new(
+            return Err(crate::Diagnostic::io(
                 io::ErrorKind::InvalidInput,
+                "error.incompatible-layer-data",
                 "dados de camada incompatíveis",
             ));
         }
@@ -463,8 +498,9 @@ impl Document {
 
     pub fn set_pixel(&mut self, layer: usize, x: u32, y: u32, pixel: Pixel) -> io::Result<()> {
         if x >= self.width || y >= self.height {
-            return Err(io::Error::new(
+            return Err(crate::Diagnostic::io(
                 io::ErrorKind::InvalidInput,
+                "error.pixel-outside",
                 "pixel fora da tela",
             ));
         }
@@ -479,19 +515,28 @@ impl Document {
 
     pub fn composite_rect(&self, min: (u32, u32), max: (u32, u32)) -> io::Result<Vec<Pixel>> {
         if min.0 > max.0 || min.1 > max.1 || max.0 >= self.width || max.1 >= self.height {
-            return Err(io::Error::new(
+            return Err(crate::Diagnostic::io(
                 io::ErrorKind::InvalidInput,
+                "error.invalid-composite-region",
                 "região de composição inválida",
             ));
         }
         let rect_w = (max.0 - min.0 + 1) as usize;
         let rect_h = (max.1 - min.1 + 1) as usize;
-        let count = rect_w
-            .checked_mul(rect_h)
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "região muito grande"))?;
-        let byte_len = count
-            .checked_mul(4)
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "região muito grande"))?;
+        let count = rect_w.checked_mul(rect_h).ok_or_else(|| {
+            crate::Diagnostic::io(
+                io::ErrorKind::InvalidInput,
+                "error.region-too-large",
+                "região muito grande",
+            )
+        })?;
+        let byte_len = count.checked_mul(4).ok_or_else(|| {
+            crate::Diagnostic::io(
+                io::ErrorKind::InvalidInput,
+                "error.region-too-large",
+                "região muito grande",
+            )
+        })?;
         let mut dst = Vec::new();
         dst.try_reserve_exact(byte_len)
             .map_err(|error| io::Error::new(io::ErrorKind::OutOfMemory, error))?;
@@ -544,9 +589,13 @@ impl Document {
     }
 
     fn layer_mut(&mut self, layer: usize) -> io::Result<&mut Layer> {
-        self.layers
-            .get_mut(layer)
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "camada inexistente"))
+        self.layers.get_mut(layer).ok_or_else(|| {
+            crate::Diagnostic::io(
+                io::ErrorKind::InvalidInput,
+                "error.layer-missing",
+                "camada inexistente",
+            )
+        })
     }
 
     fn allocate_pixels(&self) -> io::Result<Vec<Pixel>> {

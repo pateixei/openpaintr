@@ -1,3 +1,4 @@
+use super::i18n::text as tr;
 use std::{
     fs::File,
     io::{self, BufReader, BufWriter, Write},
@@ -160,7 +161,7 @@ impl SaveOptionsDialog {
                 document.write_png_with_options(&mut self.encoded, depth, compression)
             }
         };
-        self.error = res.err().map(|e| e.to_string());
+        self.error = res.err().as_ref().map(super::i18n::error_message);
         if let Ok((w, h, mut pixels)) = document.composite_thumbnail(160) {
             if let SaveFormat::Png {
                 depth: depth @ (PngDepth::Rgb24White | PngDepth::Rgb24Black),
@@ -197,8 +198,8 @@ impl SaveOptionsDialog {
         let response = egui::Modal::new(egui::Id::new("opcoes_salvamento")).show(ctx, |ui| {
             ui.set_width((ctx.content_rect().width() - 40.0).clamp(320.0, 480.0));
             let title = match self.format {
-                SaveFormat::Pdn { .. } => "Opções de salvamento (.pdn)",
-                SaveFormat::Png { .. } => "Opções de exportação (.png)",
+                SaveFormat::Pdn { .. } => tr("pdn-save-options"),
+                SaveFormat::Png { .. } => tr("png-export-options"),
             };
             ui.heading(title);
             ui.weak(self.path.display().to_string());
@@ -227,12 +228,18 @@ impl SaveOptionsDialog {
                     );
                 }
                 ui.vertical(|ui| {
-                    ui.label(format!("Dimensões: {w} × {h} px"));
+                    ui.label(super::i18n::format("dimensions", &[&w, &h]));
                     if matches!(self.format, SaveFormat::Pdn { .. }) {
-                        ui.label(format!("Camadas: {}", document.layer_count()));
+                        ui.label(super::i18n::format(
+                            "layer-count",
+                            &[&document.layer_count()],
+                        ));
                     }
                     if self.error.is_none() {
-                        ui.label(format!("Tamanho estimado: {}", format_bytes(self.encoded.len())));
+                        ui.label(super::i18n::format(
+                            "estimated-size",
+                            &[&format_bytes(self.encoded.len())],
+                        ));
                     }
                 });
             });
@@ -240,30 +247,37 @@ impl SaveOptionsDialog {
             ui.separator();
             match &mut self.format {
                 SaveFormat::Pdn { effort } => {
-                    ui.label("Compressão das camadas (DEFLATE)");
+                    ui.label(tr("layer-compression"));
                     if ui
-                        .add(egui::Slider::new(effort, 1..=9).text("Nível"))
+                        .add(egui::Slider::new(effort, 1..=9).text(tr("compression-level")))
                         .changed()
                     {
                         changed = true;
                     }
                 }
                 SaveFormat::Png { depth, compression } => {
-                    egui::ComboBox::from_label("Profundidade de cor")
-                        .selected_text(depth.label())
+                    egui::ComboBox::new("color-depth", tr("color-depth"))
+                        .selected_text(depth_label(*depth))
                         .show_ui(ui, |ui| {
                             for option in PngDepth::ALL {
-                                if ui.selectable_value(depth, option, option.label()).changed() {
+                                if ui
+                                    .selectable_value(depth, option, depth_label(option))
+                                    .changed()
+                                {
                                     changed = true;
                                 }
                             }
                         });
-                    egui::ComboBox::from_label("Compressão PNG")
-                        .selected_text(compression.label())
+                    egui::ComboBox::new("png-compression", tr("png-compression"))
+                        .selected_text(compression_label(*compression))
                         .show_ui(ui, |ui| {
                             for option in PngCompression::ALL {
                                 if ui
-                                    .selectable_value(compression, option, option.label())
+                                    .selectable_value(
+                                        compression,
+                                        option,
+                                        compression_label(option),
+                                    )
                                     .changed()
                                 {
                                     changed = true;
@@ -274,10 +288,7 @@ impl SaveOptionsDialog {
             }
 
             if self.needs_overwrite_confirm {
-                ui.checkbox(
-                    &mut self.overwrite_confirmed,
-                    "O arquivo já existe no destino — confirmar substituição",
-                );
+                ui.checkbox(&mut self.overwrite_confirmed, tr("confirm-overwrite"));
             }
             if let Some(error) = &self.error {
                 ui.colored_label(ui.visuals().error_fg_color, error);
@@ -286,10 +297,10 @@ impl SaveOptionsDialog {
                 let save = ui
                     .add_enabled(
                         self.error.is_none() && self.overwrite_confirmed,
-                        egui::Button::new("Salvar"),
+                        egui::Button::new(tr("save")),
                     )
                     .clicked();
-                let cancel = ui.button("Cancelar").clicked();
+                let cancel = ui.button(tr("cancel")).clicked();
                 (save, cancel)
             })
             .inner
@@ -340,15 +351,18 @@ impl LayerPropertiesDialog {
         let mut live_changed = false;
         let response = egui::Modal::new(egui::Id::new("propriedades_camada")).show(ctx, |ui| {
             ui.set_width((ctx.content_rect().width() - 40.0).clamp(280.0, 380.0));
-            ui.heading("Propriedades da camada");
+            ui.heading(tr("layer-properties"));
             ui.separator();
             ui.horizontal(|ui| {
-                ui.label("Nome");
+                ui.label(tr("name"));
                 if ui.text_edit_singleline(&mut self.draft.name).changed() {
                     self.error = None;
                 }
             });
-            if ui.checkbox(&mut self.draft.visible, "Visível").changed() {
+            if ui
+                .checkbox(&mut self.draft.visible, tr("visible"))
+                .changed()
+            {
                 live_changed = true;
             }
             if ui
@@ -361,18 +375,22 @@ impl LayerPropertiesDialog {
                                 .ok()
                                 .map(|value| value * 255.0 / 100.0)
                         })
-                        .text("Opacidade"),
+                        .text(tr("opacity")),
                 )
                 .changed()
             {
                 live_changed = true;
             }
-            egui::ComboBox::from_label("Modo de mesclagem")
-                .selected_text(BLEND_MODES[usize::from(self.draft.blend).min(13)])
+            egui::ComboBox::new("blend-mode", tr("blend-mode"))
+                .selected_text(super::i18n::blend_name(self.draft.blend))
                 .show_ui(ui, |ui| {
-                    for (idx, name) in BLEND_MODES.iter().enumerate() {
+                    for mode in 0..BLEND_MODES.len() as u8 {
                         if ui
-                            .selectable_value(&mut self.draft.blend, idx as u8, *name)
+                            .selectable_value(
+                                &mut self.draft.blend,
+                                mode,
+                                super::i18n::blend_name(mode),
+                            )
                             .changed()
                         {
                             live_changed = true;
@@ -382,13 +400,13 @@ impl LayerPropertiesDialog {
             if let Some(error) = &self.error {
                 ui.colored_label(ui.visuals().error_fg_color, error);
             }
-            ui.horizontal(|ui| (ui.button("OK").clicked(), ui.button("Cancelar").clicked()))
+            ui.horizontal(|ui| (ui.button("OK").clicked(), ui.button(tr("cancel")).clicked()))
                 .inner
         });
         let (ok, cancel) = response.inner;
         if ok {
             if self.draft.name.trim().is_empty() || self.draft.name.contains('\0') {
-                self.error = Some("Informe um nome válido para a camada.".into());
+                self.error = Some(tr("invalid-layer-name").into());
                 LayerDialogAction::Open(live_changed)
             } else {
                 LayerDialogAction::Confirm
@@ -415,4 +433,21 @@ fn format_bytes(bytes: usize) -> String {
     } else {
         format!("{:.2} MiB", bytes as f64 / (1024.0 * 1024.0))
     }
+}
+
+fn depth_label(depth: PngDepth) -> &'static str {
+    tr(match depth {
+        PngDepth::Rgba32 => "png-rgba32",
+        PngDepth::Rgb24White => "png-rgb-white",
+        PngDepth::Rgb24Black => "png-rgb-black",
+    })
+}
+
+fn compression_label(compression: PngCompression) -> &'static str {
+    tr(match compression {
+        PngCompression::None => "compression-none",
+        PngCompression::Fast => "compression-fast",
+        PngCompression::Balanced => "compression-balanced",
+        PngCompression::High => "compression-high",
+    })
 }

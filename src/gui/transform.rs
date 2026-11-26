@@ -1,3 +1,4 @@
+use super::i18n::text as tr;
 use eframe::egui::{self, Color32, CursorIcon, PointerButton, Rect, Stroke, Vec2, vec2};
 
 use super::{
@@ -24,9 +25,9 @@ pub enum TransformOutcome {
 impl TransformTarget {
     pub fn short_label(self) -> &'static str {
         match self {
-            Self::Mask => "Mover seleção",
-            Self::Pixels => "Mover pixels",
-            Self::Layer => "Transformar camada",
+            Self::Mask => tr("move-selection"),
+            Self::Pixels => tr("move-pixels"),
+            Self::Layer => tr("transform-layer"),
         }
     }
 }

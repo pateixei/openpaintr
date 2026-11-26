@@ -6,7 +6,7 @@ description = "Editor raster em Rust para Linux"
 
 [features]
 default = ["gui"]
-gui = ["dep:eframe", "dep:winit", "dep:rfd", "dep:tempfile", "dep:arboard", "dep:serde", "dep:serde_json"]
+gui = ["dep:eframe", "dep:winit", "dep:rfd", "dep:tempfile", "dep:arboard", "dep:serde", "dep:serde_json", "dep:arabic_reshaper", "dep:unicode-bidi"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"], optional = true }
@@ -23,3 +23,5 @@ jflib-img-pdn = "0.2.1"
 # Use the host standard library for JFLib's runtime.
 jflib-plat = { version = "0.2.1", features = ["std"] }
 jflib-rt = "0.2.1"
+arabic_reshaper = { version = "0.4.2", optional = true }
+unicode-bidi = { version = "0.3.18", optional = true }

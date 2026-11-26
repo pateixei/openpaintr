@@ -1,3 +1,4 @@
+use super::i18n::text as tr;
 use openpaintr::Pixel;
 
 use super::stroke_raster;
@@ -14,8 +15,8 @@ impl AlphaMatchMode {
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::Premultiplied => "Alfa pré-multiplicado",
-            Self::Straight => "Alfa direto",
+            Self::Premultiplied => tr("premultiplied-alpha"),
+            Self::Straight => tr("straight-alpha"),
         }
     }
 }
@@ -32,8 +33,8 @@ impl StrokeBlend {
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::Normal => "Mesclar",
-            Self::Overwrite => "Sobrescrever",
+            Self::Normal => tr("composite-stroke"),
+            Self::Overwrite => tr("overwrite"),
         }
     }
 }
@@ -65,14 +66,14 @@ impl FillPattern {
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::Solid => "Cor sólida",
-            Self::Horizontal => "Linhas horizontais",
-            Self::Vertical => "Linhas verticais",
-            Self::DiagonalUp => "Diagonal /",
-            Self::DiagonalDown => "Diagonal \\",
-            Self::Checker => "Xadrez",
-            Self::Dots => "Pontos",
-            Self::Grid => "Grade",
+            Self::Solid => tr("solid-color"),
+            Self::Horizontal => tr("horizontal-lines"),
+            Self::Vertical => tr("vertical-lines"),
+            Self::DiagonalUp => tr("diagonal-up"),
+            Self::DiagonalDown => tr("diagonal-down"),
+            Self::Checker => tr("checkerboard"),
+            Self::Dots => tr("dots"),
+            Self::Grid => tr("grid"),
         }
     }
 

@@ -65,9 +65,10 @@ impl Document {
         let mut bytes = Vec::new();
         input.take(MAX_FILE_BYTES + 1).read_to_end(&mut bytes)?;
         if bytes.len() as u64 > MAX_FILE_BYTES {
-            return Err(pdn_error(
+            return Err(crate::Diagnostic::io(
                 io::ErrorKind::InvalidData,
-                "arquivo maior que 256 MiB",
+                "error.pdn-file-size",
+                "PDN: arquivo maior que 256 MiB",
             ));
         }
         let options = ImgDec {
@@ -76,19 +77,29 @@ impl Document {
             ..ImgDec::default()
         };
         let source = img_pdn::decode(&bytes, Some(&options)).map_err(|code| {
-            let (kind, message) = match code {
-                ERR_UNSUPPORTED => (io::ErrorKind::Unsupported, "variante não suportada"),
+            let (kind, key, message) = match code {
+                ERR_UNSUPPORTED => (
+                    io::ErrorKind::Unsupported,
+                    "error.pdn-variant",
+                    "PDN: variante não suportada",
+                ),
                 ERR_LIMIT => (
                     io::ErrorKind::InvalidData,
-                    "limite de decodificação excedido",
+                    "error.pdn-decode-limit",
+                    "PDN: limite de decodificação excedido",
                 ),
-                ERR_NOMEM => (io::ErrorKind::OutOfMemory, "memória insuficiente"),
+                ERR_NOMEM => (
+                    io::ErrorKind::OutOfMemory,
+                    "error.pdn-out-of-memory",
+                    "PDN: memória insuficiente",
+                ),
                 _ => (
                     io::ErrorKind::InvalidData,
-                    "arquivo inválido, incompleto ou incompatível",
+                    "error.pdn-invalid",
+                    "PDN: arquivo inválido, incompleto ou incompatível",
                 ),
             };
-            pdn_error(kind, message)
+            crate::Diagnostic::io(kind, key, message)
         })?;
         drop(bytes);
 
@@ -105,16 +116,18 @@ impl Document {
             },
         };
         if document.width == 0 || document.height == 0 || source.layers.is_empty() {
-            return Err(pdn_error(
+            return Err(crate::Diagnostic::io(
                 io::ErrorKind::InvalidData,
-                "documento sem imagem ou camadas",
+                "error.pdn-empty",
+                "PDN: documento sem imagem ou camadas",
             ));
         }
         let pixel_count = u64::from(document.width) * u64::from(document.height);
         if pixel_count > MAX_PIXELS / source.layers.len() as u64 {
-            return Err(pdn_error(
+            return Err(crate::Diagnostic::io(
                 io::ErrorKind::InvalidData,
-                "limite de pixels das camadas excedido",
+                "error.pdn-layer-limit",
+                "PDN: limite de pixels das camadas excedido",
             ));
         }
         let row_bytes = document.width as usize * 4;
@@ -126,9 +139,10 @@ impl Document {
                 || stride < row_bytes
                 || surface.px.len() / stride < document.height as usize
             {
-                return Err(pdn_error(
+                return Err(crate::Diagnostic::io(
                     io::ErrorKind::InvalidData,
-                    "dimensões de camada inválidas",
+                    "error.pdn-layer-size",
+                    "PDN: dimensões de camada inválidas",
                 ));
             }
             let name = layer.name.strip_suffix(&[0]).unwrap_or(&layer.name);
@@ -165,18 +179,20 @@ impl Document {
     pub fn write_pdn_with_effort(&self, mut output: impl Write, effort: u32) -> io::Result<()> {
         let pixel_count = u64::from(self.width) * u64::from(self.height);
         if pixel_count > MAX_PIXELS / self.layers.len() as u64 {
-            return Err(pdn_error(
+            return Err(crate::Diagnostic::io(
                 io::ErrorKind::InvalidInput,
-                "limite de pixels das camadas excedido",
+                "error.pdn-layer-limit",
+                "PDN: limite de pixels das camadas excedido",
             ));
         }
 
         let mut surfaces = Vec::new();
         for layer in &self.layers {
             if layer.name.contains('\0') || layer.blend > img_pdn::PDNB_XOR {
-                return Err(pdn_error(
+                return Err(crate::Diagnostic::io(
                     io::ErrorKind::InvalidInput,
-                    "nome ou modo de mesclagem incompatível",
+                    "error.pdn-layer-name-mode",
+                    "PDN: nome ou modo de mesclagem incompatível",
                 ));
             }
             let mut px = Vec::new();
@@ -223,24 +239,26 @@ impl Document {
             ..Default::default()
         };
         let bytes = img_pdn::encode(&source, Some(&options)).map_err(|code| match code {
-            ERR_NOMEM => pdn_error(io::ErrorKind::OutOfMemory, "memória insuficiente ao gravar"),
-            _ => pdn_error(
+            ERR_NOMEM => crate::Diagnostic::io(
+                io::ErrorKind::OutOfMemory,
+                "error.pdn-save-memory",
+                "PDN: memória insuficiente ao gravar",
+            ),
+            _ => crate::Diagnostic::io(
                 io::ErrorKind::InvalidInput,
-                "não foi possível codificar o documento",
+                "error.pdn-encode",
+                "PDN: não foi possível codificar o documento",
             ),
         })?;
         if bytes.len() as u64 > MAX_FILE_BYTES {
-            return Err(pdn_error(
+            return Err(crate::Diagnostic::io(
                 io::ErrorKind::InvalidInput,
-                "arquivo maior que 256 MiB",
+                "error.pdn-file-size",
+                "PDN: arquivo maior que 256 MiB",
             ));
         }
         output.write_all(&bytes)
     }
-}
-
-fn pdn_error(kind: io::ErrorKind, message: &str) -> io::Error {
-    io::Error::new(kind, format!("PDN: {message}"))
 }
 
 #[cfg(test)]

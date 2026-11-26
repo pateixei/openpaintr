@@ -1,3 +1,4 @@
+use super::i18n::text as tr;
 use eframe::egui::{self, Color32, Pos2, Rect, Vec2, pos2, vec2};
 use openpaintr::Document;
 
@@ -12,9 +13,9 @@ pub enum Unit {
 impl Unit {
     pub fn label(self) -> &'static str {
         match self {
-            Self::Pixels => "Pixels",
-            Self::Inches => "Polegadas",
-            Self::Centimeters => "Centímetros",
+            Self::Pixels => tr("pixels"),
+            Self::Inches => tr("inches"),
+            Self::Centimeters => tr("centimeters"),
         }
     }
 

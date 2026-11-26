@@ -1,3 +1,4 @@
+use super::i18n::text as tr;
 use std::collections::{BTreeMap, HashMap};
 
 use eframe::egui::{self, Key, Modifiers, PointerButton};
@@ -77,6 +78,10 @@ macro_rules! mouse_actions {
             }
 
             pub fn label(self) -> &'static str {
+                tr(self.label_key())
+            }
+
+            fn label_key(self) -> &'static str {
                 match self { $(Self::$action => $label),* }
             }
 
@@ -95,85 +100,85 @@ macro_rules! mouse_actions {
 }
 
 mouse_actions! {
-    Pan: "canvas.pan", "Tela · panorâmica temporária", Canvas, ["Middle", "Space+Left", "Space+Right"], ["Space+Left"];
-    CanvasCornerResize: "canvas.corner_resize", "Canto inferior direito · redimensionar tela", CanvasCorner, ["Ctrl+DoubleLeft"], ["Ctrl+DoubleLeft"];
-    WheelVertical: "canvas.scroll_vertical", "Tela · rolar verticalmente", Canvas, ["Wheel"], ["Wheel"];
-    WheelHorizontal: "canvas.scroll_horizontal", "Tela · rolar horizontalmente", Canvas, ["Shift+Wheel", "WheelX"], ["Ctrl+Wheel", "WheelX"];
-    WheelZoom: "canvas.wheel_zoom", "Tela · zoom pela roda", Canvas, ["Ctrl+Wheel"], ["Alt+Wheel"];
-    WheelStrokeSize: "canvas.wheel_stroke_size", "Tela · espessura do traço pela roda", Canvas, ["Ctrl+Shift+Wheel"], ["Ctrl+Shift+Wheel"];
-    TempZoomIn: "canvas.temp_zoom_in", "Tela · ampliar temporariamente", Canvas, [], ["Ctrl+Space+Left"];
-    TempZoomOut: "canvas.temp_zoom_out", "Tela · reduzir temporariamente", Canvas, [], ["Alt+Space+Left"];
-    Hand: "hand.pan", "Mão · mover a tela", Hand, ["Left", "Right"], ["Left"];
-    ZoomIn: "zoom.in", "Zoom · ampliar", Zoom, ["Left"], ["Left"];
-    ZoomOut: "zoom.out", "Zoom · reduzir", Zoom, ["Right"], ["Alt+Left"];
-    ZoomFit: "hand.double_fit", "Ícone da Mão · ajustar à janela", ToolbarHand, [], ["DoubleLeft"];
-    ZoomActual: "zoom.double_actual", "Ícone do Zoom · tamanho real", ToolbarZoom, [], ["DoubleLeft"];
-    LayerProperties: "layer.mouse_properties", "Linha da camada · abrir propriedades", LayerRow, ["DoubleLeft"], [];
-    LayerUp: "layer.mouse_move_up", "Botão subir camada · subir um nível", LayerUpButton, ["Left"], ["Left"];
-    LayerTop: "layer.mouse_move_top", "Botão subir camada · mover ao topo", LayerUpButton, ["Ctrl+Left"], [];
-    LayerDown: "layer.mouse_move_down", "Botão descer camada · descer um nível", LayerDownButton, ["Left"], ["Left"];
-    LayerBottom: "layer.mouse_move_bottom", "Botão descer camada · mover à base", LayerDownButton, ["Ctrl+Left"], [];
-    DrawPrimary: "brush.primary", "Pincel · cor primária", Brush, ["Left"], ["Left"];
-    DrawSecondary: "brush.secondary", "Pincel · cor secundária", Brush, ["Right"], [];
-    BrushSampleColor: "brush.sample_color", "Pincel · amostrar cor temporariamente", Brush, ["Ctrl+Left", "Ctrl+Right"], ["Alt+Left"];
-    PencilPrimary: "pencil.primary", "Lápis · cor primária", Pencil, ["Left"], ["Left"];
-    PencilSecondary: "pencil.secondary", "Lápis · cor secundária", Pencil, ["Right"], [];
-    BucketPrimary: "bucket.primary", "Balde · preencher com a cor primária", Bucket, ["Left"], ["Left"];
-    BucketSecondary: "bucket.secondary", "Balde · preencher com a cor secundária", Bucket, ["Right"], [];
-    BucketGlobalPrimary: "bucket.global_primary", "Balde global · cor primária", Bucket, ["Shift+Left"], [];
-    BucketGlobalSecondary: "bucket.global_secondary", "Balde global · cor secundária", Bucket, ["Shift+Right"], [];
-    BrushOptions: "brush.options", "Pincel · opções de tamanho", Brush, [], ["Right"];
-    Erase: "eraser.erase", "Borracha · apagar", Eraser, ["Left", "Right"], ["Left"];
-    EraserOptions: "eraser.options", "Borracha · opções de tamanho", Eraser, [], ["Right"];
-    EyedropperPrimary: "eyedropper.primary", "Conta-gotas · definir cor primária", Eyedropper, ["Left"], ["Left"];
-    EyedropperSecondary: "eyedropper.secondary", "Conta-gotas · definir cor secundária", Eyedropper, ["Right"], ["Shift+Left"];
-    EyedropperComposite: "eyedropper.composite", "Conta-gotas · amostrar composição", Eyedropper, ["Ctrl+Left", "Ctrl+Right"], ["Alt+Left"];
-    ClonePaint: "clone.paint", "Carimbo · pintar da origem", CloneStamp, ["Left", "Right"], ["Left"];
-    CloneSetAnchor: "clone.set_anchor", "Carimbo · definir origem", CloneStamp, ["Ctrl+Left"], ["Alt+Left"];
-    RecolorPrimary: "recolor.primary", "Recolorir · substituir para primária", Recolor, ["Left"], ["Left"];
-    RecolorSecondary: "recolor.secondary", "Recolorir · substituir para secundária", Recolor, ["Right"], [];
-    RecolorSample: "recolor.sample", "Recolorir · amostrar cor-alvo", Recolor, ["Ctrl+Left", "Ctrl+Right"], ["Alt+Left"];
-    GradientPrimary: "gradient.primary", "Gradiente · primária para secundária", Gradient, ["Left"], ["Left"];
-    GradientSecondary: "gradient.secondary", "Gradiente · secundária para primária", Gradient, ["Right"], [];
-    LinePrimary: "line.primary", "Linha/Curva · cor primária", LineCurve, ["Left"], ["Left"];
-    LineSecondary: "line.secondary", "Linha/Curva · cor secundária", LineCurve, ["Right"], [];
-    ShapePrimary: "shape.primary", "Formas · cor primária", ShapeTool, ["Left"], ["Left"];
-    ShapeSecondary: "shape.secondary", "Formas · cor secundária", ShapeTool, ["Right"], [];
-    TextPlace: "text.place", "Texto · posicionar cursor", Text, ["Left"], ["Left"];
-    ZoomMarquee: "zoom.marquee", "Zoom · arrastar região", ZoomDrag, ["Left"], [];
-    ZoomScrubby: "zoom.scrubby", "Zoom · arrastar contínuo", ZoomDrag, [], ["Left"];
-    Select: "selection.create", "Seleção · modo atual", Selection, ["Left", "Right"], ["Left"];
-    SelectionRelocate: "selection.relocate", "Seleção · mover contorno durante criação", SelectionDrag, ["Right"], ["Space+Left"];
-    SelectSquare: "selection.constrain", "Seleção · quadrado ou círculo", Selection, ["Shift+Left", "Shift+Right"], [];
-    SelectAdd: "selection.add", "Seleção · adicionar", Selection, ["Ctrl+Left"], ["Shift+Left"];
-    SelectSubtract: "selection.subtract", "Seleção · subtrair", Selection, ["Alt+Left"], ["Alt+Left"];
-    SelectXor: "selection.xor", "Seleção · XOR", Selection, ["Ctrl+Right"], [];
-    SelectIntersect: "selection.intersect", "Seleção · intersectar", Selection, ["Alt+Right"], ["Alt+Shift+Left"];
-    Wand: "wand.sample", "Varinha · modo atual", Wand, ["Left"], ["Left"];
-    WandAdd: "wand.add", "Varinha · adicionar", Wand, ["Ctrl+Left"], ["Shift+Left"];
-    WandSubtract: "wand.subtract", "Varinha · subtrair", Wand, ["Alt+Left"], ["Alt+Left"];
-    WandXor: "wand.xor", "Varinha · XOR", Wand, ["Ctrl+Right"], [];
-    WandIntersect: "wand.intersect", "Varinha · intersectar", Wand, ["Alt+Right"], ["Alt+Shift+Left"];
-    WandGlobal: "wand.global", "Varinha global · modo atual", Wand, ["Shift+Left"], [];
-    WandGlobalAdd: "wand.global_add", "Varinha global · adicionar", Wand, ["Ctrl+Shift+Left"], [];
-    WandGlobalSubtract: "wand.global_subtract", "Varinha global · subtrair", Wand, ["Alt+Shift+Left"], [];
-    WandGlobalXor: "wand.global_xor", "Varinha global · XOR", Wand, ["Ctrl+Shift+Right"], [];
-    WandGlobalIntersect: "wand.global_intersect", "Varinha global · intersectar", Wand, ["Alt+Shift+Right"], [];
-    ColorPrimary: "colors.primary", "Roda de cores · cor primária", ColorWheel, ["Left"], ["Left"];
-    ColorSecondary: "colors.secondary", "Roda de cores · cor secundária", ColorWheel, ["Right"], [];
-    ColorHue: "colors.hue_only", "Roda de cores · somente matiz", ColorWheel, ["Ctrl+Left"], [];
-    ColorSaturation: "colors.saturation_only", "Roda de cores · somente saturação", ColorWheel, ["Alt+Left"], [];
-    ColorSnap: "colors.snap_hue", "Roda de cores · matiz em passos de 15°", ColorWheel, ["Shift+Left"], [];
-    ColorSnapHue: "colors.snap_hue_only", "Roda de cores · somente matiz em passos de 15°", ColorWheel, ["Ctrl+Shift+Left"], [];
-    Move: "transform.move", "Transformação · mover", TransformMove, ["Left"], ["Left"];
-    MoveCopy: "transform.move_copy", "Transformação · mover uma cópia", TransformMove, ["Ctrl+Left"], ["Alt+Left"];
-    Scale: "transform.scale", "Alça · redimensionar", TransformScale, ["Left"], ["Left"];
-    ScaleProportional: "transform.scale_proportional", "Alça · preservar proporção", TransformScale, ["Shift+Left"], ["Shift+Left"];
-    ScaleCentered: "transform.scale_centered", "Alça · redimensionar pelo centro", TransformScale, ["Alt+Left"], ["Alt+Left"];
-    ScaleBoth: "transform.scale_centered_proportional", "Alça · redimensionar pelo centro e preservar proporção", TransformScale, ["Alt+Shift+Left"], ["Alt+Shift+Left"];
-    Rotate: "transform.rotate", "Alça de rotação · girar", TransformRotate, ["Left", "Right"], ["Left"];
-    RotateSnap: "transform.rotate_snap", "Alça de rotação · girar em passos de 15°", TransformRotate, ["Shift+Left", "Shift+Right"], ["Shift+Left"];
-    RotateCopy: "transform.rotate_copy", "Alça de rotação · girar uma cópia", TransformRotate, ["Ctrl+Left", "Ctrl+Right"], [];
+    Pan: "canvas.pan", "mouse.canvas.pan", Canvas, ["Middle", "Space+Left", "Space+Right"], ["Space+Left"];
+    CanvasCornerResize: "canvas.corner_resize", "mouse.canvas.corner_resize", CanvasCorner, ["Ctrl+DoubleLeft"], ["Ctrl+DoubleLeft"];
+    WheelVertical: "canvas.scroll_vertical", "mouse.canvas.scroll_vertical", Canvas, ["Wheel"], ["Wheel"];
+    WheelHorizontal: "canvas.scroll_horizontal", "mouse.canvas.scroll_horizontal", Canvas, ["Shift+Wheel", "WheelX"], ["Ctrl+Wheel", "WheelX"];
+    WheelZoom: "canvas.wheel_zoom", "mouse.canvas.wheel_zoom", Canvas, ["Ctrl+Wheel"], ["Alt+Wheel"];
+    WheelStrokeSize: "canvas.wheel_stroke_size", "mouse.canvas.wheel_stroke_size", Canvas, ["Ctrl+Shift+Wheel"], ["Ctrl+Shift+Wheel"];
+    TempZoomIn: "canvas.temp_zoom_in", "mouse.canvas.temp_zoom_in", Canvas, [], ["Ctrl+Space+Left"];
+    TempZoomOut: "canvas.temp_zoom_out", "mouse.canvas.temp_zoom_out", Canvas, [], ["Alt+Space+Left"];
+    Hand: "hand.pan", "mouse.hand.pan", Hand, ["Left", "Right"], ["Left"];
+    ZoomIn: "zoom.in", "mouse.zoom.in", Zoom, ["Left"], ["Left"];
+    ZoomOut: "zoom.out", "mouse.zoom.out", Zoom, ["Right"], ["Alt+Left"];
+    ZoomFit: "hand.double_fit", "mouse.hand.double_fit", ToolbarHand, [], ["DoubleLeft"];
+    ZoomActual: "zoom.double_actual", "mouse.zoom.double_actual", ToolbarZoom, [], ["DoubleLeft"];
+    LayerProperties: "layer.mouse_properties", "mouse.layer.mouse_properties", LayerRow, ["DoubleLeft"], [];
+    LayerUp: "layer.mouse_move_up", "mouse.layer.mouse_move_up", LayerUpButton, ["Left"], ["Left"];
+    LayerTop: "layer.mouse_move_top", "mouse.layer.mouse_move_top", LayerUpButton, ["Ctrl+Left"], [];
+    LayerDown: "layer.mouse_move_down", "mouse.layer.mouse_move_down", LayerDownButton, ["Left"], ["Left"];
+    LayerBottom: "layer.mouse_move_bottom", "mouse.layer.mouse_move_bottom", LayerDownButton, ["Ctrl+Left"], [];
+    DrawPrimary: "brush.primary", "mouse.brush.primary", Brush, ["Left"], ["Left"];
+    DrawSecondary: "brush.secondary", "mouse.brush.secondary", Brush, ["Right"], [];
+    BrushSampleColor: "brush.sample_color", "mouse.brush.sample_color", Brush, ["Ctrl+Left", "Ctrl+Right"], ["Alt+Left"];
+    PencilPrimary: "pencil.primary", "mouse.pencil.primary", Pencil, ["Left"], ["Left"];
+    PencilSecondary: "pencil.secondary", "mouse.pencil.secondary", Pencil, ["Right"], [];
+    BucketPrimary: "bucket.primary", "mouse.bucket.primary", Bucket, ["Left"], ["Left"];
+    BucketSecondary: "bucket.secondary", "mouse.bucket.secondary", Bucket, ["Right"], [];
+    BucketGlobalPrimary: "bucket.global_primary", "mouse.bucket.global_primary", Bucket, ["Shift+Left"], [];
+    BucketGlobalSecondary: "bucket.global_secondary", "mouse.bucket.global_secondary", Bucket, ["Shift+Right"], [];
+    BrushOptions: "brush.options", "mouse.brush.options", Brush, [], ["Right"];
+    Erase: "eraser.erase", "mouse.eraser.erase", Eraser, ["Left", "Right"], ["Left"];
+    EraserOptions: "eraser.options", "mouse.eraser.options", Eraser, [], ["Right"];
+    EyedropperPrimary: "eyedropper.primary", "mouse.eyedropper.primary", Eyedropper, ["Left"], ["Left"];
+    EyedropperSecondary: "eyedropper.secondary", "mouse.eyedropper.secondary", Eyedropper, ["Right"], ["Shift+Left"];
+    EyedropperComposite: "eyedropper.composite", "mouse.eyedropper.composite", Eyedropper, ["Ctrl+Left", "Ctrl+Right"], ["Alt+Left"];
+    ClonePaint: "clone.paint", "mouse.clone.paint", CloneStamp, ["Left", "Right"], ["Left"];
+    CloneSetAnchor: "clone.set_anchor", "mouse.clone.set_anchor", CloneStamp, ["Ctrl+Left"], ["Alt+Left"];
+    RecolorPrimary: "recolor.primary", "mouse.recolor.primary", Recolor, ["Left"], ["Left"];
+    RecolorSecondary: "recolor.secondary", "mouse.recolor.secondary", Recolor, ["Right"], [];
+    RecolorSample: "recolor.sample", "mouse.recolor.sample", Recolor, ["Ctrl+Left", "Ctrl+Right"], ["Alt+Left"];
+    GradientPrimary: "gradient.primary", "mouse.gradient.primary", Gradient, ["Left"], ["Left"];
+    GradientSecondary: "gradient.secondary", "mouse.gradient.secondary", Gradient, ["Right"], [];
+    LinePrimary: "line.primary", "mouse.line.primary", LineCurve, ["Left"], ["Left"];
+    LineSecondary: "line.secondary", "mouse.line.secondary", LineCurve, ["Right"], [];
+    ShapePrimary: "shape.primary", "mouse.shape.primary", ShapeTool, ["Left"], ["Left"];
+    ShapeSecondary: "shape.secondary", "mouse.shape.secondary", ShapeTool, ["Right"], [];
+    TextPlace: "text.place", "mouse.text.place", Text, ["Left"], ["Left"];
+    ZoomMarquee: "zoom.marquee", "mouse.zoom.marquee", ZoomDrag, ["Left"], [];
+    ZoomScrubby: "zoom.scrubby", "mouse.zoom.scrubby", ZoomDrag, [], ["Left"];
+    Select: "selection.create", "mouse.selection.create", Selection, ["Left", "Right"], ["Left"];
+    SelectionRelocate: "selection.relocate", "mouse.selection.relocate", SelectionDrag, ["Right"], ["Space+Left"];
+    SelectSquare: "selection.constrain", "mouse.selection.constrain", Selection, ["Shift+Left", "Shift+Right"], [];
+    SelectAdd: "selection.add", "mouse.selection.add", Selection, ["Ctrl+Left"], ["Shift+Left"];
+    SelectSubtract: "selection.subtract", "mouse.selection.subtract", Selection, ["Alt+Left"], ["Alt+Left"];
+    SelectXor: "selection.xor", "mouse.selection.xor", Selection, ["Ctrl+Right"], [];
+    SelectIntersect: "selection.intersect", "mouse.selection.intersect", Selection, ["Alt+Right"], ["Alt+Shift+Left"];
+    Wand: "wand.sample", "mouse.wand.sample", Wand, ["Left"], ["Left"];
+    WandAdd: "wand.add", "mouse.wand.add", Wand, ["Ctrl+Left"], ["Shift+Left"];
+    WandSubtract: "wand.subtract", "mouse.wand.subtract", Wand, ["Alt+Left"], ["Alt+Left"];
+    WandXor: "wand.xor", "mouse.wand.xor", Wand, ["Ctrl+Right"], [];
+    WandIntersect: "wand.intersect", "mouse.wand.intersect", Wand, ["Alt+Right"], ["Alt+Shift+Left"];
+    WandGlobal: "wand.global", "mouse.wand.global", Wand, ["Shift+Left"], [];
+    WandGlobalAdd: "wand.global_add", "mouse.wand.global_add", Wand, ["Ctrl+Shift+Left"], [];
+    WandGlobalSubtract: "wand.global_subtract", "mouse.wand.global_subtract", Wand, ["Alt+Shift+Left"], [];
+    WandGlobalXor: "wand.global_xor", "mouse.wand.global_xor", Wand, ["Ctrl+Shift+Right"], [];
+    WandGlobalIntersect: "wand.global_intersect", "mouse.wand.global_intersect", Wand, ["Alt+Shift+Right"], [];
+    ColorPrimary: "colors.primary", "mouse.colors.primary", ColorWheel, ["Left"], ["Left"];
+    ColorSecondary: "colors.secondary", "mouse.colors.secondary", ColorWheel, ["Right"], [];
+    ColorHue: "colors.hue_only", "mouse.colors.hue_only", ColorWheel, ["Ctrl+Left"], [];
+    ColorSaturation: "colors.saturation_only", "mouse.colors.saturation_only", ColorWheel, ["Alt+Left"], [];
+    ColorSnap: "colors.snap_hue", "mouse.colors.snap_hue", ColorWheel, ["Shift+Left"], [];
+    ColorSnapHue: "colors.snap_hue_only", "mouse.colors.snap_hue_only", ColorWheel, ["Ctrl+Shift+Left"], [];
+    Move: "transform.move", "mouse.transform.move", TransformMove, ["Left"], ["Left"];
+    MoveCopy: "transform.move_copy", "mouse.transform.move_copy", TransformMove, ["Ctrl+Left"], ["Alt+Left"];
+    Scale: "transform.scale", "mouse.transform.scale", TransformScale, ["Left"], ["Left"];
+    ScaleProportional: "transform.scale_proportional", "mouse.transform.scale_proportional", TransformScale, ["Shift+Left"], ["Shift+Left"];
+    ScaleCentered: "transform.scale_centered", "mouse.transform.scale_centered", TransformScale, ["Alt+Left"], ["Alt+Left"];
+    ScaleBoth: "transform.scale_centered_proportional", "mouse.transform.scale_centered_proportional", TransformScale, ["Alt+Shift+Left"], ["Alt+Shift+Left"];
+    Rotate: "transform.rotate", "mouse.transform.rotate", TransformRotate, ["Left", "Right"], ["Left"];
+    RotateSnap: "transform.rotate_snap", "mouse.transform.rotate_snap", TransformRotate, ["Shift+Left", "Shift+Right"], ["Shift+Left"];
+    RotateCopy: "transform.rotate_copy", "mouse.transform.rotate_copy", TransformRotate, ["Ctrl+Left", "Ctrl+Right"], [];
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -284,8 +289,9 @@ impl MouseBindings {
         let mut bindings = HashMap::new();
         for &action in MouseAction::ALL {
             for value in values.get(action.id()).into_iter().flatten() {
-                let gesture = Gesture::parse(value)
-                    .ok_or_else(|| format!("{}: gesto inválido «{value}»", action.label()))?;
+                let gesture = Gesture::parse(value).ok_or_else(|| {
+                    super::i18n::format_logical("invalid-gesture", &[&super::i18n::logical_text(action.label_key()), &value])
+                })?;
                 let scope = action.scope();
                 let supported = match scope {
                     Scope::ToolbarHand
@@ -308,9 +314,9 @@ impl MouseBindings {
                     _ => matches!(gesture.trigger, Trigger::Button(_)),
                 };
                 if !supported {
-                    return Err(format!(
-                        "{}: tipo de gesto incompatível «{value}»",
-                        action.label()
+                    return Err(super::i18n::format_logical(
+                        "unsupported-gesture",
+                        &[&super::i18n::logical_text(action.label_key()), &value],
                     ));
                 }
                 for (&(other_scope, other_gesture), &other) in &bindings {
@@ -319,10 +325,9 @@ impl MouseBindings {
                         && scope.conflicts_with(other_scope)
                     {
                         let other: MouseAction = other;
-                        return Err(format!(
-                            "«{value}» conflita entre «{}» e «{}».",
-                            other.label(),
-                            action.label()
+                        return Err(super::i18n::format_logical(
+                            "gesture-conflict",
+                            &[&value, &super::i18n::logical_text(other.label_key()), &super::i18n::logical_text(action.label_key())],
                         ));
                     }
                 }
@@ -430,7 +435,7 @@ pub fn settings_rows(ui: &mut egui::Ui, values: &mut BTreeMap<String, Vec<String
                 .map(str::to_string)
                 .collect();
         }
-        if ui.small_button("Padrão").clicked() {
+        if ui.small_button(tr("preset-default")).clicked() {
             *bindings = action
                 .defaults(base)
                 .iter()

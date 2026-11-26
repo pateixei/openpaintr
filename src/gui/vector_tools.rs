@@ -1,3 +1,4 @@
+use super::i18n::text as tr;
 use std::collections::HashMap;
 
 use eframe::egui::{self, Color32, CursorIcon, Rect, Stroke, Vec2, vec2};
@@ -33,8 +34,8 @@ impl CurveKind {
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::CubicBezier => "Curva Bézier",
-            Self::Spline => "Spline",
+            Self::CubicBezier => tr("bezier"),
+            Self::Spline => tr("spline"),
         }
     }
 }
@@ -60,11 +61,11 @@ impl DashPreset {
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::Solid => "Contínua",
-            Self::Dash => "Tracejada",
-            Self::Dot => "Pontilhada",
-            Self::DashDot => "Traço-ponto",
-            Self::DashDotDot => "Traço-ponto-ponto",
+            Self::Solid => tr("solid-line"),
+            Self::Dash => tr("dashed-line"),
+            Self::Dot => tr("dotted-line"),
+            Self::DashDot => tr("dash-dot"),
+            Self::DashDotDot => tr("dash-dot-dot"),
         }
     }
 
@@ -100,11 +101,11 @@ impl LineCapStyle {
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::Flat => "Reta",
-            Self::Round => "Arredondada",
-            Self::Square => "Quadrada",
-            Self::Arrow => "Seta aberta",
-            Self::ArrowFilled => "Seta preenchida",
+            Self::Flat => tr("flat-cap"),
+            Self::Round => tr("round-cap"),
+            Self::Square => tr("square-cap"),
+            Self::Arrow => tr("open-arrow"),
+            Self::ArrowFilled => tr("filled-arrow"),
         }
     }
 
@@ -132,9 +133,9 @@ impl ShapeFillMode {
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::Outline => "Contorno",
-            Self::Fill => "Preenchimento",
-            Self::Both => "Contorno e preenchimento",
+            Self::Outline => tr("outline"),
+            Self::Fill => tr("fill"),
+            Self::Both => tr("outline-fill"),
         }
     }
 }
@@ -159,11 +160,11 @@ impl ShapeFamily {
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::Basic => "Básicas",
-            Self::Polygons => "Polígonos e estrelas",
-            Self::Arrows => "Setas",
-            Self::Symbols => "Símbolos e balões",
-            Self::Freeform => "Forma livre (v3)",
+            Self::Basic => tr("basic-shapes"),
+            Self::Polygons => tr("polygons-stars"),
+            Self::Arrows => tr("arrows"),
+            Self::Symbols => tr("symbols-callouts"),
+            Self::Freeform => tr("freeform-v3"),
         }
     }
 }
@@ -262,32 +263,32 @@ impl ShapeKind {
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::Rectangle => "Retângulo",
-            Self::RoundedRect => "Retângulo arredondado",
-            Self::Ellipse => "Elipse",
-            Self::Diamond => "Losango",
-            Self::Trapezoid => "Trapézio",
-            Self::Parallelogram => "Paralelogramo",
-            Self::Triangle => "Triângulo",
-            Self::RightTriangle => "Triângulo retângulo",
-            Self::Pentagon => "Pentágono",
-            Self::Hexagon => "Hexágono",
-            Self::Star4 => "Estrela (4 pontas)",
-            Self::Star5 => "Estrela (5 pontas)",
-            Self::Star6 => "Estrela (6 pontas)",
-            Self::ArrowRight => "Seta direita",
-            Self::ArrowLeft => "Seta esquerda",
-            Self::ArrowUp => "Seta cima",
-            Self::ArrowDown => "Seta baixo",
-            Self::DoubleArrow => "Seta dupla",
-            Self::Chevron => "Chevron",
-            Self::Heart => "Coração",
-            Self::Lightning => "Raio",
-            Self::Cross => "Cruz",
-            Self::Checkmark => "Marca de seleção",
-            Self::CalloutRect => "Balão retangular",
-            Self::CalloutOval => "Balão oval",
-            Self::Freeform => "Forma livre",
+            Self::Rectangle => tr("rectangle"),
+            Self::RoundedRect => tr("rounded-rectangle"),
+            Self::Ellipse => tr("ellipse"),
+            Self::Diamond => tr("diamond"),
+            Self::Trapezoid => tr("trapezoid"),
+            Self::Parallelogram => tr("parallelogram"),
+            Self::Triangle => tr("triangle"),
+            Self::RightTriangle => tr("right-triangle"),
+            Self::Pentagon => tr("pentagon"),
+            Self::Hexagon => tr("hexagon"),
+            Self::Star4 => tr("star-four"),
+            Self::Star5 => tr("star-five"),
+            Self::Star6 => tr("star-six"),
+            Self::ArrowRight => tr("arrow-right"),
+            Self::ArrowLeft => tr("arrow-left"),
+            Self::ArrowUp => tr("arrow-up"),
+            Self::ArrowDown => tr("arrow-down"),
+            Self::DoubleArrow => tr("arrow-double"),
+            Self::Chevron => tr("chevron"),
+            Self::Heart => tr("heart"),
+            Self::Lightning => tr("lightning"),
+            Self::Cross => tr("cross"),
+            Self::Checkmark => tr("check-mark"),
+            Self::CalloutRect => tr("rect-callout"),
+            Self::CalloutOval => tr("oval-callout"),
+            Self::Freeform => tr("freeform"),
         }
     }
 }

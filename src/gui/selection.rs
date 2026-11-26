@@ -1,3 +1,4 @@
+use super::i18n::text as tr;
 use std::{collections::VecDeque, io, rc::Rc};
 
 use gfx::path::Path as GfxPath;
@@ -35,10 +36,10 @@ impl Combine {
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::Replace => "Substituir",
-            Self::Add => "Adicionar",
-            Self::Subtract => "Subtrair",
-            Self::Intersect => "Intersectar",
+            Self::Replace => tr("replace"),
+            Self::Add => tr("add"),
+            Self::Subtract => tr("subtract"),
+            Self::Intersect => tr("intersect"),
             Self::Xor => "XOR",
         }
     }
@@ -94,9 +95,8 @@ impl std::fmt::Debug for Mask {
 
 impl Mask {
     fn empty(size: Point) -> io::Result<Self> {
-        let inner = TMask::new(size.0, size.1).ok_or_else(|| {
-            io::Error::new(io::ErrorKind::InvalidInput, "tamanho de máscara inválido")
-        })?;
+        let inner = TMask::new(size.0, size.1)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, tr("invalid-mask-size")))?;
         Ok(Self { inner })
     }
 

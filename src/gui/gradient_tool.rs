@@ -1,3 +1,4 @@
+use super::i18n::text as tr;
 use eframe::egui::{self, Color32, CursorIcon, Rect, Stroke, Vec2, vec2};
 use gfx::gradient::{
     GF_ALPHA_MODE, GF_DITHER, GR_NONE, GR_REFLECT, GR_WRAP, GT_CONICAL, GT_DIAMOND, GT_LINEAR,
@@ -36,13 +37,13 @@ impl GradientShape {
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::Linear => "Linear",
-            Self::LinearReflected => "Linear refletido",
-            Self::Diamond => "Losango",
-            Self::Radial => "Radial",
-            Self::Conical => "Cônico",
-            Self::SpiralCw => "Espiral horária",
-            Self::SpiralCcw => "Espiral anti-horária",
+            Self::Linear => tr("linear"),
+            Self::LinearReflected => tr("reflected-linear"),
+            Self::Diamond => tr("diamond"),
+            Self::Radial => tr("radial"),
+            Self::Conical => tr("conical"),
+            Self::SpiralCw => tr("spiral-clockwise"),
+            Self::SpiralCcw => tr("spiral-counterclockwise"),
         }
     }
 
@@ -72,9 +73,9 @@ impl GradientRepeat {
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::None => "Sem repetição",
-            Self::Wrap => "Repetir",
-            Self::Reflect => "Refletir",
+            Self::None => tr("no-repeat"),
+            Self::Wrap => tr("repeat"),
+            Self::Reflect => tr("reflect"),
         }
     }
 
@@ -99,8 +100,8 @@ impl GradientChannelMode {
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::Colors => "Cores",
-            Self::Transparency => "Transparência",
+            Self::Colors => tr("colors"),
+            Self::Transparency => tr("transparency"),
         }
     }
 }

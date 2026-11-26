@@ -6,6 +6,7 @@ mod editor;
 mod feather;
 mod geometry;
 mod gradient_tool;
+mod i18n;
 mod icon_atlas;
 mod mouse_shortcuts;
 mod phase2;
@@ -30,8 +31,8 @@ use eframe::egui::{
     self, Align, Color32, ColorImage, PointerButton, Rect, RichText, TextureHandle, TextureOptions,
     TextureWrapMode, Vec2, pos2, vec2,
 };
+use openpaintr::{Document, Pixel};
 use rfd::FileDialog;
-use openpaintr::{BLEND_MODES, Document, Pixel};
 
 use colors::{ColorPalette, PaletteAction};
 use dialogs::{
@@ -42,6 +43,7 @@ use editor::{Editor, LayerMeta, StrokeSpec};
 use gradient_tool::{
     GradientChannelMode, GradientRepeat, GradientSession, GradientShape, SessionOutcome, snap_if,
 };
+use i18n::text as tr;
 use mouse_shortcuts::{BUTTONS, MouseAction, Scope, Trigger};
 use phase2::SizeDialog;
 use selection::{Combine, Point, Region, Selection, Shape};
@@ -79,7 +81,8 @@ fn linux_backend_choice(
 }
 
 pub fn run() -> io::Result<()> {
-    let document = Document::new(DEFAULT_SIZE.0, DEFAULT_SIZE.1)?;
+    let locale = i18n::Locale::load();
+    let document = locale.with(|| new_document(DEFAULT_SIZE.0, DEFAULT_SIZE.1))?;
     let mut options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1120.0, 760.0])
@@ -117,11 +120,16 @@ pub fn run() -> io::Result<()> {
         options,
         Box::new(move |creation| {
             let mut app = App::new(&creation.egui_ctx, document);
-            app.shortcuts = Shortcuts::from_executable();
-            if let Some(error) = &app.shortcuts.storage_error {
-                app.notice = Some((format!("Atalhos: {error}"), true));
-            }
-            app.recent = RecentFiles::from_executable();
+            app.locale = locale;
+            creation.egui_ctx.set_fonts(i18n::fonts(locale));
+            app.font_catalog = FontCatalog::for_locale(locale);
+            app.locale.with(|| {
+                app.shortcuts = Shortcuts::from_executable();
+                if let Some(error) = &app.shortcuts.storage_error {
+                    app.notice = Some((i18n::format("shortcuts-error", &[error]), true));
+                }
+                app.recent = RecentFiles::from_executable();
+            });
             Ok(Box::new(app))
         }),
     )
@@ -194,24 +202,28 @@ impl Tool {
     }
 
     fn label(self) -> &'static str {
+        tr(self.label_key())
+    }
+
+    fn label_key(self) -> &'static str {
         match self {
-            Self::Brush => "Pincel",
-            Self::Pencil => "Lápis",
-            Self::Bucket => "Balde de tinta",
-            Self::Eraser => "Borracha",
-            Self::Eyedropper => "Conta-gotas",
-            Self::CloneStamp => "Carimbo de clonagem",
-            Self::Recolor => "Recolorir",
-            Self::Gradient => "Gradiente",
-            Self::LineCurve => "Linha / Curva",
-            Self::DrawShape => "Formas",
-            Self::Text => "Texto",
-            Self::Select(Shape::Rectangle) => "Seleção retangular",
-            Self::Select(Shape::Ellipse) => "Seleção elíptica",
-            Self::Lasso => "Laço",
-            Self::Wand => "Varinha mágica",
-            Self::Pan => "Mão",
-            Self::Zoom => "Zoom",
+            Self::Brush => "brush",
+            Self::Pencil => "pencil",
+            Self::Bucket => "bucket",
+            Self::Eraser => "eraser",
+            Self::Eyedropper => "eyedropper",
+            Self::CloneStamp => "clone-stamp",
+            Self::Recolor => "recolor",
+            Self::Gradient => "gradient",
+            Self::LineCurve => "line-curve",
+            Self::DrawShape => "shapes",
+            Self::Text => "text",
+            Self::Select(Shape::Rectangle) => "rectangle-select",
+            Self::Select(Shape::Ellipse) => "ellipse-select",
+            Self::Lasso => "lasso",
+            Self::Wand => "magic-wand",
+            Self::Pan => "hand",
+            Self::Zoom => "zoom",
         }
     }
 }
@@ -304,12 +316,21 @@ impl DocumentTab {
         }
     }
 
+    fn title(&self) -> &str {
+        if self.name.is_empty() {
+            i18n::logical_text("untitled")
+        } else {
+            &self.name
+        }
+    }
+
     fn is_untouched_default(&self) -> bool {
-        !self.editor.has_edits() && self.project_path.is_none() && self.name == "Sem título"
+        !self.editor.has_edits() && self.project_path.is_none() && self.name.is_empty()
     }
 }
 
 struct App {
+    locale: i18n::Locale,
     tabs: Vec<DocumentTab>,
     active_tab: usize,
     shortcuts: Shortcuts,
@@ -380,7 +401,7 @@ impl App {
         let light = Color32::from_gray(215);
         let dark = Color32::from_gray(172);
         let checker = ctx.load_texture(
-            "Transparência",
+            tr("transparency"),
             ColorImage::new([2, 2], vec![light, dark, dark, light]),
             TextureOptions {
                 wrap_mode: TextureWrapMode::Repeat,
@@ -388,7 +409,8 @@ impl App {
             },
         );
         Self {
-            tabs: vec![DocumentTab::new(document, "Sem título".into(), None)],
+            locale: i18n::Locale::default(),
+            tabs: vec![DocumentTab::new(document, String::new(), None)],
             active_tab: 0,
             shortcuts: Shortcuts::default(),
             shortcut_dialog: None,
@@ -463,7 +485,7 @@ impl App {
     fn finish_opacity(&mut self) {
         let tab = self.tab_mut();
         if let Some((layer, before)) = tab.opacity_edit.take() {
-            tab.editor.record_layer_meta(layer, before, "Opacidade");
+            tab.editor.record_layer_meta(layer, before, "opacity");
         }
     }
 
@@ -520,9 +542,9 @@ impl App {
 
     fn close_tab_at(&mut self, index: usize) {
         if self.tabs.len() <= 1 {
-            match Document::new(DEFAULT_SIZE.0, DEFAULT_SIZE.1) {
+            match new_document(DEFAULT_SIZE.0, DEFAULT_SIZE.1) {
                 Ok(document) => {
-                    self.tabs[0] = DocumentTab::new(document, "Sem título".into(), None);
+                    self.tabs[0] = DocumentTab::new(document, String::new(), None);
                     self.active_tab = 0;
                     self.notice = None;
                 }
@@ -625,9 +647,10 @@ impl App {
             Action::New => self.new_size = Some(DEFAULT_SIZE),
             Action::Open => {
                 if let Some(path) = FileDialog::new()
-                    .add_filter("Arquivos compatíveis", &[PDN_EXT, "png"])
-                    .add_filter("Imagem PNG", &["png"])
-                    .add_filter("Documento Paint.NET", &["pdn"])
+                    .set_title(tr("open"))
+                    .add_filter(tr("supported-files"), &[PDN_EXT, "png"])
+                    .add_filter(tr("png-image"), &["png"])
+                    .add_filter(tr("pdn-document"), &["pdn"])
                     .pick_file()
                 {
                     self.open_path(ctx, path);
@@ -645,9 +668,7 @@ impl App {
             let (width, height) = document.dimensions();
             let limit = ctx.input(|input| input.max_texture_side);
             if (width.max(height) as usize) > limit {
-                return Err(io::Error::other(format!(
-                    "o limite da tela é de {limit} pixels por lado"
-                )));
+                return Err(io::Error::other(i18n::format("canvas-limit", &[&limit])));
             }
             let name = display_name(&path);
             let stored_path = pdn.then(|| path.clone());
@@ -655,14 +676,15 @@ impl App {
             self.open_in_new_tab(document, name, stored_path);
             Ok(())
         })();
-        self.report(result, "Arquivo aberto");
+        self.report(result, tr("file-opened"));
     }
 
     fn import_layer_from_file(&mut self, ctx: &egui::Context) {
         if let Some(path) = FileDialog::new()
-            .add_filter("Arquivos compatíveis", &[PDN_EXT, "png"])
-            .add_filter("Imagem PNG", &["png"])
-            .add_filter("Documento Paint.NET", &["pdn"])
+            .set_title(tr("import-layer-file"))
+            .add_filter(tr("supported-files"), &[PDN_EXT, "png"])
+            .add_filter(tr("png-image"), &["png"])
+            .add_filter(tr("pdn-document"), &["pdn"])
             .pick_file()
         {
             let result = (|| {
@@ -671,9 +693,7 @@ impl App {
                 let imp = imported.dimensions();
                 let limit = ctx.input(|input| input.max_texture_side);
                 if (cur.0.max(imp.0).max(cur.1.max(imp.1)) as usize) > limit {
-                    return Err(io::Error::other(format!(
-                        "o limite da tela é de {limit} pixels por lado"
-                    )));
+                    return Err(io::Error::other(i18n::format("canvas-limit", &[&limit])));
                 }
                 self.tab_mut().editor.import_document_layers(imported)
             })();
@@ -705,17 +725,18 @@ impl App {
                 self.tab_mut().editor.mark_saved();
                 self.recent.push(path);
             }
-            self.report(result, "Projeto salvo");
+            self.report(result, tr("project-saved"));
             return saved;
         }
 
-        let base = Path::new(&self.tab().name)
+        let base = Path::new(self.tab().title())
             .file_stem()
             .and_then(|stem| stem.to_str())
-            .unwrap_or(&self.tab().name)
+            .unwrap_or_else(|| self.tab().title())
             .to_owned();
         let Some(mut path) = FileDialog::new()
-            .add_filter("Documento Paint.NET", &[PDN_EXT])
+            .set_title(tr("save-as"))
+            .add_filter(tr("pdn-document"), &[PDN_EXT])
             .set_file_name(format!("{base}.{PDN_EXT}"))
             .save_file()
         else {
@@ -727,10 +748,7 @@ impl App {
         }
         if !has_extension(&path, PDN_EXT) {
             self.report(
-                Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    "Use a extensão .pdn para salvar o documento do Paint.NET.",
-                )),
+                Err(io::Error::new(io::ErrorKind::InvalidInput, tr("use-pdn"))),
                 "",
             );
             return false;
@@ -749,13 +767,14 @@ impl App {
         self.finish_opacity();
         self.tab_mut().editor.finish_stroke();
         self.commit_active_session();
-        let base = Path::new(&self.tab().name)
+        let base = Path::new(self.tab().title())
             .file_stem()
             .and_then(|stem| stem.to_str())
-            .unwrap_or(&self.tab().name)
+            .unwrap_or_else(|| self.tab().title())
             .to_owned();
         if let Some(mut path) = FileDialog::new()
-            .add_filter("Imagem PNG", &["png"])
+            .set_title(tr("export-png"))
+            .add_filter(tr("png-image"), &["png"])
             .set_file_name(format!("{base}.png"))
             .save_file()
         {
@@ -765,10 +784,7 @@ impl App {
             }
             if !has_extension(&path, "png") {
                 self.report(
-                    Err(io::Error::new(
-                        io::ErrorKind::InvalidInput,
-                        "Use a extensão .png para exportar a imagem.",
-                    )),
+                    Err(io::Error::new(io::ErrorKind::InvalidInput, tr("use-png"))),
                     "",
                 );
                 return;
@@ -787,7 +803,7 @@ impl App {
         self.notice = match result {
             Ok(()) if success.is_empty() => None,
             Ok(()) => Some((success.into(), false)),
-            Err(error) => Some((error.to_string(), true)),
+            Err(error) => Some((i18n::error_message(&error), true)),
         };
     }
 
@@ -813,10 +829,10 @@ impl App {
         use Command::*;
         self.shortcut_item(ui, New, true);
         self.shortcut_item(ui, Open, true);
-        ui.menu_button("Abrir recentes", |ui| {
+        ui.menu_button(tr("open-recent"), |ui| {
             let entries = self.recent.entries.clone();
             if entries.is_empty() {
-                ui.weak("Nenhum arquivo recente");
+                ui.weak(tr("no-recent"));
             } else {
                 for path in entries {
                     let label = display_name(&path);
@@ -834,7 +850,7 @@ impl App {
             if ui
                 .add_enabled(
                     !self.recent.entries.is_empty(),
-                    egui::Button::new("Limpar lista"),
+                    egui::Button::new(tr("clear-recent")),
                 )
                 .clicked()
             {
@@ -870,9 +886,9 @@ impl App {
                         .size(13.5),
                 );
                 ui.add_space(8.0);
-                ui.menu_button("Arquivo", |ui| self.file_menu(ui));
+                ui.menu_button(tr("file"), |ui| self.file_menu(ui));
                 self.phase2_menus(ui);
-                ui.menu_button("Seleção", |ui| {
+                ui.menu_button(tr("selection"), |ui| {
                     self.shortcut_item(ui, Command::SelectAll, true);
                     let selected = self.tab().editor.selection.is_some();
                     self.shortcut_item(ui, Command::Deselect, selected);
@@ -881,10 +897,10 @@ impl App {
                     self.shortcut_item(ui, Command::Fill, selected);
                     self.shortcut_item(ui, Command::Erase, selected);
                 });
-                ui.menu_button("Configurações", |ui| {
+                ui.menu_button(tr("settings"), |ui| {
                     if ui
                         .add(
-                            egui::Button::new("Atalhos de teclado e mouse")
+                            egui::Button::new(tr("shortcuts"))
                                 .shortcut_text(self.shortcuts.hint(Command::Settings)),
                         )
                         .clicked()
@@ -892,11 +908,34 @@ impl App {
                         self.shortcut_dialog = Some(self.shortcuts.dialog());
                         ui.close();
                     }
+                    ui.menu_button(i18n::text("language"), |ui| {
+                        for locale in i18n::Locale::all() {
+                            if ui
+                                .selectable_label(self.locale == locale, locale.name())
+                                .clicked()
+                            {
+                                if self.locale.prefers_simplified_chinese()
+                                    != locale.prefers_simplified_chinese()
+                                {
+                                    ui.ctx().set_fonts(i18n::fonts(locale));
+                                    self.font_catalog = FontCatalog::for_locale(locale);
+                                }
+                                self.locale = locale;
+                                self.notice = locale.with(|| {
+                                    locale.save().err().map(|error| {
+                                        (i18n::format("language-save-error", &[&error]), true)
+                                    })
+                                });
+                                ui.close();
+                                ui.ctx().request_repaint();
+                            }
+                        }
+                    });
                 });
                 ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
                     let previous = self.theme;
-                    ui.selectable_value(&mut self.theme, Theme::Dark, "Escuro");
-                    ui.selectable_value(&mut self.theme, Theme::Light, "Claro");
+                    ui.selectable_value(&mut self.theme, Theme::Dark, tr("dark"));
+                    ui.selectable_value(&mut self.theme, Theme::Light, tr("light"));
                     if previous != self.theme {
                         self.theme.apply(ui.ctx());
                         ui.ctx().request_repaint();
@@ -921,7 +960,10 @@ impl App {
                 true,
                 false,
                 btn_sz,
-                &format!("Novo ({})", self.shortcuts.hint(Command::New)),
+                &i18n::format(
+                    "shortcut-with-hint",
+                    &[&i18n::logical_text("new"), &self.shortcuts.hint(Command::New)],
+                ),
             )
             .clicked()
             {
@@ -934,7 +976,10 @@ impl App {
                 true,
                 false,
                 btn_sz,
-                &format!("Abrir ({})", self.shortcuts.hint(Command::Open)),
+                &i18n::format(
+                    "shortcut-with-hint",
+                    &[&i18n::logical_text("open"), &self.shortcuts.hint(Command::Open)],
+                ),
             )
             .clicked()
             {
@@ -947,7 +992,10 @@ impl App {
                 true,
                 false,
                 btn_sz,
-                &format!("Salvar ({})", self.shortcuts.hint(Command::Save)),
+                &i18n::format(
+                    "shortcut-with-hint",
+                    &[&i18n::logical_text("save"), &self.shortcuts.hint(Command::Save)],
+                ),
             )
             .clicked()
             {
@@ -960,7 +1008,7 @@ impl App {
                 true,
                 false,
                 btn_sz,
-                "Exportar PNG com opções",
+                tr("export-options"),
             )
             .clicked()
             {
@@ -975,7 +1023,10 @@ impl App {
                 self.tab().editor.has_edits(),
                 false,
                 btn_sz,
-                &format!("Desfazer ({})", self.shortcuts.hint(Command::Undo)),
+                &i18n::format(
+                    "shortcut-with-hint",
+                    &[&i18n::logical_text("undo"), &self.shortcuts.hint(Command::Undo)],
+                ),
             )
             .clicked()
             {
@@ -988,7 +1039,10 @@ impl App {
                 self.tab().editor.can_redo(),
                 false,
                 btn_sz,
-                &format!("Refazer ({})", self.shortcuts.hint(Command::Redo)),
+                &i18n::format(
+                    "shortcut-with-hint",
+                    &[&i18n::logical_text("redo"), &self.shortcuts.hint(Command::Redo)],
+                ),
             )
             .clicked()
             {
@@ -1003,7 +1057,7 @@ impl App {
                     (t.target, t.affine.shift, t.affine.scale, t.affine.degrees)
                 };
                 ui.label(
-                    RichText::new("Transformação:")
+                    RichText::new(tr("transform-field"))
                         .size(12.0)
                         .color(self.theme.text_muted()),
                 );
@@ -1047,7 +1101,7 @@ impl App {
                 (g.shape, g.repeat, g.channel_mode, g.dither, g.blend)
             }) {
                 ui.label(
-                    RichText::new("Gradiente:")
+                    RichText::new(tr("gradient-field"))
                         .strong()
                         .size(12.5)
                         .color(self.theme.text_primary()),
@@ -1083,7 +1137,7 @@ impl App {
                 })
             {
                 ui.label(
-                    RichText::new("Linha / Curva:")
+                    RichText::new(tr("line-curve-field"))
                         .strong()
                         .size(12.5)
                         .color(self.theme.text_primary()),
@@ -1127,7 +1181,7 @@ impl App {
                 (s.kind, s.fill_mode, s.thickness, s.corner_radius, s.pattern, s.blend)
             }) {
                 ui.label(
-                    RichText::new("Forma:")
+                    RichText::new(tr("shape-field"))
                         .strong()
                         .size(12.5)
                         .color(self.theme.text_primary()),
@@ -1184,7 +1238,7 @@ impl App {
                 )
             }) {
                 ui.label(
-                    RichText::new("Texto:")
+                    RichText::new(tr("text-field"))
                         .strong()
                         .size(12.5)
                         .color(self.theme.text_primary()),
@@ -1192,7 +1246,7 @@ impl App {
                 let text_resp = ui.add(
                     egui::TextEdit::singleline(&mut text)
                         .desired_width(120.0)
-                        .hint_text("Digite aqui..."),
+                        .hint_text(tr("placeholder-text")),
                 );
                 let changed = text_resp.changed()
                     | Self::text_controls(
@@ -1239,7 +1293,7 @@ impl App {
             {
                 let limit = ui.ctx().input(|i| i.max_texture_side).clamp(1, 8192) as u32;
                 ui.label(
-                    RichText::new("Tamanho da tela:")
+                    RichText::new(tr("canvas-size-field"))
                         .strong()
                         .size(12.5)
                         .color(self.theme.text_primary()),
@@ -1256,9 +1310,9 @@ impl App {
                     cr.preview_size = preview_size;
                 }
                 ui.label(
-                    RichText::new(format!(
-                        "(original: {} × {} px) · Ctrl/Enter confirma · Esc cancela",
-                        original.0, original.1
+                    RichText::new(i18n::format(
+                        "canvas-resize-hint",
+                        &[&original.0, &original.1],
                     ))
                     .size(11.5)
                     .color(self.theme.text_muted()),
@@ -1266,7 +1320,7 @@ impl App {
                 self.session_commit_buttons(ui);
             } else {
                 ui.label(
-                    RichText::new("Ferramenta:")
+                    RichText::new(tr("tool-field"))
                         .size(12.0)
                         .color(self.theme.text_muted()),
                 );
@@ -1283,19 +1337,19 @@ impl App {
                     Tool::Brush | Tool::Eraser | Tool::CloneStamp => {
                         ui.add_space(4.0);
                         ui.label(
-                            RichText::new("Tamanho:")
+                            RichText::new(tr("size-field"))
                                 .size(12.0)
                                 .color(self.theme.text_muted()),
                         );
                         ui.add(egui::Slider::new(&mut self.diameter, 1..=MAX_BRUSH_DIAMETER).suffix(" px"));
                         ui.label(
-                            RichText::new("Dureza:")
+                            RichText::new(tr("hardness-field"))
                                 .size(12.0)
                                 .color(self.theme.text_muted()),
                         );
                         ui.add(egui::Slider::new(&mut self.hardness, 0..=100).suffix("%"));
                         ui.label(
-                            RichText::new("Espaç.:")
+                            RichText::new(tr("spacing-field"))
                                 .size(12.0)
                                 .color(self.theme.text_muted()),
                         );
@@ -1308,8 +1362,13 @@ impl App {
                         }
                         if self.tool == Tool::CloneStamp {
                             let hint = self.tab().clone_anchor.map_or_else(
-                                || "Origem: Ctrl+Clique".to_owned(),
-                                |(x, y)| format!("Origem: ({x}, {y})"),
+                                || {
+                                    i18n::format(
+                                        "clone-source-unset",
+                                        &[&self.shortcuts.mouse_hint(MouseAction::CloneSetAnchor)],
+                                    )
+                                },
+                                |(x, y)| i18n::format("clone-source", &[&x, &y]),
                             );
                             ui.label(
                                 RichText::new(hint)
@@ -1320,8 +1379,11 @@ impl App {
                     }
                     Tool::Pencil => {
                         ui.add_space(6.0);
-                        ui.label("Tamanho:");
-                        ui.add(egui::Slider::new(&mut self.pencil_diameter, 1..=MAX_BRUSH_DIAMETER).suffix(" px"));
+                        ui.label(tr("size-field"));
+                        ui.add(
+                            egui::Slider::new(&mut self.pencil_diameter, 1..=MAX_BRUSH_DIAMETER)
+                                .suffix(" px"),
+                        );
                         Self::blend_selector(ui, "pencil_blend", &mut self.stroke_blend);
                     }
                     Tool::Bucket => {
@@ -1333,13 +1395,13 @@ impl App {
                     Tool::Recolor => {
                         ui.add_space(4.0);
                         ui.label(
-                            RichText::new("Tam.:")
+                            RichText::new(tr("short-size-field"))
                                 .size(12.0)
                                 .color(self.theme.text_muted()),
                         );
                         ui.add(egui::Slider::new(&mut self.diameter, 1..=MAX_BRUSH_DIAMETER).suffix(" px"));
                         ui.label(
-                            RichText::new("Dur.:")
+                            RichText::new(tr("short-hardness-field"))
                                 .size(12.0)
                                 .color(self.theme.text_muted()),
                         );
@@ -1365,8 +1427,8 @@ impl App {
                     }
                     Tool::Eyedropper => {
                         ui.add_space(6.0);
-                        ui.checkbox(&mut self.eyedropper_composite, "Amostrar imagem");
-                        ui.checkbox(&mut self.eyedropper_stay, "Permanecer no conta-gotas");
+                        ui.checkbox(&mut self.eyedropper_composite, tr("sample-composite"));
+                        ui.checkbox(&mut self.eyedropper_stay, tr("stay-eyedropper"));
                     }
                     Tool::Gradient => {
                         Self::gradient_controls(
@@ -1417,14 +1479,14 @@ impl App {
                     Tool::Select(_) | Tool::Lasso | Tool::Wand => {
                         ui.add_space(6.0);
                         ui.label(
-                            RichText::new("Modo:")
+                            RichText::new(tr("mode-field"))
                                 .size(12.0)
                                 .color(self.theme.text_muted()),
                         );
                         self.combine_selector(ui);
-                        ui.label("Feather:");
+                        ui.label(tr("feather-field"));
                         ui.add(egui::Slider::new(&mut self.selection_feather, 0..=100).suffix("%"))
-                            .on_hover_text("Suaviza para fora da seleção. A 100%, o raio é metade do menor lado da seleção.");
+                            .on_hover_text(tr("feather-help"));
                         if self.tool == Tool::Wand && !wrap_wand {
                             ui.add_space(4.0);
                             self.wand_options(ui);
@@ -1446,7 +1508,7 @@ impl App {
                     egui::StrokeKind::Outside,
                 );
                 ui.label(
-                    RichText::new("Cor:")
+                    RichText::new(tr("color-field"))
                         .size(11.5)
                         .color(self.theme.text_muted()),
                 );
@@ -1464,15 +1526,15 @@ impl App {
 
     fn session_commit_buttons(&mut self, ui: &mut egui::Ui) {
         if ui
-            .button("Aplicar")
-            .on_hover_text("Confirmar alterações (Enter)")
+            .button(tr("apply"))
+            .on_hover_text(tr("confirm-edits"))
             .clicked()
         {
             self.commit_active_session();
         }
         if ui
-            .button("Cancelar")
-            .on_hover_text("Cancelar alterações (Esc)")
+            .button(tr("cancel"))
+            .on_hover_text(tr("cancel-edits"))
             .clicked()
         {
             self.cancel_active_session(ui.ctx());
@@ -1481,7 +1543,7 @@ impl App {
 
     fn tolerance_options(&mut self, ui: &mut egui::Ui, id_salt: &str) {
         ui.label(
-            RichText::new("Tolerância:")
+            RichText::new(tr("tolerance-field"))
                 .size(12.0)
                 .color(self.theme.text_muted()),
         );
@@ -1498,16 +1560,16 @@ impl App {
 
     fn wand_options(&mut self, ui: &mut egui::Ui) {
         self.tolerance_options(ui, "wand_alpha");
-        ui.checkbox(&mut self.wand_contiguous, "Contígua");
-        ui.checkbox(&mut self.wand_composite, "Amostrar imagem");
+        ui.checkbox(&mut self.wand_contiguous, tr("contiguous-feminine"));
+        ui.checkbox(&mut self.wand_composite, tr("sample-composite"));
     }
 
     fn bucket_options(&mut self, ui: &mut egui::Ui) {
         self.tolerance_options(ui, "bucket_alpha");
         Self::pattern_selector(ui, "bucket_pattern", &mut self.fill_pattern);
         Self::blend_selector(ui, "bucket_blend", &mut self.stroke_blend);
-        ui.checkbox(&mut self.bucket_contiguous, "Contíguo");
-        ui.checkbox(&mut self.bucket_composite, "Amostrar imagem");
+        ui.checkbox(&mut self.bucket_contiguous, tr("contiguous"));
+        ui.checkbox(&mut self.bucket_composite, tr("sample-composite"));
     }
 
     fn pattern_selector(ui: &mut egui::Ui, id_salt: &str, pattern: &mut FillPattern) {
@@ -1571,7 +1633,7 @@ impl App {
                 }
             });
         changed |= *mode != prev_mode;
-        changed |= ui.checkbox(dither, "Dithering").changed();
+        changed |= ui.checkbox(dither, tr("dither")).changed();
         let prev_blend = *blend;
         Self::blend_selector(ui, "grad_blend", blend);
         changed | (*blend != prev_blend)
@@ -1703,23 +1765,27 @@ impl App {
         let prev_f = family.clone();
         egui::ComboBox::from_id_salt("text_family")
             .width(115.0)
-            .selected_text(family.as_str())
+            .selected_text(text_tool::family_label(family))
             .show_ui(ui, |ui| {
                 for fam in families {
-                    ui.selectable_value(family, fam.clone(), fam.as_str());
+                    ui.selectable_value(family, fam.clone(), text_tool::family_label(fam));
                 }
             });
         changed |= *family != prev_f;
         changed |= ui
             .add(egui::DragValue::new(size_px).range(6.0..=240.0).suffix(" px"))
             .changed();
-        for (flag, label) in [
-            (bold, "B"),
-            (italic, "I"),
-            (underline, "U"),
-            (strike, "S"),
+        for (flag, label, tooltip) in [
+            (bold, "B", "text-bold"),
+            (italic, "I", "text-italic"),
+            (underline, "U", "text-underline"),
+            (strike, "S", "text-strikethrough"),
         ] {
-            if ui.selectable_label(*flag, label).clicked() {
+            if ui
+                .selectable_label(*flag, label)
+                .on_hover_text(tr(tooltip))
+                .clicked()
+            {
                 *flag = !*flag;
                 changed = true;
             }
@@ -1750,14 +1816,14 @@ impl App {
             if many {
                 if ui
                     .add(egui::Button::new("◀").frame(false))
-                    .on_hover_text("Documento anterior")
+                    .on_hover_text(tr("previous-document"))
                     .clicked()
                 {
                     self.cycle_tab(-1);
                 }
                 if ui
                     .add(egui::Button::new("▶").frame(false))
-                    .on_hover_text("Próximo documento")
+                    .on_hover_text(tr("next-document"))
                     .clicked()
                 {
                     self.cycle_tab(1);
@@ -1773,15 +1839,15 @@ impl App {
                             let (title, dirty, thumb_id, thumb_size) = {
                                 let tab = &self.tabs[index];
                                 let title = if tab.editor.has_unsaved_edits() {
-                                    format!("{} *", tab.name)
+                                    format!("{} *", tab.title())
                                 } else {
-                                    tab.name.clone()
+                                    tab.title().to_owned()
                                 };
                                 let (tid, tsz) = tab
                                     .tab_thumb
                                     .as_ref()
                                     .map_or((None, Vec2::ZERO), |t| (Some(t.id()), t.size_vec2()));
-                                (title, tab.editor.has_unsaved_edits(), tid, tsz)
+                                (i18n::display(&title).into_owned(), tab.editor.has_unsaved_edits(), tid, tsz)
                             };
                             let frame = if active {
                                 egui::Frame::new()
@@ -1836,9 +1902,9 @@ impl App {
                                         let label_resp = ui
                                             .add(egui::Button::new(label).frame(false))
                                             .on_hover_text(if dirty {
-                                                "Alterações não salvas — arraste para reordenar"
+                                                tr("unsaved-drag-reorder")
                                             } else {
-                                                "Arraste para reordenar"
+                                                tr("drag-reorder")
                                             });
                                         if label_resp.clicked() {
                                             chosen = Some(index);
@@ -1852,7 +1918,7 @@ impl App {
                                                 )
                                                 .frame(false),
                                             )
-                                            .on_hover_text("Fechar documento")
+                                            .on_hover_text(tr("close-document"))
                                             .clicked()
                                         {
                                             close_idx = Some(index);
@@ -1879,7 +1945,7 @@ impl App {
                             true,
                             false,
                             vec2(22.0, 22.0),
-                            "Novo documento",
+                            tr("new-document"),
                         )
                         .clicked()
                         {
@@ -2022,7 +2088,8 @@ impl App {
         match palette_action {
             PaletteAction::SavePalette => {
                 if let Some(mut path) = FileDialog::new()
-                    .add_filter("Paleta Paint.NET", &["txt"])
+                    .set_title(tr("save-file"))
+                    .add_filter(tr("paint-net-palette"), &["txt"])
                     .set_file_name("paleta.txt")
                     .save_file()
                 {
@@ -2030,16 +2097,17 @@ impl App {
                         path.set_extension("txt");
                     }
                     let res = self.palette.save_to(&path);
-                    self.report(res, "Paleta salva");
+                    self.report(res, tr("palette-saved"));
                 }
             }
             PaletteAction::LoadPalette => {
                 if let Some(path) = FileDialog::new()
-                    .add_filter("Paleta Paint.NET", &["txt"])
+                    .set_title(tr("load-file"))
+                    .add_filter(tr("paint-net-palette"), &["txt"])
                     .pick_file()
                 {
                     let res = self.palette.load_from(&path);
-                    self.report(res, "Paleta carregada");
+                    self.report(res, tr("palette-loaded"));
                 }
             }
             PaletteAction::None => {}
@@ -2069,7 +2137,7 @@ impl App {
 
         self.theme.styled_card(
             ui,
-            "Camadas",
+            tr("layers"),
             |ui| {
                 if icon_button(
                     ui,
@@ -2078,7 +2146,7 @@ impl App {
                     true,
                     false,
                     vec2(20.0, 20.0),
-                    "Adicionar camada",
+                    tr("add-layer"),
                 )
                 .clicked()
                 {
@@ -2092,10 +2160,10 @@ impl App {
                 ui.horizontal(|ui| {
                     egui::ComboBox::from_id_salt("layer_blend_mode")
                         .width(105.0)
-                        .selected_text(BLEND_MODES[usize::from(blend).min(13)])
+                        .selected_text(i18n::blend_name(blend))
                         .show_ui(ui, |ui| {
-                            for (idx, label) in BLEND_MODES.iter().enumerate() {
-                                ui.selectable_value(&mut blend, idx as u8, *label);
+                            for mode in 0..openpaintr::BLEND_MODES.len() as u8 {
+                                ui.selectable_value(&mut blend, mode, i18n::blend_name(mode));
                             }
                         });
                     if blend != meta.blend {
@@ -2107,7 +2175,7 @@ impl App {
                             self.tab_mut().editor.record_layer_meta(
                                 selected,
                                 meta.clone(),
-                                "Modo de mesclagem",
+                                "blend-mode",
                             );
                         }
                         self.finish_geometry(result);
@@ -2128,7 +2196,7 @@ impl App {
                                         .map(|value| value * 255.0 / 100.0)
                                 }),
                         )
-                        .on_hover_text("Opacidade da camada");
+                        .on_hover_text(tr("layer-opacity"));
                     if response.changed() {
                         let meta_before = meta.clone();
                         let tab = self.tab_mut();
@@ -2159,12 +2227,13 @@ impl App {
                                 .layer_name(layer)
                                 .unwrap()
                                 .to_owned();
-                            let mode = self
+                            let blend_id = self
                                 .tab()
                                 .editor
                                 .document
-                                .layer_blend_mode(layer)
-                                .unwrap_or("Normal");
+                                .layer_blend_id(layer)
+                                .unwrap_or(0);
+                            let mode = i18n::blend_name_logical(blend_id);
                             let thumb = self
                                 .tab()
                                 .layer_thumbs
@@ -2197,7 +2266,7 @@ impl App {
                                             true,
                                             false,
                                             vec2(20.0, 20.0),
-                                            "Visibilidade da camada",
+                                            tr("layer-visibility"),
                                         )
                                         .clicked()
                                         {
@@ -2212,7 +2281,7 @@ impl App {
                                                 self.tab_mut().editor.record_layer_meta(
                                                     layer,
                                                     meta_before,
-                                                    "Visibilidade",
+                                                    "visibility",
                                                 );
                                                 self.tab_mut().thumbs_dirty = true;
                                             }
@@ -2246,7 +2315,7 @@ impl App {
                                                 egui::StrokeKind::Outside,
                                             );
                                         }
-                                        let display = if mode != "Normal" || opacity < 255 {
+                                        let display = if blend_id != 0 || opacity < 255 {
                                             format!(
                                                 "{name} ({mode}, {:.0}%)",
                                                 f32::from(opacity) * 100.0 / 255.0
@@ -2255,7 +2324,7 @@ impl App {
                                             name
                                         };
                                         let label_text =
-                                            RichText::new(display).size(12.5).color(if active {
+                                            RichText::new(i18n::display(&display).into_owned()).size(12.5).color(if active {
                                                 theme.pill_active_fg()
                                             } else {
                                                 theme.text_primary()
@@ -2266,8 +2335,9 @@ impl App {
                                                     .frame(false)
                                                     .truncate(),
                                             )
-                                            .on_hover_text(format!(
-                                                "{mode} · Arraste para reordenar"
+                                            .on_hover_text(i18n::format(
+                                                "layer-drag-hint",
+                                                &[&mode],
                                             ));
                                         if self.shortcuts.mouse.click(
                                             &label_resp,
@@ -2312,7 +2382,7 @@ impl App {
                         true,
                         false,
                         sz,
-                        "Adicionar camada",
+                        tr("add-layer"),
                     )
                     .clicked()
                     {
@@ -2325,7 +2395,7 @@ impl App {
                         true,
                         false,
                         sz,
-                        "Duplicar camada",
+                        tr("duplicate-layer"),
                     )
                     .clicked()
                     {
@@ -2338,7 +2408,7 @@ impl App {
                         count > 1,
                         false,
                         sz,
-                        "Excluir camada",
+                        tr("delete-layer"),
                     )
                     .clicked()
                     {
@@ -2351,7 +2421,7 @@ impl App {
                         selected > 0,
                         false,
                         sz,
-                        "Mesclar com a camada abaixo",
+                        tr("merge-layer-down"),
                     )
                     .clicked()
                     {
@@ -2362,13 +2432,13 @@ impl App {
                             ActionIcon::ArrowUp,
                             Scope::LayerUpButton,
                             selected + 1 < count,
-                            "Subir camada",
+                            tr("layer-up"),
                         ),
                         (
                             ActionIcon::ArrowDown,
                             Scope::LayerDownButton,
                             selected > 0,
-                            "Descer camada",
+                            tr("layer-down"),
                         ),
                     ] {
                         let response = icon_button(ui, theme, icon, enabled, false, sz, label);
@@ -2392,7 +2462,7 @@ impl App {
                             true,
                             false,
                             sz,
-                            "Propriedades da camada",
+                            tr("layer-properties"),
                         )
                         .clicked()
                         {
@@ -2410,10 +2480,7 @@ impl App {
         } else if let Some(layer) = open_props {
             self.open_layer_properties(layer);
         } else if let Some((from, to)) = move_pair {
-            let result = self
-                .tab_mut()
-                .editor
-                .move_layer(from, to, "Reordenar camada");
+            let result = self.tab_mut().editor.move_layer(from, to, "reorder-layer");
             self.finish_geometry(result);
         } else if let Some(layer) = double_clicked_layer {
             self.open_layer_properties(layer);
@@ -2430,7 +2497,7 @@ impl App {
 
         self.theme.styled_card(
             ui,
-            "Histórico",
+            tr("history"),
             |ui| {
                 let icon = if open {
                     ActionIcon::ChevronDown
@@ -2445,9 +2512,9 @@ impl App {
                     false,
                     vec2(20.0, 20.0),
                     if open {
-                        "Recolher histórico"
+                        tr("collapse-history")
                     } else {
-                        "Expandir histórico"
+                        tr("expand-history")
                     },
                 )
                 .clicked()
@@ -2490,18 +2557,23 @@ impl App {
                             })
                             .inner
                         };
-                        if item(ui, "0. Nova imagem".to_owned(), undo_len == 0, false) {
+                        if item(ui, i18n::display(&format!("0. {}", i18n::logical_text("new-image"))).into_owned(), undo_len == 0, false) {
                             target_state = Some(0);
                         }
                         for (index, label) in self.tab().editor.history().enumerate() {
                             let state = index + 1;
-                            if item(ui, format!("{state}. {label}"), undo_len == state, false) {
+                            if item(
+                                ui,
+                                i18n::display(&format!("{state}. {}", i18n::logical_text(label))).into_owned(),
+                                undo_len == state,
+                                false,
+                            ) {
                                 target_state = Some(state);
                             }
                         }
                         for (offset, label) in self.tab().editor.redo_history().rev().enumerate() {
                             let state = undo_len + offset + 1;
-                            if item(ui, format!("{state}. {label}"), false, true) {
+                            if item(ui, i18n::display(&format!("{state}. {}", i18n::logical_text(label))).into_owned(), false, true) {
                                 target_state = Some(state);
                             }
                         }
@@ -2589,12 +2661,9 @@ impl App {
         if let Some(cr) = self.tab_mut().canvas_resize.take() {
             if cr.preview_size != cr.original {
                 let selected = self.tab().editor.selected;
-                let result = geometry::canvas_size(
-                    &self.tab().editor.document,
-                    cr.preview_size,
-                    (0, 0),
-                );
-                self.install_geometry(result, selected, "Tamanho da tela");
+                let result =
+                    geometry::canvas_size(&self.tab().editor.document, cr.preview_size, (0, 0));
+                self.install_geometry(result, selected, "canvas-size");
             } else {
                 self.tab_mut().editor.mark_full_refresh();
             }
@@ -2608,16 +2677,16 @@ impl App {
             let selection = tab.editor.selection.as_ref();
             let src = tab.editor.document.layer_pixels(layer).expect("camada ativa");
             if let Some(grad) = tab.gradient.take() {
-                (Some(grad.render_preview(src, size, selection)), "Gradiente")
+                (Some(grad.render_preview(src, size, selection)), "gradient")
             } else if let Some(lc) = tab.line_curve.take() {
-                (Some(lc.render_preview(src, size, selection)), "Linha / Curva")
+                (Some(lc.render_preview(src, size, selection)), "line-curve")
             } else if let Some(shape) = tab.shape_session.take() {
-                (Some(shape.render_preview(src, size, selection)), "Forma")
+                (Some(shape.render_preview(src, size, selection)), "shape")
             } else if let Some(mut text) = tab.text_session.take() {
                 let empty = text.text.trim().is_empty();
                 let buf = (!empty)
                     .then(|| text.render_preview(&mut self.font_catalog, src, size, selection));
-                (buf, "Texto")
+                (buf, "text")
             } else {
                 (None, "")
             }
@@ -2658,7 +2727,7 @@ impl App {
         tab.selection_gesture = None;
         tab.selection_path.clear();
         tab.stroke_gesture = None;
-        tab.editor.set_selection(None, "Limpar seleção");
+        tab.editor.set_selection(None, "deselect");
     }
 
     fn bucket_fill(&mut self, seed: Point, color: Pixel, contiguous: bool) {
@@ -2694,9 +2763,9 @@ impl App {
     fn paint_selection(&mut self, erase: bool) {
         self.finish_opacity();
         let (color, label) = if erase {
-            (Pixel::default(), "Apagar seleção")
+            (Pixel::default(), "erase-selection")
         } else {
-            (self.palette.primary, "Preencher seleção")
+            (self.palette.primary, "fill-selection")
         };
         match self.tab_mut().editor.fill_selection(color, label) {
             Ok(changed) => {
@@ -2825,7 +2894,8 @@ impl App {
                 if let Some(texture) = &mut tab.image {
                     texture.set(image, TextureOptions::NEAREST);
                 } else {
-                    tab.image = Some(ctx.load_texture("Documento", image, TextureOptions::NEAREST));
+                    tab.image =
+                        Some(ctx.load_texture(tr("document"), image, TextureOptions::NEAREST));
                 }
             }
             Err(error) => {
@@ -3789,7 +3859,7 @@ impl App {
                         self.commit_selection_with(
                             self.wand(start, contiguous),
                             mode,
-                            self.tool.label(),
+                            self.tool.label_key(),
                         );
                         preview = self.tab().editor.selection.clone();
                         ui.ctx().request_repaint();
@@ -3900,7 +3970,7 @@ impl App {
                                         self.commit_selection_with(
                                             Ok(candidate),
                                             mode,
-                                            self.tool.label(),
+                                            self.tool.label_key(),
                                         );
                                         preview = self.tab().editor.selection.clone();
                                     } else {
@@ -3923,7 +3993,7 @@ impl App {
                                             self.commit_selection_with(
                                                 selection,
                                                 mode,
-                                                self.tool.label(),
+                                                self.tool.label_key(),
                                             );
                                             preview = self.tab().editor.selection.clone();
                                         } else {
@@ -4292,8 +4362,12 @@ impl App {
                                                 ))
                                             } else {
                                                 self.notice = Some((
-                                                    "Carimbo: use Ctrl+Clique para definir a origem."
-                                                        .into(),
+                                                    i18n::format(
+                                                        "clone-source-hint",
+                                                        &[&self.shortcuts.mouse_hint(
+                                                            MouseAction::CloneSetAnchor,
+                                                        )],
+                                                    ),
                                                     false,
                                                 ));
                                                 None
@@ -4385,7 +4459,8 @@ impl App {
     fn dialogs(&mut self, ctx: &egui::Context) {
         if self.tool_size_popup {
             let mut open = true;
-            egui::Window::new("Tamanho do traço")
+            egui::Window::new(tr("stroke-size"))
+                .id(egui::Id::new("stroke_size"))
                 .collapsible(false)
                 .resizable(false)
                 .open(&mut open)
@@ -4393,7 +4468,7 @@ impl App {
                     ui.add(
                         egui::Slider::new(&mut self.diameter, 1..=MAX_BRUSH_DIAMETER)
                             .suffix(" px")
-                            .text("Tamanho"),
+                            .text(tr("size")),
                     );
                 });
             if !open {
@@ -4406,14 +4481,14 @@ impl App {
         {
             let scope = pending.scope;
             let tab_index = pending.tab_index;
-            let doc_name = self.tabs[tab_index].name.clone();
+            let doc_name = self.tabs[tab_index].title();
             let response = egui::Modal::new(egui::Id::new("discard")).show(ctx, |ui| {
-                ui.heading(format!("Salvar as alterações em «{doc_name}»?"));
+                ui.heading(i18n::format("save-changes", &[&doc_name]));
                 ui.horizontal(|ui| {
                     (
-                        ui.button("Salvar e continuar").clicked(),
-                        ui.button("Descartar e continuar").clicked(),
-                        ui.button("Cancelar").clicked(),
+                        ui.button(tr("save-continue")).clicked(),
+                        ui.button(tr("discard-continue")).clicked(),
+                        ui.button(tr("cancel")).clicked(),
                     )
                 })
                 .inner
@@ -4464,9 +4539,9 @@ impl App {
                     self.report(
                         result,
                         if is_project {
-                            "Projeto salvo"
+                            tr("project-saved")
                         } else {
-                            "PNG exportado"
+                            tr("png-exported")
                         },
                     );
                     if let Some(pending) = self.pending_close.take()
@@ -4499,7 +4574,7 @@ impl App {
                         self.tab_mut().editor.record_layer_meta(
                             layer,
                             dialog.original,
-                            "Propriedades da camada",
+                            "layer-properties",
                         );
                         self.tab_mut().thumbs_dirty = true;
                     }
@@ -4517,15 +4592,15 @@ impl App {
         if let Some((mut width, mut height)) = self.new_size {
             let limit = ctx.input(|input| input.max_texture_side).min(8192) as u32;
             let response = egui::Modal::new(egui::Id::new("new")).show(ctx, |ui| {
-                ui.heading("Nova imagem");
+                ui.heading(tr("new-image"));
                 ui.horizontal(|ui| {
-                    ui.label("Largura");
+                    ui.label(tr("width"));
                     ui.add(
                         egui::DragValue::new(&mut width)
                             .range(1..=limit)
                             .suffix(" px"),
                     );
-                    ui.label("Altura");
+                    ui.label(tr("height"));
                     ui.add(
                         egui::DragValue::new(&mut height)
                             .range(1..=limit)
@@ -4534,15 +4609,15 @@ impl App {
                 });
                 ui.horizontal(|ui| {
                     (
-                        ui.button("Criar").clicked(),
-                        ui.button("Cancelar").clicked(),
+                        ui.button(tr("create")).clicked(),
+                        ui.button(tr("cancel")).clicked(),
                     )
                 })
                 .inner
             });
             if response.inner.0 {
-                match Document::new(width, height) {
-                    Ok(document) => self.open_in_new_tab(document, "Sem título".into(), None),
+                match new_document(width, height) {
+                    Ok(document) => self.open_in_new_tab(document, String::new(), None),
                     Err(error) => self.report(Err(error), ""),
                 }
                 self.new_size = None;
@@ -4699,13 +4774,21 @@ fn has_extension(path: &Path, extension: &str) -> bool {
         .is_some_and(|ext| ext.eq_ignore_ascii_case(extension))
 }
 
+fn new_document(width: u32, height: u32) -> io::Result<Document> {
+    let mut document = Document::new(width, height)?;
+    document.set_layer_name(0, i18n::logical_text("background"))?;
+    Ok(document)
+}
+
 fn open_document(path: &Path) -> io::Result<(Document, bool)> {
     let file = BufReader::new(File::open(path)?);
     let pdn = has_extension(path, PDN_EXT);
     let document = if pdn {
         Document::read_pdn(file)?
     } else {
-        Document::read_png(file)?
+        let mut document = Document::read_png(file)?;
+        document.set_layer_name(0, i18n::logical_text("background"))?;
+        document
     };
     Ok((document, pdn))
 }
@@ -4751,6 +4834,10 @@ impl App {
     }
 
     fn ui_frame(&mut self, ctx: &egui::Context) {
+        self.locale.with(|| self.localized_frame(ctx));
+    }
+
+    fn localized_frame(&mut self, ctx: &egui::Context) {
         let os_fullscreen = ctx.input(|input| input.viewport().fullscreen);
         if os_fullscreen != self.observed_fullscreen {
             self.observed_fullscreen = os_fullscreen;
@@ -5052,7 +5139,7 @@ impl App {
                         .on_hover_text(notice);
                     } else {
                         ui.label(
-                            RichText::new("Pronto")
+                            RichText::new(tr("ready"))
                                 .size(12.0)
                                 .color(self.theme.text_muted()),
                         );
@@ -5067,7 +5154,7 @@ impl App {
                             true,
                             false,
                             vec2(20.0, 20.0),
-                            "Ampliar zoom",
+                            tr("zoom-enlarge"),
                         )
                         .clicked()
                         {
@@ -5082,7 +5169,7 @@ impl App {
                                     .show_value(false)
                                     .clamping(egui::SliderClamping::Edits),
                             )
-                            .on_hover_text("Zoom contínuo")
+                            .on_hover_text(tr("continuous-zoom"))
                             .changed()
                         {
                             self.tab_mut().zoom = Some(scale / 100.0);
@@ -5094,7 +5181,7 @@ impl App {
                             true,
                             false,
                             vec2(20.0, 20.0),
-                            "Reduzir zoom",
+                            tr("zoom-out"),
                         )
                         .clicked()
                         {
@@ -5105,11 +5192,11 @@ impl App {
                                 .size(12.0)
                                 .color(self.theme.text_primary()),
                             |ui| {
-                                if ui.button("Ajustar à janela").clicked() {
+                                if ui.button(tr("fit-window")).clicked() {
                                     self.tab_mut().zoom = None;
                                     ui.close();
                                 }
-                                if ui.button("100% (Real)").clicked() {
+                                if ui.button(tr("zoom-actual")).clicked() {
                                     self.tab_mut().zoom = Some(1.0);
                                     ui.close();
                                 }
@@ -5200,6 +5287,98 @@ impl eframe::App for App {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn language_switch_updates_an_open_document_and_keeps_its_history_and_layer_names()
+    -> io::Result<()> {
+        fn collect_text(shape: &egui::Shape, output: &mut Vec<String>) {
+            match shape {
+                egui::Shape::Text(text) => output.push(text.galley.text().to_owned()),
+                egui::Shape::Vec(shapes) => {
+                    for shape in shapes {
+                        collect_text(shape, output);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        let ctx = egui::Context::default();
+        let mut app = App::new(&ctx, new_document(32, 24)?);
+        app.tab_mut().editor.add_layer()?;
+        app.tab_mut()
+            .editor
+            .document
+            .set_layer_name(1, "My saved layer")?;
+        let shortcut = app.shortcuts.hint(Command::Save);
+        for locale in i18n::Locale::all() {
+            app.locale = locale;
+            ctx.set_fonts(i18n::fonts(locale));
+            let output = ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(1280.0, 800.0))),
+                    ..Default::default()
+                },
+                |ctx| app.ui_frame(ctx),
+            );
+            let mut rendered = Vec::new();
+            for shape in output.shapes {
+                collect_text(&shape.shape, &mut rendered);
+            }
+            let (file, untitled, history) = locale.with(|| {
+                (
+                    tr("file"),
+                    tr("untitled"),
+                    i18n::display(&format!("1. {}", i18n::logical_text("add-layer"))).into_owned(),
+                )
+            });
+            assert!(
+                rendered.iter().any(|text| text == file),
+                "{}",
+                locale.name()
+            );
+            assert!(
+                rendered.iter().any(|text| text.contains(untitled)),
+                "{}",
+                locale.name()
+            );
+            assert!(rendered.contains(&history), "{}", locale.name());
+            assert_eq!(
+                app.tab().editor.document.layer_name(1),
+                Some("My saved layer")
+            );
+            assert_eq!(app.shortcuts.hint(Command::Save), shortcut);
+        }
+        assert!(app.tab_mut().editor.undo()?);
+        assert_eq!(app.tab().editor.document.layer_count(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn pdn_edit_undo_and_png_export_work_in_each_language() -> io::Result<()> {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/pdn/Untitled.pdn");
+        for locale in i18n::Locale::all() {
+            locale.with(|| -> io::Result<()> {
+                let (document, pdn) = open_document(&path)?;
+                assert!(pdn);
+                let mut editor = Editor::new(document);
+                let color = Pixel([255, 0, 255, 255]);
+                let original = editor.document.pixel(0, 0, 0);
+                editor.select_all();
+                assert!(editor.fill_selection(color, "fill-selection")?);
+                assert_eq!(editor.document.pixel(0, 0, 0), Some(color));
+                assert!(editor.undo()?);
+                assert_eq!(editor.document.pixel(0, 0, 0), original);
+
+                let mut png = Vec::new();
+                editor.document.write_png(&mut png)?;
+                let exported = Document::read_png(std::io::Cursor::new(png))?;
+                assert_eq!(exported.composite()?, editor.document.composite()?);
+                Ok(())
+            })?;
+        }
+        Ok(())
+    }
 
     #[test]
     fn selection_tools_commit_soft_masks_that_fill_and_move_with_partial_alpha() -> io::Result<()> {

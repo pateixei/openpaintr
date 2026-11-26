@@ -1,3 +1,4 @@
+use super::i18n::text as tr;
 use std::{
     collections::{BTreeMap, HashMap},
     fs::{self, File},
@@ -30,6 +31,10 @@ macro_rules! actions {
             }
 
             pub fn label(self) -> &'static str {
+                tr(self.label_key())
+            }
+
+            fn label_key(self) -> &'static str {
                 match self { $(Self::$action => $label),* }
             }
 
@@ -44,95 +49,95 @@ macro_rules! actions {
 }
 
 actions! {
-    Brush: "tool.brush", "Pincel", ["B"], ["B", "Shift+B"];
-    Pencil: "tool.pencil", "Lápis", ["P"], ["B", "Shift+B"];
-    Bucket: "tool.bucket", "Balde de tinta", ["F"], ["G", "Shift+G"];
-    Eraser: "tool.eraser", "Borracha", ["E"], ["E"];
-    Eyedropper: "tool.eyedropper", "Conta-gotas", ["K"], ["I"];
-    CloneStamp: "tool.clone_stamp", "Carimbo de clonagem", ["L"], ["S"];
-    Recolor: "tool.recolor", "Recolorir", ["R"], ["J"];
-    Gradient: "tool.gradient", "Gradiente", ["G"], ["G", "Shift+G"];
-    LineCurve: "tool.line_curve", "Linha / Curva", ["O", "Shift+O"], ["U", "Shift+U"];
-    Shape: "tool.shape", "Formas", ["O", "Shift+O"], ["U", "Shift+U"];
-    Text: "tool.text", "Texto", ["T"], ["T"];
-    Rectangle: "tool.rectangle_select", "Seleção retangular", ["S", "Shift+S"], ["M", "Shift+M"];
-    Lasso: "tool.lasso", "Laço", ["S", "Shift+S"], ["L"];
-    Ellipse: "tool.ellipse_select", "Seleção elíptica", ["S", "Shift+S"], ["M", "Shift+M"];
-    Wand: "tool.magic_wand", "Varinha mágica", ["S", "Shift+S"], ["W"];
-    Pan: "tool.pan", "Mão", ["H"], ["H"];
-    Zoom: "tool.zoom", "Ferramenta Zoom", ["Z"], ["Z"];
-    TemporaryPan: "tool.temporary_pan", "Mão temporária (manter pressionado)", ["Space"], ["Space"];
-    BrushSmaller: "tool.brush_smaller", "Reduzir tamanho do pincel", ["OpenBracket"], ["OpenBracket"];
-    BrushLarger: "tool.brush_larger", "Aumentar tamanho do pincel", ["CloseBracket"], ["CloseBracket"];
-    BrushSmallerFast: "tool.brush_smaller_fast", "Reduzir tamanho do pincel em 5 px", ["Ctrl+OpenBracket"], [];
-    BrushLargerFast: "tool.brush_larger_fast", "Aumentar tamanho do pincel em 5 px", ["Ctrl+CloseBracket"], [];
-    New: "file.new", "Nova imagem", ["Ctrl+N"], ["Ctrl+N"];
-    Open: "file.open", "Abrir", ["Ctrl+O"], ["Ctrl+O"];
-    Save: "file.save", "Salvar", ["Ctrl+S"], ["Ctrl+S"];
-    SaveAs: "file.save_as", "Salvar como", ["Ctrl+Shift+S"], ["Ctrl+Shift+S"];
-    Export: "file.export_png", "Exportar PNG", [], [];
-    Close: "file.close", "Fechar documento", ["Ctrl+W", "Ctrl+F4"], ["Ctrl+W"];
-    CloseAll: "file.close_all", "Fechar todos os documentos", ["Ctrl+Shift+W"], ["Ctrl+Alt+W"];
-    Exit: "file.exit", "Sair", ["Ctrl+Q"], ["Ctrl+Q"];
-    NextDocument: "view.next_document", "Próximo documento", ["Ctrl+Tab", "Ctrl+PageDown"], ["Ctrl+Tab", "Ctrl+PageDown"];
-    PrevDocument: "view.prev_document", "Documento anterior", ["Ctrl+Shift+Tab", "Ctrl+PageUp"], ["Ctrl+Shift+Tab", "Ctrl+PageUp"];
-    Undo: "edit.undo", "Desfazer", ["Ctrl+Z"], ["Ctrl+Z"];
-    Redo: "edit.redo", "Refazer", ["Ctrl+Y"], ["Ctrl+Shift+Z"];
-    Cut: "edit.cut", "Recortar", ["Ctrl+X", "Shift+Delete"], ["Ctrl+X", "F2"];
-    Copy: "edit.copy", "Copiar", ["Ctrl+C", "Ctrl+Insert"], ["Ctrl+C", "F3"];
-    CopyComposite: "edit.copy_composite", "Copiar composição", ["Ctrl+Shift+C"], ["Ctrl+Shift+C"];
-    Paste: "edit.paste", "Colar", ["Ctrl+V", "Shift+Insert"], ["Ctrl+V", "F4"];
-    PasteLayer: "edit.paste_layer", "Colar em nova camada", ["Ctrl+Shift+V"], [];
-    PasteImage: "edit.paste_image", "Colar em nova imagem", ["Ctrl+Alt+V"], [];
-    CopyMask: "selection.copy_mask", "Copiar máscara", ["Ctrl+Alt+Shift+C"], [];
-    PasteMask: "selection.paste_mask", "Colar máscara (substituir)", ["Ctrl+Alt+Shift+V"], [];
-    SelectAll: "selection.all", "Selecionar tudo", ["Ctrl+A"], ["Ctrl+A"];
-    Deselect: "selection.clear", "Limpar seleção", ["Ctrl+D", "Enter"], ["Ctrl+D"];
-    Invert: "selection.invert", "Inverter seleção", ["Ctrl+I"], ["Ctrl+Shift+I", "Shift+F7"];
-    Fill: "selection.fill", "Preencher com a cor atual", ["Backspace"], ["Alt+Backspace"];
-    Erase: "selection.erase", "Apagar seleção", ["Delete"], ["Delete"];
-    MovePixels: "selection.move_pixels", "Mover/transformar pixels", ["M"], ["V"];
-    MoveMask: "selection.move_mask", "Mover/transformar máscara", ["M", "Shift+M"], [];
-    ZoomIn: "view.zoom_in", "Aumentar zoom", ["Ctrl+Plus", "Ctrl+Equals", "Ctrl+Shift+Plus"], ["Ctrl+Plus", "Ctrl+Equals", "Ctrl+Shift+Plus"];
-    ZoomOut: "view.zoom_out", "Reduzir zoom", ["Ctrl+Minus"], ["Ctrl+Minus"];
-    Fit: "view.fit", "Ajustar à janela", ["Ctrl+B"], ["Ctrl+0"];
-    FitSelection: "view.fit_selection", "Ajustar à seleção", ["Ctrl+Shift+B"], [];
-    ActualSize: "view.actual_size", "Tamanho real", ["Ctrl+0"], ["Ctrl+1"];
-    Fullscreen: "view.fullscreen", "Tela cheia", ["F11"], ["F11"];
-    Grid: "view.pixel_grid", "Grade de pixels", [], [];
-    Rulers: "view.rulers", "Réguas", [], ["Ctrl+R"];
-    Crop: "image.crop", "Recortar à seleção", ["Ctrl+Shift+X"], [];
-    Resize: "image.resize", "Redimensionar imagem", ["Ctrl+R"], ["Ctrl+Alt+I"];
-    CanvasSize: "image.canvas_size", "Tamanho da tela", ["Ctrl+Shift+R"], ["Ctrl+Alt+C"];
-    FlipImageX: "image.flip_horizontal", "Inverter imagem horizontalmente", [], [];
-    FlipImageY: "image.flip_vertical", "Inverter imagem verticalmente", [], [];
-    RotateCw: "image.rotate_clockwise", "Girar imagem 90° horário", ["Ctrl+H"], [];
-    RotateCcw: "image.rotate_counterclockwise", "Girar imagem 90° anti-horário", ["Ctrl+G"], [];
-    RotateHalf: "image.rotate_half", "Girar imagem 180°", [], [];
-    Flatten: "image.flatten", "Achatar imagem", ["Ctrl+Shift+F"], [];
-    AddLayer: "layer.add", "Adicionar camada", ["Ctrl+Shift+N"], ["Ctrl+Alt+Shift+N"];
-    DeleteLayer: "layer.delete", "Excluir camada", ["Ctrl+Shift+Delete"], [];
-    DuplicateLayer: "layer.duplicate", "Duplicar camada", ["Ctrl+Shift+D"], ["Ctrl+J"];
-    MergeLayerDown: "layer.merge_down", "Mesclar com a camada abaixo", ["Ctrl+M"], ["Ctrl+E"];
-    ImportLayer: "layer.import_file", "Importar camada de arquivo", [], [];
-    LayerProperties: "layer.properties", "Propriedades da camada", ["F4"], [];
-    MoveLayerTop: "layer.move_top", "Mover camada para o topo", [], ["Ctrl+Shift+CloseBracket"];
-    MoveLayerUp: "layer.move_up", "Subir camada", [], ["Ctrl+CloseBracket"];
-    MoveLayerDown: "layer.move_down", "Descer camada", [], ["Ctrl+OpenBracket"];
-    MoveLayerBottom: "layer.move_bottom", "Mover camada para a base", [], ["Ctrl+Shift+OpenBracket"];
-    GoTopLayer: "layer.go_top", "Ir para a camada do topo", ["Alt+Home"], ["Alt+Period"];
-    GoUpLayer: "layer.go_up", "Ir para a camada acima", ["Alt+PageUp"], ["Alt+CloseBracket"];
-    GoDownLayer: "layer.go_down", "Ir para a camada abaixo", ["Alt+PageDown"], ["Alt+OpenBracket"];
-    GoBottomLayer: "layer.go_bottom", "Ir para a camada da base", ["Alt+End"], ["Alt+Comma"];
-    ToggleLayer: "layer.toggle_visibility", "Alternar visibilidade da camada", ["Ctrl+Comma"], [];
-    FlipLayerX: "layer.flip_horizontal", "Inverter camada horizontalmente", [], [];
-    FlipLayerY: "layer.flip_vertical", "Inverter camada verticalmente", [], [];
-    RotateLayerHalf: "layer.rotate_half", "Girar camada 180°", [], [];
-    RotateZoom: "layer.rotate_zoom", "Girar/Zoom da camada", ["Ctrl+Shift+Z"], [];
-    FreeTransform: "edit.free_transform", "Transformação livre", [], ["Ctrl+T"];
-    SwapColors: "color.swap", "Alternar cores primária e secundária", ["X"], ["X"];
-    ResetColors: "color.reset", "Restaurar cores padrão", [], ["D"];
-    Settings: "settings.shortcuts", "Configurar atalhos", ["Alt+X"], ["Ctrl+Alt+Shift+K"];
+    Brush: "tool.brush", "brush", ["B"], ["B", "Shift+B"];
+    Pencil: "tool.pencil", "pencil", ["P"], ["B", "Shift+B"];
+    Bucket: "tool.bucket", "bucket", ["F"], ["G", "Shift+G"];
+    Eraser: "tool.eraser", "eraser", ["E"], ["E"];
+    Eyedropper: "tool.eyedropper", "eyedropper", ["K"], ["I"];
+    CloneStamp: "tool.clone_stamp", "clone-stamp", ["L"], ["S"];
+    Recolor: "tool.recolor", "recolor", ["R"], ["J"];
+    Gradient: "tool.gradient", "gradient", ["G"], ["G", "Shift+G"];
+    LineCurve: "tool.line_curve", "line-curve", ["O", "Shift+O"], ["U", "Shift+U"];
+    Shape: "tool.shape", "shapes", ["O", "Shift+O"], ["U", "Shift+U"];
+    Text: "tool.text", "text", ["T"], ["T"];
+    Rectangle: "tool.rectangle_select", "rectangle-select", ["S", "Shift+S"], ["M", "Shift+M"];
+    Lasso: "tool.lasso", "lasso", ["S", "Shift+S"], ["L"];
+    Ellipse: "tool.ellipse_select", "ellipse-select", ["S", "Shift+S"], ["M", "Shift+M"];
+    Wand: "tool.magic_wand", "magic-wand", ["S", "Shift+S"], ["W"];
+    Pan: "tool.pan", "hand", ["H"], ["H"];
+    Zoom: "tool.zoom", "zoom-tool", ["Z"], ["Z"];
+    TemporaryPan: "tool.temporary_pan", "temporary-hand", ["Space"], ["Space"];
+    BrushSmaller: "tool.brush_smaller", "brush-narrower", ["OpenBracket"], ["OpenBracket"];
+    BrushLarger: "tool.brush_larger", "brush-wider", ["CloseBracket"], ["CloseBracket"];
+    BrushSmallerFast: "tool.brush_smaller_fast", "brush-narrower-five", ["Ctrl+OpenBracket"], [];
+    BrushLargerFast: "tool.brush_larger_fast", "brush-wider-five", ["Ctrl+CloseBracket"], [];
+    New: "file.new", "new-image", ["Ctrl+N"], ["Ctrl+N"];
+    Open: "file.open", "open", ["Ctrl+O"], ["Ctrl+O"];
+    Save: "file.save", "save", ["Ctrl+S"], ["Ctrl+S"];
+    SaveAs: "file.save_as", "save-as", ["Ctrl+Shift+S"], ["Ctrl+Shift+S"];
+    Export: "file.export_png", "export-png", [], [];
+    Close: "file.close", "close-document", ["Ctrl+W", "Ctrl+F4"], ["Ctrl+W"];
+    CloseAll: "file.close_all", "close-all", ["Ctrl+Shift+W"], ["Ctrl+Alt+W"];
+    Exit: "file.exit", "exit", ["Ctrl+Q"], ["Ctrl+Q"];
+    NextDocument: "view.next_document", "next-document", ["Ctrl+Tab", "Ctrl+PageDown"], ["Ctrl+Tab", "Ctrl+PageDown"];
+    PrevDocument: "view.prev_document", "previous-document", ["Ctrl+Shift+Tab", "Ctrl+PageUp"], ["Ctrl+Shift+Tab", "Ctrl+PageUp"];
+    Undo: "edit.undo", "undo", ["Ctrl+Z"], ["Ctrl+Z"];
+    Redo: "edit.redo", "redo", ["Ctrl+Y"], ["Ctrl+Shift+Z"];
+    Cut: "edit.cut", "cut", ["Ctrl+X", "Shift+Delete"], ["Ctrl+X", "F2"];
+    Copy: "edit.copy", "copy", ["Ctrl+C", "Ctrl+Insert"], ["Ctrl+C", "F3"];
+    CopyComposite: "edit.copy_composite", "copy-composite", ["Ctrl+Shift+C"], ["Ctrl+Shift+C"];
+    Paste: "edit.paste", "paste", ["Ctrl+V", "Shift+Insert"], ["Ctrl+V", "F4"];
+    PasteLayer: "edit.paste_layer", "paste-new-layer", ["Ctrl+Shift+V"], [];
+    PasteImage: "edit.paste_image", "paste-new-image", ["Ctrl+Alt+V"], [];
+    CopyMask: "selection.copy_mask", "copy-mask", ["Ctrl+Alt+Shift+C"], [];
+    PasteMask: "selection.paste_mask", "paste-mask-replace", ["Ctrl+Alt+Shift+V"], [];
+    SelectAll: "selection.all", "select-all", ["Ctrl+A"], ["Ctrl+A"];
+    Deselect: "selection.clear", "deselect", ["Ctrl+D", "Enter"], ["Ctrl+D"];
+    Invert: "selection.invert", "invert-selection", ["Ctrl+I"], ["Ctrl+Shift+I", "Shift+F7"];
+    Fill: "selection.fill", "fill-current", ["Backspace"], ["Alt+Backspace"];
+    Erase: "selection.erase", "erase-selection", ["Delete"], ["Delete"];
+    MovePixels: "selection.move_pixels", "move-transform-pixels", ["M"], ["V"];
+    MoveMask: "selection.move_mask", "move-transform-mask", ["M", "Shift+M"], [];
+    ZoomIn: "view.zoom_in", "zoom-in", ["Ctrl+Plus", "Ctrl+Equals", "Ctrl+Shift+Plus"], ["Ctrl+Plus", "Ctrl+Equals", "Ctrl+Shift+Plus"];
+    ZoomOut: "view.zoom_out", "zoom-out", ["Ctrl+Minus"], ["Ctrl+Minus"];
+    Fit: "view.fit", "fit-window", ["Ctrl+B"], ["Ctrl+0"];
+    FitSelection: "view.fit_selection", "fit-selection", ["Ctrl+Shift+B"], [];
+    ActualSize: "view.actual_size", "actual-size", ["Ctrl+0"], ["Ctrl+1"];
+    Fullscreen: "view.fullscreen", "full-screen", ["F11"], ["F11"];
+    Grid: "view.pixel_grid", "pixel-grid", [], [];
+    Rulers: "view.rulers", "rulers", [], ["Ctrl+R"];
+    Crop: "image.crop", "crop-selection", ["Ctrl+Shift+X"], [];
+    Resize: "image.resize", "resize-image", ["Ctrl+R"], ["Ctrl+Alt+I"];
+    CanvasSize: "image.canvas_size", "canvas-size", ["Ctrl+Shift+R"], ["Ctrl+Alt+C"];
+    FlipImageX: "image.flip_horizontal", "flip-image-horizontal", [], [];
+    FlipImageY: "image.flip_vertical", "flip-image-vertical", [], [];
+    RotateCw: "image.rotate_clockwise", "rotate-image-clockwise", ["Ctrl+H"], [];
+    RotateCcw: "image.rotate_counterclockwise", "rotate-image-counterclockwise", ["Ctrl+G"], [];
+    RotateHalf: "image.rotate_half", "rotate-image-half", [], [];
+    Flatten: "image.flatten", "flatten", ["Ctrl+Shift+F"], [];
+    AddLayer: "layer.add", "add-layer", ["Ctrl+Shift+N"], ["Ctrl+Alt+Shift+N"];
+    DeleteLayer: "layer.delete", "delete-layer", ["Ctrl+Shift+Delete"], [];
+    DuplicateLayer: "layer.duplicate", "duplicate-layer", ["Ctrl+Shift+D"], ["Ctrl+J"];
+    MergeLayerDown: "layer.merge_down", "merge-layer-down", ["Ctrl+M"], ["Ctrl+E"];
+    ImportLayer: "layer.import_file", "import-layer-file", [], [];
+    LayerProperties: "layer.properties", "layer-properties", ["F4"], [];
+    MoveLayerTop: "layer.move_top", "layer-to-top", [], ["Ctrl+Shift+CloseBracket"];
+    MoveLayerUp: "layer.move_up", "layer-up", [], ["Ctrl+CloseBracket"];
+    MoveLayerDown: "layer.move_down", "layer-down", [], ["Ctrl+OpenBracket"];
+    MoveLayerBottom: "layer.move_bottom", "layer-to-bottom", [], ["Ctrl+Shift+OpenBracket"];
+    GoTopLayer: "layer.go_top", "select-top-layer", ["Alt+Home"], ["Alt+Period"];
+    GoUpLayer: "layer.go_up", "select-layer-above", ["Alt+PageUp"], ["Alt+CloseBracket"];
+    GoDownLayer: "layer.go_down", "select-layer-below", ["Alt+PageDown"], ["Alt+OpenBracket"];
+    GoBottomLayer: "layer.go_bottom", "select-bottom-layer", ["Alt+End"], ["Alt+Comma"];
+    ToggleLayer: "layer.toggle_visibility", "toggle-layer-visibility", ["Ctrl+Comma"], [];
+    FlipLayerX: "layer.flip_horizontal", "flip-layer-horizontal", [], [];
+    FlipLayerY: "layer.flip_vertical", "flip-layer-vertical", [], [];
+    RotateLayerHalf: "layer.rotate_half", "rotate-layer-half", [], [];
+    RotateZoom: "layer.rotate_zoom", "layer-rotate-zoom", ["Ctrl+Shift+Z"], [];
+    FreeTransform: "edit.free_transform", "free-transform", [], ["Ctrl+T"];
+    SwapColors: "color.swap", "toggle-colors", ["X"], ["X"];
+    ResetColors: "color.reset", "reset-colors", [], ["D"];
+    Settings: "settings.shortcuts", "configure-shortcuts", ["Alt+X"], ["Ctrl+Alt+Shift+K"];
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -189,7 +194,7 @@ impl Profile {
         for &action in Command::ALL {
             for binding in &self.bindings[action.id()] {
                 let chord = Chord::parse(binding).ok_or_else(|| {
-                    format!("{}: combinação inválida «{binding}»", action.label())
+                    super::i18n::format_logical("invalid-binding", &[&super::i18n::logical_text(action.label_key()), &binding])
                 })?;
                 let candidates = mapped.entry(chord).or_default();
                 if candidates.contains(&action) {
@@ -219,11 +224,9 @@ impl Profile {
                     .iter()
                     .find(|&&other| group == 0 || native_group(other) != group)
                 {
-                    return Err(format!(
-                        "{} está atribuído a «{}» e «{}».",
-                        chord.label(),
-                        other.label(),
-                        action.label()
+                    return Err(super::i18n::format_logical(
+                        "binding-conflict",
+                        &[&chord.label(), &super::i18n::logical_text(other.label_key()), &super::i18n::logical_text(action.label_key())],
                     ));
                 }
                 candidates.push(action);
@@ -260,7 +263,7 @@ impl Profiles {
         if config.version != VERSION {
             return Err(io::Error::new(
                 io::ErrorKind::Unsupported,
-                format!("Versão de atalhos incompatível: {}", config.version),
+                super::i18n::format_logical("unsupported-shortcuts-version", &[&config.version]),
             ));
         }
         for (name, base) in [(PAINT_NET, Base::PaintNet), (ADOBE, Base::Adobe)] {
@@ -272,7 +275,7 @@ impl Profiles {
         if !config.profiles.contains_key(&config.active) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                "Perfil ativo inexistente",
+                tr("no-active-profile"),
             ));
         }
         for (name, profile) in &mut config.profiles {
@@ -413,7 +416,7 @@ impl Shortcuts {
         match std::env::current_exe().and_then(|exe| {
             exe.parent()
                 .map(|parent| parent.join(FILE_NAME))
-                .ok_or_else(|| io::Error::other("Pasta do executável indisponível"))
+                .ok_or_else(|| io::Error::other(tr("executable-dir-unavailable")))
         }) {
             Ok(path) => Self::load(path),
             Err(error) => Self {
@@ -445,6 +448,10 @@ impl Shortcuts {
     }
 
     pub fn hint(&self, action: Command) -> String {
+        self.config.profiles[&self.config.active].bindings[action.id()].join(" / ")
+    }
+
+    pub fn mouse_hint(&self, action: mouse_shortcuts::MouseAction) -> String {
         self.config.profiles[&self.config.active].bindings[action.id()].join(" / ")
     }
 
@@ -566,12 +573,12 @@ impl Shortcuts {
     pub fn settings(&mut self, ctx: &egui::Context, dialog: &mut ShortcutDialog) -> bool {
         let response = egui::Modal::new(egui::Id::new("configurar_atalhos")).show(ctx, |ui| {
             ui.set_width((ctx.content_rect().width() - 36.0).clamp(320.0, 560.0));
-            ui.heading("Atalhos de teclado e mouse");
+            ui.heading(tr("shortcuts"));
             if let Some(path) = &self.path {
                 ui.weak(path.display().to_string());
             }
             ui.horizontal(|ui| {
-                ui.label("Perfil ativo");
+                ui.label(tr("active-profile"));
                 egui::ComboBox::from_id_salt("perfil_atalhos")
                     .selected_text(&dialog.draft.active)
                     .show_ui(ui, |ui| {
@@ -580,18 +587,18 @@ impl Shortcuts {
                         }
                     });
                 ui.separator();
-                ui.selectable_value(&mut dialog.mouse_tab, false, "Teclado");
-                ui.selectable_value(&mut dialog.mouse_tab, true, "Mouse");
+                ui.selectable_value(&mut dialog.mouse_tab, false, tr("keyboard"));
+                ui.selectable_value(&mut dialog.mouse_tab, true, tr("mouse"));
             });
             ui.horizontal(|ui| {
                 ui.add(
-                    egui::TextEdit::singleline(&mut dialog.name).hint_text("Nome do novo perfil"),
+                    egui::TextEdit::singleline(&mut dialog.name).hint_text(tr("new-profile-name")),
                 );
                 let name = dialog.name.trim();
                 if ui
                     .add_enabled(
                         !name.is_empty() && !dialog.draft.profiles.contains_key(name),
-                        egui::Button::new("Duplicar perfil"),
+                        egui::Button::new(tr("duplicate-profile")),
                     )
                     .clicked()
                 {
@@ -604,9 +611,9 @@ impl Shortcuts {
                 }
             });
             if dialog.mouse_tab {
-                ui.label("Use botões (Left, Right, Middle, Wheel, DoubleLeft) com Ctrl, Alt, Shift ou Space. Separe com ;.");
+                ui.label(tr("mouse-bindings-help"));
             } else {
-                ui.label("Use combinações como Ctrl+Shift+B. Separe alternativas com ponto e vírgula.");
+                ui.label(tr("key-bindings-help"));
             }
             let profile = dialog
                 .draft
@@ -644,7 +651,7 @@ impl Shortcuts {
                                     {
                                         *values = text.split(';').map(str::to_string).collect();
                                     }
-                                    if ui.small_button("Padrão").clicked() {
+                                    if ui.small_button(tr("preset-default")).clicked() {
                                         *values = action
                                             .defaults(profile.base)
                                             .iter()
@@ -657,12 +664,12 @@ impl Shortcuts {
                         });
                 });
             if let Some(problem) = &dialog.problem {
-                ui.colored_label(ui.visuals().error_fg_color, problem);
+                ui.colored_label(ui.visuals().error_fg_color, super::i18n::display(problem).into_owned());
             }
             ui.horizontal(|ui| {
                 (
-                    ui.button("Salvar perfis").clicked(),
-                    ui.button("Cancelar").clicked(),
+                    ui.button(tr("save-profiles")).clicked(),
+                    ui.button(tr("cancel")).clicked(),
                 )
             })
             .inner
@@ -703,12 +710,12 @@ impl Shortcuts {
         let path = self
             .path
             .as_ref()
-            .ok_or_else(|| "Pasta do executável indisponível".to_owned())?;
+            .ok_or_else(|| tr("executable-dir-unavailable").to_owned())?;
         // A corrupt or newer file is kept for recovery rather than overwritten.
         let replace = match fs::metadata(path) {
             Ok(_) => {
                 Profiles::read(path)
-                    .map_err(|error| format!("O arquivo atual foi preservado: {error}"))?;
+                    .map_err(|error| super::i18n::format_logical("shortcuts-kept", &[&error]))?;
                 true
             }
             Err(error) if error.kind() == io::ErrorKind::NotFound => false,
@@ -874,7 +881,7 @@ mod tests {
             .insert(Command::Save.id().into(), vec!["ctrl+z".into()]);
         let error = shortcuts.save_draft(draft).unwrap_err();
         assert!(
-            error.contains("Salvar") && error.contains("Desfazer"),
+            error.contains(Command::Save.label()) && error.contains(Command::Undo.label()),
             "{error}"
         );
         assert_eq!(fs::read(path)?, before);

@@ -1,10 +1,11 @@
+use super::i18n::text as tr;
 use std::{collections::BTreeMap, fs, path::Path, sync::Arc};
 
 use eframe::egui::{
     self, Align, Color32, CursorIcon, Rect, Stroke, Vec2,
     epaint::{
         FontFamily, FontId,
-        text::{FontData, FontDefinitions, Fonts, Galley, LayoutJob, LayoutSection, TextFormat},
+        text::{FontData, Fonts, Galley, LayoutJob, LayoutSection, TextFormat},
     },
     pos2, vec2,
 };
@@ -12,6 +13,7 @@ use openpaintr::Pixel;
 
 use super::{
     gradient_tool::SessionOutcome,
+    i18n,
     paint_dashed_line,
     selection::{Point, Selection},
     tolerance::{self, StrokeBlend},
@@ -30,9 +32,9 @@ impl TextAlign {
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::Left => "Esquerda",
-            Self::Center => "Centro",
-            Self::Right => "Direita",
+            Self::Left => tr("left-align"),
+            Self::Center => tr("center-align"),
+            Self::Right => tr("right-align"),
         }
     }
 
@@ -50,6 +52,14 @@ pub struct FontCatalog {
     fonts: Fonts,
 }
 
+pub fn family_label(family: &str) -> &str {
+    match family {
+        "Padrão (Sans)" => tr("default-sans"),
+        "Monoespaçada" => tr("monospace"),
+        name => name,
+    }
+}
+
 impl Default for FontCatalog {
     fn default() -> Self {
         Self::new()
@@ -58,7 +68,11 @@ impl Default for FontCatalog {
 
 impl FontCatalog {
     pub fn new() -> Self {
-        let mut defs = FontDefinitions::default();
+        Self::for_locale(i18n::Locale::default())
+    }
+
+    pub fn for_locale(locale: i18n::Locale) -> Self {
+        let mut defs = i18n::fonts(locale);
         let mut families = vec!["Padrão (Sans)".to_owned(), "Monoespaçada".to_owned()];
         let candidates = [
             ("DejaVu Sans", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
@@ -76,8 +90,9 @@ impl FontCatalog {
             {
                 defs.font_data
                     .insert(name.to_owned(), Arc::new(FontData::from_owned(bytes)));
-                defs.families
-                    .insert(FontFamily::Name(Arc::from(name)), vec![name.to_owned()]);
+                let mut family = vec![name.to_owned()];
+                family.extend(defs.families[&FontFamily::Proportional].iter().cloned());
+                defs.families.insert(FontFamily::Name(Arc::from(name)), family);
                 families.push(name.to_owned());
             }
         }
@@ -99,7 +114,7 @@ impl FontCatalog {
         let text = if session.text.is_empty() {
             " ".to_owned()
         } else {
-            session.text.clone()
+            i18n::display(&session.text).into_owned()
         };
         let color = Color32::WHITE;
         let line_w = (session.size_px * 0.075).max(1.0);

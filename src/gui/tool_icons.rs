@@ -1,3 +1,4 @@
+use super::i18n::text as tr;
 use eframe::egui::{
     self, Color32, CornerRadius, Painter, Rect, Shape as PaintShape, Stroke, StrokeKind, Vec2,
     pos2, vec2,
@@ -131,7 +132,7 @@ pub fn move_button(ui: &mut egui::Ui, theme: Theme, selected: bool) -> egui::Res
         vec2(32.0, 32.0),
         "",
     );
-    tool_tooltip(response, ui, "Mover pixels selecionados")
+    tool_tooltip(response, ui, tr("move-selected-pixels"))
 }
 
 pub fn paint_small_tool(ui: &mut egui::Ui, tool: Tool) {

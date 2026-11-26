@@ -61,14 +61,19 @@ impl Document {
         decoder.set_transformations(Transformations::normalize_to_color8());
         let mut reader = decoder.read_info()?;
         if reader.info().animation_control.is_some() {
-            return Err(io::Error::new(
+            return Err(crate::Diagnostic::io(
                 io::ErrorKind::Unsupported,
+                "error.animated-png",
                 "PNG animado ainda não é suportado",
             ));
         }
 
         let size = reader.output_buffer_size().ok_or_else(|| {
-            io::Error::new(io::ErrorKind::InvalidData, "dimensões de PNG inválidas")
+            crate::Diagnostic::io(
+                io::ErrorKind::InvalidData,
+                "error.invalid-png-size",
+                "dimensões de PNG inválidas",
+            )
         })?;
         let mut bytes = Vec::new();
         bytes.try_reserve_exact(size).map_err(io::Error::other)?;
