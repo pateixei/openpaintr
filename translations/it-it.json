@@ -209,6 +209,8 @@
   "layer-drag-hint": "{0} · Trascina per riordinare",
   "layer-number": "Livello {0}",
   "layer-opacity": "Opacità livello",
+  "layer-panel-delete": "Elimina livello (pannello Livelli)",
+  "layer-panel-insert": "Inserisci livello (pannello Livelli)",
   "layer-properties": "Proprietà livello",
   "layer-rotate-zoom": "Ruota/ridimensiona livello",
   "layer-to-bottom": "Sposta livello in fondo",

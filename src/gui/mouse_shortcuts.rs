@@ -290,7 +290,10 @@ impl MouseBindings {
         for &action in MouseAction::ALL {
             for value in values.get(action.id()).into_iter().flatten() {
                 let gesture = Gesture::parse(value).ok_or_else(|| {
-                    super::i18n::format_logical("invalid-gesture", &[&super::i18n::logical_text(action.label_key()), &value])
+                    super::i18n::format_logical(
+                        "invalid-gesture",
+                        &[&super::i18n::logical_text(action.label_key()), &value],
+                    )
                 })?;
                 let scope = action.scope();
                 let supported = match scope {
@@ -327,7 +330,11 @@ impl MouseBindings {
                         let other: MouseAction = other;
                         return Err(super::i18n::format_logical(
                             "gesture-conflict",
-                            &[&value, &super::i18n::logical_text(other.label_key()), &super::i18n::logical_text(action.label_key())],
+                            &[
+                                &value,
+                                &super::i18n::logical_text(other.label_key()),
+                                &super::i18n::logical_text(action.label_key()),
+                            ],
                         ));
                     }
                 }

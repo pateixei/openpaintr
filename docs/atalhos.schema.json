@@ -249,6 +249,12 @@
             "layer.delete": {
               "$ref": "#/$defs/combinações"
             },
+            "layer.panel_insert": {
+              "$ref": "#/$defs/combinações"
+            },
+            "layer.panel_delete": {
+              "$ref": "#/$defs/combinações"
+            },
             "layer.duplicate": {
               "$ref": "#/$defs/combinações"
             },

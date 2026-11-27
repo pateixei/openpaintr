@@ -209,6 +209,8 @@
   "layer-drag-hint": "{0} · Arrastrar para reordenar",
   "layer-number": "Capa {0}",
   "layer-opacity": "Opacidad de la capa",
+  "layer-panel-delete": "Eliminar capa (panel Capas)",
+  "layer-panel-insert": "Insertar capa (panel Capas)",
   "layer-properties": "Propiedades de la capa",
   "layer-rotate-zoom": "Girar/Zoom de la capa",
   "layer-to-bottom": "Mover capa al final",

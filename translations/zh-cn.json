@@ -209,6 +209,8 @@
   "layer-drag-hint": "{0} · 拖动以重新排序",
   "layer-number": "图层 {0}",
   "layer-opacity": "图层不透明度",
+  "layer-panel-delete": "删除图层（图层面板）",
+  "layer-panel-insert": "插入图层（图层面板）",
   "layer-properties": "图层属性",
   "layer-rotate-zoom": "图层旋转/缩放",
   "layer-to-bottom": "将图层移到底端",

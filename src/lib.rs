@@ -132,17 +132,33 @@ impl Document {
     }
 
     pub fn add_layer(&mut self, name: impl Into<String>) -> io::Result<usize> {
+        let index = self.layers.len();
+        self.insert_blank_layer(index, name)?;
+        Ok(index)
+    }
+
+    pub fn insert_blank_layer(&mut self, index: usize, name: impl Into<String>) -> io::Result<()> {
+        if index > self.layers.len() {
+            return Err(crate::Diagnostic::io(
+                io::ErrorKind::InvalidInput,
+                "error.invalid-layer-position",
+                "posição de camada inválida",
+            ));
+        }
         let pixels = self.allocate_pixels()?;
-        self.layers.push(Layer {
-            name: name.into(),
-            visible: true,
-            opacity: 255,
-            blend: img_pdn::PDNB_NORMAL,
-            pixels,
-            pdn_background: 0,
-            pdn_metadata: Vec::new(),
-        });
-        Ok(self.layers.len() - 1)
+        self.layers.insert(
+            index,
+            Layer {
+                name: name.into(),
+                visible: true,
+                opacity: 255,
+                blend: img_pdn::PDNB_NORMAL,
+                pixels,
+                pdn_background: 0,
+                pdn_metadata: Vec::new(),
+            },
+        );
+        Ok(())
     }
 
     pub fn layer_name(&self, layer: usize) -> Option<&str> {
@@ -561,7 +577,11 @@ impl Document {
                 let src_start = (start_y + row_idx) * full_w + start_x;
                 pixels_to_bytes(&layer.pixels[src_start..src_start + rect_w], &mut src_row);
                 let dst_start = row_idx * rect_w * 4;
-                bm_row_inplace(&mut dst[dst_start..dst_start + rect_w * 4], &src_row, mode_op);
+                bm_row_inplace(
+                    &mut dst[dst_start..dst_start + rect_w * 4],
+                    &src_row,
+                    mode_op,
+                );
             }
         }
 
@@ -631,7 +651,12 @@ fn bytes_to_pixels(bytes: &[u8], pixels: &mut [Pixel]) {
     }
 }
 
-fn sample_thumbnail(pixels: &[Pixel], width: u32, height: u32, max_side: u32) -> (u32, u32, Vec<Pixel>) {
+fn sample_thumbnail(
+    pixels: &[Pixel],
+    width: u32,
+    height: u32,
+    max_side: u32,
+) -> (u32, u32, Vec<Pixel>) {
     let max_side = max_side.max(1);
     let (thumb_w, thumb_h) = if width >= height {
         let thumb_w = width.min(max_side).max(1);

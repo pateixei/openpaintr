@@ -8,10 +8,25 @@ use std::{
 use eframe::egui::{self, Color32, ColorImage, TextureHandle, TextureOptions};
 use openpaintr::{BLEND_MODES, Document, Pixel, PngCompression, PngDepth};
 
-use super::editor::LayerMeta;
+use super::{editor::LayerMeta, theme::CARD_CORNER_RADIUS, window_chrome};
 
 const RECENT_FILE: &str = "recentes.json";
 const MAX_RECENT: usize = 10;
+
+pub(super) fn modal(ctx: &egui::Context, id: &str) -> egui::Modal {
+    let modal = egui::Modal::new(egui::Id::new(id));
+    let fullscreen = ctx.input(|input| input.viewport().fullscreen.unwrap_or(false));
+    let radius = window_chrome::corner_radius(ctx, fullscreen);
+    // Keep the shaded area inside the rounded window while retaining the modal's input blocker.
+    ctx.layer_painter(modal.area.layer()).rect_filled(
+        ctx.content_rect(),
+        radius,
+        modal.backdrop_color,
+    );
+    modal
+        .backdrop_color(Color32::TRANSPARENT)
+        .frame(egui::Frame::popup(&ctx.style()).corner_radius(CARD_CORNER_RADIUS))
+}
 
 pub fn atomic_write_bytes(path: &Path, bytes: &[u8], replace: bool) -> io::Result<()> {
     let parent = path
@@ -59,10 +74,9 @@ pub struct RecentFiles {
 
 impl RecentFiles {
     pub fn from_executable() -> Self {
-        let path = std::env::current_exe().ok().and_then(|exe| {
-            exe.parent()
-                .map(|parent| parent.join(RECENT_FILE))
-        });
+        let path = std::env::current_exe()
+            .ok()
+            .and_then(|exe| exe.parent().map(|parent| parent.join(RECENT_FILE)));
         let entries = path
             .as_deref()
             .and_then(|p| File::open(p).ok())
@@ -94,8 +108,13 @@ impl RecentFiles {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum SaveFormat {
-    Pdn { effort: u32 },
-    Png { depth: PngDepth, compression: PngCompression },
+    Pdn {
+        effort: u32,
+    },
+    Png {
+        depth: PngDepth,
+        compression: PngCompression,
+    },
 }
 
 pub struct SaveOptionsDialog {
@@ -195,7 +214,7 @@ impl SaveOptionsDialog {
         checker: &TextureHandle,
     ) -> SaveDialogAction {
         let mut changed = false;
-        let response = egui::Modal::new(egui::Id::new("opcoes_salvamento")).show(ctx, |ui| {
+        let response = modal(ctx, "opcoes_salvamento").show(ctx, |ui| {
             ui.set_width((ctx.content_rect().width() - 40.0).clamp(320.0, 480.0));
             let title = match self.format {
                 SaveFormat::Pdn { .. } => tr("pdn-save-options"),
@@ -349,7 +368,7 @@ impl LayerPropertiesDialog {
 
     pub fn show(&mut self, ctx: &egui::Context) -> LayerDialogAction {
         let mut live_changed = false;
-        let response = egui::Modal::new(egui::Id::new("propriedades_camada")).show(ctx, |ui| {
+        let response = modal(ctx, "propriedades_camada").show(ctx, |ui| {
             ui.set_width((ctx.content_rect().width() - 40.0).clamp(280.0, 380.0));
             ui.heading(tr("layer-properties"));
             ui.separator();

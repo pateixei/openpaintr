@@ -234,7 +234,10 @@ impl ColorPalette {
         let mut colors = Vec::new();
         for raw in content.lines() {
             let line = raw.trim();
-            if line.is_empty() || line.starts_with(';') || line.starts_with('#') && line.len() != 7 && line.len() != 9 {
+            if line.is_empty()
+                || line.starts_with(';')
+                || line.starts_with('#') && line.len() != 7 && line.len() != 9
+            {
                 continue;
             }
             let hex = line.trim_start_matches('#');
@@ -259,7 +262,10 @@ impl ColorPalette {
     }
 
     pub fn serialize_palette_txt(&self) -> String {
-        let mut out = format!("; {} (AARRGGBB)\n", super::i18n::logical_text("palette-file-comment"));
+        let mut out = format!(
+            "; {} (AARRGGBB)\n",
+            super::i18n::logical_text("palette-file-comment")
+        );
         for [r, g, b, a] in &self.swatches {
             out.push_str(&format!("{a:02X}{r:02X}{g:02X}{b:02X}\n"));
         }
@@ -304,6 +310,8 @@ pub struct RibbonOutput {
     pub toggle_clicked: bool,
 }
 
+pub const RIBBON_CONTENT_HEIGHT: f32 = 24.0;
+
 pub fn ribbon(
     ui: &mut egui::Ui,
     palette: &mut ColorPalette,
@@ -311,15 +319,15 @@ pub fn ribbon(
     theme: Theme,
     checker: &egui::TextureHandle,
 ) -> RibbonOutput {
-    ui.set_height(24.0);
+    ui.set_height(RIBBON_CONTENT_HEIGHT);
     let (preview_rect, bar_rect, chevron_rect, toggle_clicked) = ui
         .horizontal(|ui| {
-            ui.set_height(24.0);
+            ui.set_height(RIBBON_CONTENT_HEIGHT);
             ui.spacing_mut().item_spacing.x = 6.0;
 
             // Left: 18x18 primary color preview square
             let (preview_slot, preview_resp) =
-                ui.allocate_exact_size(vec2(18.0, 24.0), Sense::click());
+                ui.allocate_exact_size(vec2(18.0, RIBBON_CONTENT_HEIGHT), Sense::click());
             let preview_rect = Rect::from_center_size(preview_slot.center(), vec2(18.0, 18.0));
             let px = palette.primary;
             let p = ui.painter();
@@ -354,7 +362,8 @@ pub fn ribbon(
             let chevron_w = 26.0_f32;
             let gap = ui.spacing().item_spacing.x;
             let bar_w = (ui.available_width() - chevron_w - gap).max(32.0);
-            let (bar_slot, bar_resp) = ui.allocate_exact_size(vec2(bar_w, 24.0), Sense::click_and_drag());
+            let (bar_slot, bar_resp) =
+                ui.allocate_exact_size(vec2(bar_w, RIBBON_CONTENT_HEIGHT), Sense::click_and_drag());
             let bar_rect = Rect::from_center_size(bar_slot.center(), vec2(bar_w, 16.0));
             let radius = 8.0_f32.min(bar_rect.width() * 0.25);
 
@@ -408,7 +417,11 @@ pub fn ribbon(
             let marker_x = egui::lerp(strip_rect.left()..=strip_rect.right(), hue);
             let marker_pos = pos2(marker_x, bar_rect.center().y);
             let marker_fill: Color32 = Hsva::new(hue, 1.0, 1.0, 1.0).into();
-            p.circle_stroke(marker_pos, 6.5, Stroke::new(1.0_f32, Color32::from_black_alpha(110)));
+            p.circle_stroke(
+                marker_pos,
+                6.5,
+                Stroke::new(1.0_f32, Color32::from_black_alpha(110)),
+            );
             p.circle_filled(marker_pos, 6.0, marker_fill);
             p.circle_stroke(marker_pos, 6.0, Stroke::new(2.0_f32, Color32::WHITE));
 
@@ -423,7 +436,7 @@ pub fn ribbon(
                 },
                 true,
                 open,
-                vec2(chevron_w, 24.0),
+                vec2(chevron_w, RIBBON_CONTENT_HEIGHT),
                 if open {
                     tr("close-colors")
                 } else {
@@ -731,10 +744,8 @@ pub fn picker(
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
             ui.label(RichText::new("Hex").size(11.0).color(theme.text_muted()));
-            let resp = ui.add(
-                egui::TextEdit::singleline(&mut palette.hex_draft)
-                    .desired_width(68.0),
-            );
+            let resp =
+                ui.add(egui::TextEdit::singleline(&mut palette.hex_draft).desired_width(68.0));
             if resp.changed()
                 && let Some(parsed) = parse_hex(&palette.hex_draft)
             {
@@ -800,10 +811,8 @@ pub fn picker(
             ui.spacing_mut().item_spacing.x = gap;
             for (col_idx, &rgba) in chunk.iter().enumerate() {
                 let idx = row_idx * cols + col_idx;
-                let (rect, resp) = ui.allocate_exact_size(
-                    vec2(swatch_size, swatch_size),
-                    Sense::click(),
-                );
+                let (rect, resp) =
+                    ui.allocate_exact_size(vec2(swatch_size, swatch_size), Sense::click());
                 if rgba[3] < 255 {
                     ui.painter().image(
                         checker.id(),
@@ -859,7 +868,12 @@ pub fn parse_hex(raw: &str) -> Option<[u8; 4]> {
     let hex = raw.trim().trim_start_matches('#');
     if hex.len() == 6 {
         let v = u32::from_str_radix(hex, 16).ok()?;
-        Some([((v >> 16) & 0xff) as u8, ((v >> 8) & 0xff) as u8, (v & 0xff) as u8, 255])
+        Some([
+            ((v >> 16) & 0xff) as u8,
+            ((v >> 8) & 0xff) as u8,
+            (v & 0xff) as u8,
+            255,
+        ])
     } else if hex.len() == 8 {
         let v = u32::from_str_radix(hex, 16).ok()?;
         Some([
@@ -924,9 +938,9 @@ fn gradient_bar(
     p.circle_filled(handle_pos, 5.5, Color32::WHITE);
     p.circle_stroke(handle_pos, 5.5, Stroke::new(1.8_f32, theme.accent()));
 
-    let updated = resp.interact_pointer_pos().map(|pos| {
-        ((pos.x - inner.left()) / inner.width().max(1.0)).clamp(0.0, 1.0)
-    });
+    let updated = resp
+        .interact_pointer_pos()
+        .map(|pos| ((pos.x - inner.left()) / inner.width().max(1.0)).clamp(0.0, 1.0));
     resp.on_hover_text(tooltip);
     let _ = id_salt;
     updated

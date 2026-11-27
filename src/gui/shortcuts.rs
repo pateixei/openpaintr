@@ -9,7 +9,10 @@ use std::{
 use eframe::egui::{self, Key, Modifiers};
 use serde::{Deserialize, Serialize};
 
-use super::mouse_shortcuts::{self, MouseBindings};
+use super::{
+    dialogs::modal,
+    mouse_shortcuts::{self, MouseBindings},
+};
 
 const FILE_NAME: &str = "atalhos.json";
 const VERSION: u32 = 1;
@@ -117,6 +120,8 @@ actions! {
     Flatten: "image.flatten", "flatten", ["Ctrl+Shift+F"], [];
     AddLayer: "layer.add", "add-layer", ["Ctrl+Shift+N"], ["Ctrl+Alt+Shift+N"];
     DeleteLayer: "layer.delete", "delete-layer", ["Ctrl+Shift+Delete"], [];
+    InsertLayerInPanel: "layer.panel_insert", "layer-panel-insert", ["Insert"], ["Insert"];
+    DeleteLayerInPanel: "layer.panel_delete", "layer-panel-delete", ["Delete"], ["Delete"];
     DuplicateLayer: "layer.duplicate", "duplicate-layer", ["Ctrl+Shift+D"], ["Ctrl+J"];
     MergeLayerDown: "layer.merge_down", "merge-layer-down", ["Ctrl+M"], ["Ctrl+E"];
     ImportLayer: "layer.import_file", "import-layer-file", [], [];
@@ -138,6 +143,12 @@ actions! {
     SwapColors: "color.swap", "toggle-colors", ["X"], ["X"];
     ResetColors: "color.reset", "reset-colors", [], ["D"];
     Settings: "settings.shortcuts", "configure-shortcuts", ["Alt+X"], ["Ctrl+Alt+Shift+K"];
+}
+
+impl Command {
+    fn layers_only(self) -> bool {
+        matches!(self, Self::InsertLayerInPanel | Self::DeleteLayerInPanel)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -194,9 +205,12 @@ impl Profile {
         for &action in Command::ALL {
             for binding in &self.bindings[action.id()] {
                 let chord = Chord::parse(binding).ok_or_else(|| {
-                    super::i18n::format_logical("invalid-binding", &[&super::i18n::logical_text(action.label_key()), &binding])
+                    super::i18n::format_logical(
+                        "invalid-binding",
+                        &[&super::i18n::logical_text(action.label_key()), &binding],
+                    )
                 })?;
-                let candidates = mapped.entry(chord).or_default();
+                let candidates = mapped.entry((chord, action.layers_only())).or_default();
                 if candidates.contains(&action) {
                     continue;
                 }
@@ -226,7 +240,11 @@ impl Profile {
                 {
                     return Err(super::i18n::format_logical(
                         "binding-conflict",
-                        &[&chord.label(), &super::i18n::logical_text(other.label_key()), &super::i18n::logical_text(action.label_key())],
+                        &[
+                            &chord.label(),
+                            &super::i18n::logical_text(other.label_key()),
+                            &super::i18n::logical_text(action.label_key()),
+                        ],
                     ));
                 }
                 candidates.push(action);
@@ -381,7 +399,7 @@ impl Chord {
     }
 }
 
-type Bindings = HashMap<Chord, Vec<Command>>;
+type Bindings = HashMap<(Chord, bool), Vec<Command>>;
 
 pub struct Shortcuts {
     path: Option<PathBuf>,
@@ -465,8 +483,9 @@ impl Shortcuts {
 
     pub fn held(&self, ctx: &egui::Context, action: Command) -> bool {
         ctx.input(|input| {
-            self.bindings.iter().any(|(chord, actions)| {
-                actions.contains(&action)
+            self.bindings.iter().any(|((chord, layers_only), actions)| {
+                !layers_only
+                    && actions.contains(&action)
                     && input.key_down(chord.key)
                     && *chord == Chord::from_input(chord.key, input.modifiers)
             })
@@ -489,7 +508,7 @@ impl Shortcuts {
         }
     }
 
-    pub fn commands(&mut self, ctx: &egui::Context) -> Vec<Command> {
+    pub fn commands(&mut self, ctx: &egui::Context, layers_focused: bool) -> Vec<Command> {
         ctx.input(|input| {
             input
                 .events
@@ -506,7 +525,7 @@ impl Shortcuts {
                         return None;
                     };
                     let chord = Chord::from_input(*key, *modifiers);
-                    let chord = if self.bindings.contains_key(&chord) {
+                    let chord = if self.bindings.contains_key(&(chord, layers_focused)) {
                         chord
                     } else {
                         Chord::from_input((*physical_key)?, *modifiers)
@@ -514,7 +533,7 @@ impl Shortcuts {
                     if *pressed == chord.clipboard_release() {
                         return None;
                     }
-                    let actions = self.bindings.get(&chord)?;
+                    let actions = self.bindings.get(&(chord, layers_focused))?;
                     if *repeat
                         && !matches!(
                             actions.as_slice(),
@@ -571,7 +590,7 @@ impl Shortcuts {
     }
 
     pub fn settings(&mut self, ctx: &egui::Context, dialog: &mut ShortcutDialog) -> bool {
-        let response = egui::Modal::new(egui::Id::new("configurar_atalhos")).show(ctx, |ui| {
+        let response = modal(ctx, "configurar_atalhos").show(ctx, |ui| {
             ui.set_width((ctx.content_rect().width() - 36.0).clamp(320.0, 560.0));
             ui.heading(tr("shortcuts"));
             if let Some(path) = &self.path {
@@ -664,7 +683,10 @@ impl Shortcuts {
                         });
                 });
             if let Some(problem) = &dialog.problem {
-                ui.colored_label(ui.visuals().error_fg_color, super::i18n::display(problem).into_owned());
+                ui.colored_label(
+                    ui.visuals().error_fg_color,
+                    super::i18n::display(problem).into_owned(),
+                );
             }
             ui.horizontal(|ui| {
                 (
@@ -776,7 +798,7 @@ mod tests {
                 ..Default::default()
             },
             |ctx| {
-                actions = shortcuts.commands(ctx);
+                actions = shortcuts.commands(ctx, false);
             },
         );
         actions

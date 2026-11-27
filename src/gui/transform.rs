@@ -65,11 +65,7 @@ impl Transform {
         }
     }
 
-    pub fn with_floating(
-        affine: Affine,
-        bounds: (Vec2, Vec2),
-        floating: Image,
-    ) -> Self {
+    pub fn with_floating(affine: Affine, bounds: (Vec2, Vec2), floating: Image) -> Self {
         Self {
             target: TransformTarget::Pixels,
             affine,
@@ -205,7 +201,8 @@ impl Transform {
         changed |= self.interact_handle(Handle::Rotate, &rot_response, rect, zoom, mouse);
 
         // 4. Pivot crosshair (only interactive when the transformed box is large enough not to block moving).
-        let show_pivot = points[0].distance(points[1]) >= 28.0 && points[1].distance(points[2]) >= 28.0;
+        let show_pivot =
+            points[0].distance(points[1]) >= 28.0 && points[1].distance(points[2]) >= 28.0;
         if show_pivot || matches!(self.gesture, Some((Handle::Pivot, ..))) {
             let pivot_response = ui.interact(
                 Rect::from_center_size(pivot_screen, Vec2::splat(14.0)),
@@ -276,12 +273,10 @@ impl Transform {
             response.ctx.input(|input| {
                 for btn in BUTTONS {
                     if (input.pointer.button_down(btn) || input.pointer.button_pressed(btn))
-                        && let Some(action) = mouse.resolve(
-                            scope,
-                            Trigger::Button(btn),
-                            input.modifiers,
-                            |key| input.key_down(key),
-                        )
+                        && let Some(action) =
+                            mouse.resolve(scope, Trigger::Button(btn), input.modifiers, |key| {
+                                input.key_down(key)
+                            })
                     {
                         return Some(action);
                     }
@@ -499,7 +494,10 @@ mod tests {
 
         let mut transform = Transform::new(TransformTarget::Pixels, affine, bounds);
         transform.move_pivot(vec2(35.0, 48.0));
-        let after: Vec<_> = corners.iter().map(|&c| transform.affine.forward(c)).collect();
+        let after: Vec<_> = corners
+            .iter()
+            .map(|&c| transform.affine.forward(c))
+            .collect();
         for (a, b) in before.into_iter().zip(after) {
             assert!((a.0 - b.0).abs() < 1e-6);
             assert!((a.1 - b.1).abs() < 1e-6);
