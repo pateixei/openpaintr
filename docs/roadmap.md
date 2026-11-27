@@ -211,6 +211,15 @@ Switching to Adobe, creating a custom profile, and restoring its binding after a
   | Conical | preview | `31.61` / `264.12` | `31.42` / `262.49` |
   | Conical | commit | `34.63` / `321.67` | `34.44` / `319.00` |
 
+  **Vector coverage mask (plan item 2.4, November 27, 2026).** Same environment, comparing commit `70acebd` with `b461071`: the middle of three alternating rounds of five timed runs, in milliseconds (typical / large). Output is byte-identical.
+
+  | Large shape drag | Phase | Before | After |
+  | --- | --- | ---: | ---: |
+  | Five-point star | preview | `3.27` / `46.62` | `2.48` / `39.73` |
+  | Five-point star | commit | `8.17` / `109.88` | `5.31` / `85.16` |
+  | Freeform spiral | preview | `3.89` / `51.14` | `2.60` / `40.64` |
+  | Freeform spiral | commit | `10.21` / `142.88` | `5.88` / `89.45` |
+
 **Acceptance criteria** — Publish the format and metadata support matrix, test file and clipboard integration on Wayland and X11, and record reproducible interactive benchmarks.
 
 ### Formats shown in the Paint.NET 5.2 Open dialog
