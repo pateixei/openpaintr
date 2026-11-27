@@ -16,7 +16,10 @@ use std::{io::Write as _, process::Command as Process, time::Instant};
 
 use serde_json::json;
 
-use super::{super::transform::Transform, *};
+use super::{
+    super::{selection::Selection, transform::Transform},
+    *,
+};
 
 const CASE_ENV: &str = "OPENPAINTR_PERF_CASE";
 const OUTPUT_ENV: &str = "OPENPAINTR_PERF_OUTPUT";
@@ -242,10 +245,19 @@ fn run_once(
                     let center = (min + max) * 0.5;
                     let mut affine = geometry::Affine::centered(size);
                     affine.center = (f64::from(center.x), f64::from(center.y));
-                    driver.app.tab_mut().session = Some(ActiveSession::Transform(
-                        Transform::with_floating(affine, (min, max), floating),
-                    ));
-                    driver.app.tab_mut().editor.mark_full_refresh();
+                    let tab = driver.app.tab_mut();
+                    // As pasting does: the commit also transforms this selection's mask.
+                    let end = (origin.0 + 63, origin.1 + 63);
+                    tab.editor.set_selection(
+                        Some(Selection::new(Shape::Rectangle, origin, end)),
+                        "paste",
+                    );
+                    tab.session = Some(ActiveSession::Transform(Transform::with_floating(
+                        affine,
+                        (min, max),
+                        floating,
+                    )));
+                    tab.editor.mark_full_refresh();
                 }
             }
             driver.step();
@@ -265,6 +277,12 @@ fn run_once(
                 assert!(affine.shift.0.abs() > 1.0, "not moved");
             }
             commit_session(&mut driver, recorder);
+            if workload == "transform_floating" {
+                assert!(
+                    driver.app.tab().editor.selection.is_some(),
+                    "selection lost"
+                );
+            }
         }
         "gradient" | "shape_star" | "shape_freeform" => {
             let mut driver = open(bytes, recorder)?;
