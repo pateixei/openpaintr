@@ -1,7 +1,7 @@
 use super::i18n::text as tr;
 use std::{
     borrow::Cow,
-    collections::{HashMap, VecDeque},
+    collections::{BTreeSet, HashMap, VecDeque},
     io, mem,
 };
 
@@ -27,6 +27,43 @@ pub struct LayerMeta {
     pub visible: bool,
     pub opacity: u8,
     pub blend: u8,
+}
+
+/// The layers whose pixels changed, which their thumbnails must follow.
+#[derive(Debug, Default)]
+pub struct LayerChanges {
+    /// Layers were added, removed, or reordered, so every index may differ.
+    all: bool,
+    layers: BTreeSet<usize>,
+}
+
+impl LayerChanges {
+    pub fn contains(&self, layer: usize) -> bool {
+        self.all || self.layers.contains(&layer)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        !self.all && self.layers.is_empty()
+    }
+
+    pub fn merge(&mut self, other: Self) {
+        self.all |= other.all;
+        self.layers.extend(other.layers);
+    }
+
+    fn note(&mut self, edit: &Edit) {
+        match edit {
+            Edit::Raster { layer, .. } | Edit::LayerPixels { layer, .. } => {
+                self.layers.insert(*layer);
+            }
+            Edit::Document { .. }
+            | Edit::LayerInserted { .. }
+            | Edit::LayerRemoved { .. }
+            | Edit::LayerMoved { .. }
+            | Edit::LayerMergedDown { .. } => self.all = true,
+            Edit::Selection { .. } | Edit::LayerMetadata { .. } => {}
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -468,6 +505,7 @@ pub struct Editor {
     next_revision: u64,
     stroke: Option<Stroke>,
     dirty: DirtyState,
+    layer_changes: LayerChanges,
 }
 
 impl Editor {
@@ -486,6 +524,10 @@ impl Editor {
             dirty: DirtyState {
                 full: true,
                 rect: None,
+            },
+            layer_changes: LayerChanges {
+                all: true,
+                ..LayerChanges::default()
             },
         }
     }
@@ -554,6 +596,11 @@ impl Editor {
                 (max.0.max(point.0), max.1.max(point.1)),
             ),
         });
+    }
+
+    /// The layers changed since the last call, including by a live stroke.
+    pub fn take_layer_changes(&mut self) -> LayerChanges {
+        mem::take(&mut self.layer_changes)
     }
 
     pub fn take_dirty(&mut self) -> DirtyState {
@@ -1325,6 +1372,7 @@ impl Editor {
             self.undo.push_back(entry);
             return Err(error);
         }
+        self.layer_changes.note(&entry.edit);
         self.undo_bytes -= entry.bytes;
         self.revision = entry.before;
         self.redo.push(entry);
@@ -1340,6 +1388,7 @@ impl Editor {
             self.redo.push(entry);
             return Err(error);
         }
+        self.layer_changes.note(&entry.edit);
         self.undo_bytes += entry.bytes;
         self.revision = entry.after;
         self.undo.push_back(entry);
@@ -1519,6 +1568,9 @@ impl Editor {
             );
             stroke.carry = carry;
         }
+        if changed {
+            self.layer_changes.layers.insert(stroke.layer);
+        }
         for pt in dirty_points {
             self.mark_dirty_point(pt);
         }
@@ -1547,6 +1599,7 @@ impl Editor {
             self.revision = self.next_revision;
             self.next_revision += 1;
         }
+        self.layer_changes.note(&edit);
         let bytes = edit.approx_bytes();
         self.undo_bytes += bytes;
         self.undo.push_back(HistoryEntry {

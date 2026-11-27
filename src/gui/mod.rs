@@ -20,6 +20,7 @@ mod storage;
 mod stroke_raster;
 mod text_tool;
 mod theme;
+mod thumbnails;
 mod tolerance;
 mod tool_icons;
 mod tool_options;
@@ -46,7 +47,7 @@ use app_settings::{AaMode, GlobalSettings, TextStyle};
 use colors::{ColorPalette, PaletteAction, paint_color_swatch};
 use dialogs::{
     LayerDialogAction, LayerPropertiesDialog, RecentFiles, SaveDialogAction, SaveFormat,
-    SaveOptionsDialog, make_thumbnail_texture, modal,
+    SaveOptionsDialog, modal,
 };
 use editor::{Editor, LayerMeta, StrokeSpec};
 use gradient_tool::{
@@ -62,6 +63,7 @@ use session::{
 use shortcuts::{Command, ShortcutDialog, Shortcuts};
 use text_tool::{FontCatalog, TextAlign, TextParams, TextSession};
 use theme::{CARD_CORNER_RADIUS, CARD_GAP, Theme};
+use thumbnails::Thumbnails;
 use tolerance::{AlphaMatchMode, FillPattern, StrokeBlend};
 use transform::TransformTarget;
 use vector_tools::{
@@ -283,9 +285,7 @@ struct DocumentTab {
     clone_offset: Option<(i64, i64)>,
     zoom_drag: Option<(PointerButton, egui::Pos2, f32, bool)>,
     image: Option<TextureHandle>,
-    tab_thumb: Option<TextureHandle>,
-    layer_thumbs: Vec<Option<TextureHandle>>,
-    thumbs_dirty: bool,
+    thumbnails: Thumbnails,
     selection_gesture: Option<SelectionGesture>,
     selection_path: Vec<Point>,
     stroke_gesture: Option<StrokeGesture>,
@@ -308,9 +308,7 @@ impl DocumentTab {
             clone_offset: None,
             zoom_drag: None,
             image: None,
-            tab_thumb: None,
-            layer_thumbs: Vec::new(),
-            thumbs_dirty: true,
+            thumbnails: Thumbnails::default(),
             selection_gesture: None,
             selection_path: Vec::new(),
             stroke_gesture: None,
@@ -565,9 +563,8 @@ impl App {
     }
 
     fn finish_change(&mut self, result: io::Result<bool>) {
-        match result {
-            Ok(changed) => self.tab_mut().thumbs_dirty |= changed,
-            Err(error) => self.report(Err(error), ""),
+        if let Err(error) = result {
+            self.report(Err(error), "");
         }
     }
 
@@ -1256,10 +1253,10 @@ impl App {
                                 } else {
                                     tab.title().to_owned()
                                 };
-                                let (tid, tsz) = tab
-                                    .tab_thumb
-                                    .as_ref()
-                                    .map_or((None, Vec2::ZERO), |t| (Some(t.id()), t.size_vec2()));
+                                let (tid, tsz) =
+                                    tab.thumbnails.tab.as_ref().map_or((None, Vec2::ZERO), |t| {
+                                        (Some(t.id()), t.size_vec2())
+                                    });
                                 (
                                     i18n::display(&title).into_owned(),
                                     tab.editor.has_unsaved_edits(),
@@ -1650,7 +1647,8 @@ impl App {
                             let mode = i18n::blend_name_logical(blend_id);
                             let thumb = self
                                 .tab()
-                                .layer_thumbs
+                                .thumbnails
+                                .layers
                                 .get(layer)
                                 .and_then(|t| t.as_ref())
                                 .map(|t| (t.id(), t.size_vec2()));
@@ -2157,28 +2155,13 @@ impl App {
         self.finish_change(result);
     }
 
+    /// Redraws the thumbnails of what changed in the active document.
     fn refresh_thumbnails(&mut self, ctx: &egui::Context) {
-        let active_session = self.has_active_session();
+        let busy = self.has_active_session() || ctx.input(|input| input.pointer.any_down());
         let tab = &mut self.tabs[self.active_tab];
-        if !tab.thumbs_dirty || active_session {
-            return;
-        }
-        tab.thumbs_dirty = false;
-        let doc = &tab.editor.document;
-        let tab_thumb = make_thumbnail_texture(ctx, "tab_thumb", doc, None, 24);
-        let count = doc.layer_count();
-        let mut layer_thumbs = Vec::with_capacity(count);
-        for idx in 0..count {
-            layer_thumbs.push(make_thumbnail_texture(
-                ctx,
-                &format!("layer_thumb_{idx}"),
-                doc,
-                Some(idx),
-                28,
-            ));
-        }
-        tab.tab_thumb = tab_thumb;
-        tab.layer_thumbs = layer_thumbs;
+        let changes = tab.editor.take_layer_changes();
+        tab.thumbnails.layers_changed(changes);
+        tab.thumbnails.refresh(ctx, &tab.editor.document, busy);
     }
 
     fn refresh_image(&mut self, ctx: &egui::Context) {
@@ -2203,6 +2186,8 @@ impl App {
         {
             match tab.editor.document.composite_rect(min, max) {
                 Ok(pixels) => {
+                    tab.thumbnails
+                        .composited((width, height), min, max, &pixels);
                     let rw = (max.0 - min.0 + 1) as usize;
                     let rh = (max.1 - min.1 + 1) as usize;
                     let sub = pixels_to_color_image(rw, rh, &pixels);
@@ -2256,6 +2241,9 @@ impl App {
         })();
         match composite {
             Ok(pixels) => {
+                let last = (width - 1, height - 1);
+                tab.thumbnails
+                    .composited((width, height), (0, 0), last, &pixels);
                 let image = pixels_to_color_image(width as usize, height as usize, &pixels);
                 if let Some(texture) = &mut tab.image {
                     texture.set(image, TextureOptions::NEAREST);
@@ -3697,13 +3685,9 @@ impl App {
                             tab.editor.draw_to(pointer.and_then(document_point));
                         }
                         if !down || released {
-                            let was_drawing = self.tab().editor.has_edits();
                             self.tab_mut().editor.finish_stroke();
                             self.tab_mut().stroke_gesture = None;
                             if released {
-                                if was_drawing {
-                                    self.tab_mut().thumbs_dirty = true;
-                                }
                                 ui.ctx().request_repaint();
                             }
                         }
@@ -3856,7 +3840,6 @@ impl App {
                             dialog.original,
                             "layer-properties",
                         );
-                        self.tab_mut().thumbs_dirty = true;
                     }
                     self.report(result, "");
                 }
@@ -4365,8 +4348,6 @@ impl App {
             }
         }
 
-        self.refresh_thumbnails(ctx);
-
         let workspace_frame = egui::Frame::new().fill(self.settings.theme.workspace());
         let window_radius = window_chrome::corner_radius(ctx, self.fullscreen);
 
@@ -4596,6 +4577,8 @@ impl App {
                     ctx.request_repaint();
                 }
             });
+        // After the canvas, whose composite the tab thumbnail samples.
+        self.refresh_thumbnails(ctx);
         self.color_dropdown_popup(ctx, ribbon);
         self.dialogs(ctx);
         self.geometry_dialogs(ctx);
@@ -4838,6 +4821,133 @@ mod tests {
             assert!(driver.app.error_flash.is_none());
             driver.time += 1.0;
         }
+        Ok(())
+    }
+
+    /// The ids of the layer thumbnails and of the tab thumbnail that a frame
+    /// redrew.
+    fn redrawn(driver: &TestDriver, output: &egui::FullOutput) -> (Vec<usize>, bool) {
+        let thumbnails = &driver.app.tab().thumbnails;
+        let uploaded = |texture: &Option<TextureHandle>| {
+            texture.as_ref().is_some_and(|texture| {
+                output
+                    .textures_delta
+                    .set
+                    .iter()
+                    .any(|(id, _)| *id == texture.id())
+            })
+        };
+        let layers = (0..thumbnails.layers.len())
+            .filter(|&layer| uploaded(&thumbnails.layers[layer]))
+            .collect();
+        (layers, uploaded(&thumbnails.tab))
+    }
+
+    #[test]
+    fn a_stroke_redraws_only_its_layer_and_the_tab_thumbnail() -> io::Result<()> {
+        let mut document = Document::new(300, 200)?;
+        document.add_layer("Middle")?;
+        document.add_layer("Top")?;
+        let mut driver = TestDriver::new(document);
+        for _ in 0..3 {
+            driver.step();
+        }
+        let output = driver.step();
+        assert_eq!(redrawn(&driver, &output), (vec![], false), "idle");
+
+        let tab = driver.app.tab_mut();
+        tab.editor.selected = 1;
+        tab.editor.begin_stroke(Pixel([220, 40, 40, 255]), 60);
+        tab.editor.draw_to(Some((150, 100)));
+        tab.editor.finish_stroke();
+        driver.time += 1.0;
+        let output = driver.step();
+        assert_eq!(redrawn(&driver, &output), (vec![1], true));
+
+        // Selections and layer properties leave layer thumbnails alone.
+        driver.app.tab_mut().editor.select_all();
+        driver.app.tab_mut().editor.set_properties(2, (true, 90))?;
+        driver.time += 1.0;
+        let output = driver.step();
+        assert_eq!(redrawn(&driver, &output).0, Vec::<usize>::new());
+        Ok(())
+    }
+
+    #[test]
+    fn thumbnails_follow_every_kind_of_change() -> io::Result<()> {
+        let mut document = Document::new(97, 53)?;
+        document.add_layer("Top")?;
+        let mut driver = TestDriver::new(document);
+        for _ in 0..2 {
+            driver.step();
+        }
+        // The tab thumbnail, sampled from composites on display, matches one
+        // taken from a fresh composite.
+        let check = |driver: &mut TestDriver, after: &str| -> io::Result<()> {
+            for _ in 0..2 {
+                driver.time += 1.0;
+                driver.step();
+            }
+            let tab = driver.app.tab();
+            let (.., expected) = tab.editor.document.composite_thumbnail(24)?;
+            assert_eq!(tab.thumbnails.tab_pixels(), expected, "{after}");
+            assert_eq!(
+                tab.thumbnails.layers.len(),
+                tab.editor.document.layer_count(),
+                "{after}"
+            );
+            Ok(())
+        };
+        check(&mut driver, "open")?;
+        let editor = &mut driver.app.tab_mut().editor;
+        editor.selected = 1;
+        // A stroke refreshes the display only where it drew.
+        editor.begin_stroke(Pixel([20, 200, 40, 200]), 30);
+        editor.draw_to(Some((10, 10)));
+        editor.draw_to(Some((80, 40)));
+        editor.finish_stroke();
+        check(&mut driver, "stroke")?;
+        assert!(driver.app.tab_mut().editor.undo()?);
+        driver.app.tab_mut().editor.mark_full_refresh();
+        check(&mut driver, "undo")?;
+        assert!(driver.app.tab_mut().editor.redo()?);
+        check(&mut driver, "redo")?;
+        driver.app.tab_mut().editor.add_layer()?;
+        check(&mut driver, "add layer")?;
+        driver.app.tab_mut().editor.delete_layer(0)?;
+        check(&mut driver, "delete layer")?;
+        let result = geometry::canvas_size(&driver.app.tab().editor.document, (40, 90), (0, 0));
+        driver.app.install_geometry(result, 0, "canvas-size");
+        check(&mut driver, "resize")?;
+        Ok(())
+    }
+
+    #[test]
+    fn thumbnails_wait_while_the_pointer_is_busy() -> io::Result<()> {
+        let mut driver = TestDriver::new(Document::new(64, 48)?);
+        for _ in 0..3 {
+            driver.step();
+        }
+        driver.time += 1.0;
+        let press = egui::Event::PointerButton {
+            pos: pos2(2.0, 2.0),
+            button: PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        };
+        driver.run(egui::Modifiers::NONE, vec![press]);
+        // Six changes, 50 ms apart, with the button held.
+        let mut redraws = 0;
+        for step in 0..12_u32 {
+            let tab = driver.app.tab_mut();
+            tab.editor
+                .begin_stroke(Pixel([200, step as u8, 0, 255]), 40);
+            tab.editor.draw_to(Some((32, 24)));
+            tab.editor.finish_stroke();
+            let output = driver.step();
+            redraws += usize::from(redrawn(&driver, &output).1);
+        }
+        assert!((2..=3).contains(&redraws), "{redraws} redraws in 600 ms");
         Ok(())
     }
 

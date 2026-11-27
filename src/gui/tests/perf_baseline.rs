@@ -433,10 +433,9 @@ fn run_once(
                 tab.editor.begin_stroke(Pixel([220, 40, 40, 255]), 24);
                 tab.editor.draw_to(Some((40 + step * 8, 40 + step * 4)));
                 tab.editor.finish_stroke();
-                tab.thumbs_dirty = true;
                 let output = recorder.time("refresh", || driver.step());
                 assert!(
-                    updated(&output, driver.app.tab().tab_thumb.as_ref()),
+                    updated(&output, driver.app.tab().thumbnails.tab.as_ref()),
                     "thumbnails not refreshed"
                 );
             }

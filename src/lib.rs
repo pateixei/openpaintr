@@ -658,35 +658,65 @@ fn blend_onto(destination: &mut [Pixel], source: &[Pixel], blend: u8, opacity: u
     );
 }
 
+/// The size of a canvas's thumbnail and the canvas pixel behind each of its
+/// pixels.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ThumbnailGrid {
+    pub width: u32,
+    pub height: u32,
+    source: (u32, u32),
+}
+
+impl ThumbnailGrid {
+    /// A thumbnail of a `width` x `height` canvas at most `max_side` wide and
+    /// tall.
+    pub fn new(width: u32, height: u32, max_side: u32) -> Self {
+        let max_side = max_side.max(1);
+        let (thumb_w, thumb_h) = if width >= height {
+            let thumb_w = width.min(max_side).max(1);
+            let thumb_h = ((u64::from(height) * u64::from(thumb_w)).div_ceil(u64::from(width))
+                as u32)
+                .clamp(1, max_side);
+            (thumb_w, thumb_h)
+        } else {
+            let thumb_h = height.min(max_side).max(1);
+            let thumb_w = ((u64::from(width) * u64::from(thumb_h)).div_ceil(u64::from(height))
+                as u32)
+                .clamp(1, max_side);
+            (thumb_w, thumb_h)
+        };
+        Self {
+            width: thumb_w,
+            height: thumb_h,
+            source: (width, height),
+        }
+    }
+
+    /// The canvas pixel sampled by each thumbnail pixel, row by row.
+    pub fn positions(self) -> impl Iterator<Item = (u32, u32)> {
+        let center = |index: u32, count: u32, length: u32| {
+            ((u64::from(index) * 2 + 1) * u64::from(length) / (2 * u64::from(count)))
+                .min(u64::from(length - 1)) as u32
+        };
+        (0..self.height).flat_map(move |ty| {
+            let y = center(ty, self.height, self.source.1);
+            (0..self.width).map(move |tx| (center(tx, self.width, self.source.0), y))
+        })
+    }
+}
+
 fn sample_thumbnail(
     pixels: &[Pixel],
     width: u32,
     height: u32,
     max_side: u32,
 ) -> (u32, u32, Vec<Pixel>) {
-    let max_side = max_side.max(1);
-    let (thumb_w, thumb_h) = if width >= height {
-        let thumb_w = width.min(max_side).max(1);
-        let thumb_h = ((u64::from(height) * u64::from(thumb_w)).div_ceil(u64::from(width)) as u32)
-            .clamp(1, max_side);
-        (thumb_w, thumb_h)
-    } else {
-        let thumb_h = height.min(max_side).max(1);
-        let thumb_w = ((u64::from(width) * u64::from(thumb_h)).div_ceil(u64::from(height)) as u32)
-            .clamp(1, max_side);
-        (thumb_w, thumb_h)
-    };
-    let mut out = Vec::with_capacity((thumb_w * thumb_h) as usize);
-    for ty in 0..thumb_h {
-        let sy = ((u64::from(ty) * 2 + 1) * u64::from(height) / (2 * u64::from(thumb_h)))
-            .min(u64::from(height - 1)) as usize;
-        for tx in 0..thumb_w {
-            let sx = ((u64::from(tx) * 2 + 1) * u64::from(width) / (2 * u64::from(thumb_w)))
-                .min(u64::from(width - 1)) as usize;
-            out.push(pixels[sy * width as usize + sx]);
-        }
-    }
-    (thumb_w, thumb_h, out)
+    let grid = ThumbnailGrid::new(width, height, max_side);
+    let out = grid
+        .positions()
+        .map(|(x, y)| pixels[y as usize * width as usize + x as usize])
+        .collect();
+    (grid.width, grid.height, out)
 }
 
 #[cfg(test)]

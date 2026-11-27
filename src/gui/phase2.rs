@@ -220,7 +220,6 @@ impl App {
 
     pub(super) fn finish_geometry(&mut self, result: io::Result<()>) {
         if result.is_ok() {
-            self.tab_mut().thumbs_dirty = true;
             self.tab_mut().editor.mark_full_refresh();
         }
         self.report(result, "");
@@ -236,7 +235,6 @@ impl App {
                     match self.tab_mut().editor.cut_image() {
                         Ok(changed) => {
                             if changed {
-                                self.tab_mut().thumbs_dirty = true;
                                 self.tab_mut().editor.mark_full_refresh();
                             }
                         }

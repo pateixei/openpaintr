@@ -37,21 +37,6 @@ pub(super) fn modal(ctx: &egui::Context, id: &str) -> egui::Modal {
         .frame(egui::Frame::popup(&ctx.style()).corner_radius(CARD_CORNER_RADIUS))
 }
 
-pub fn make_thumbnail_texture(
-    ctx: &egui::Context,
-    name: &str,
-    document: &Document,
-    layer: Option<usize>,
-    max_side: u32,
-) -> Option<TextureHandle> {
-    let (w, h, pixels) = match layer {
-        Some(idx) => document.layer_thumbnail(idx, max_side)?,
-        None => document.composite_thumbnail(max_side).ok()?,
-    };
-    let image = pixels_to_color_image(w as usize, h as usize, &pixels);
-    Some(ctx.load_texture(name, image, TextureOptions::LINEAR))
-}
-
 #[derive(Default)]
 pub struct RecentFiles {
     path: Option<PathBuf>,
