@@ -4605,6 +4605,7 @@ impl eframe::App for App {
 mod tests {
     use super::*;
 
+    mod golden_gradient;
     mod golden_resample;
     mod perf_baseline;
 
