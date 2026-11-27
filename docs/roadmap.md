@@ -113,6 +113,72 @@ Switching to Adobe, creating a custom profile, and restoring its binding after a
 - [ ] **Desktop and support.** Add printing and scanner or camera acquisition using Linux integrations, file associations and drag-and-drop, tool defaults and settings, themes, help, tutorials, About, and support and feedback links. Use the Linux distribution channel for updates.
 - [ ] **Performance.** Extend phase 1 interactive benchmarks to compositing, clipboard operations, and large layer stacks (and later to effects in phase 5). Use observed bottlenecks to prioritize region updates, caching, and parallelism. Assess FP32 compositing, SIMD, and a portable GPU backend using precision comparisons and benchmarks. [Rendering, color, and extension changes in 5.2](https://paint.net/roadmap.html)
 
+  **Per-tool baseline (November 27, 2026).** Development moved from WSL2 to native Ubuntu 26.04, so these numbers are **not comparable with the phase 1 table**. Compare later measurements only with results from this environment.
+
+  Environment: `Linux ptlinux 7.0.0-44-generic #44-Ubuntu SMP PREEMPT_DYNAMIC Fri Nov  6 02:38:04 UTC 2026 x86_64 GNU/Linux`; `13th Gen Intel(R) Core(TM) i7-13700K`, `powersave` governor; `rustc 1.100.0 (0ef1bc386 2026-11-09)`; commit `4f5fac9`; desktop session with other applications running.
+
+  Reproduce with `cargo test --release --locked --bin openpaintr perf_baseline -- --ignored --nocapture`, which writes `target/perf/baseline.jsonl`. Keep the filter: other ignored tests rewrite versioned fixtures. Each case runs in its own process with 2 warm-ups and 10 timed runs, on the typical (`800 × 600`, 4 layers) and large (`2560 × 1440`, 8 layers) documents, with Analytical antialiasing. A frame is one headless UI update (UI, preview, compositing, and texture conversion), without tessellation or GPU upload.
+
+  Phase 1 workloads, measured as in phase 1 (median and maximum of per-run means). The stroke now uses the default Analytical antialiasing.
+
+  | Workload | Open to editable canvas | Stroke + frame | Zoom / scroll frame | PNG export | Peak `VmHWM` |
+  | --- | ---: | ---: | ---: | ---: | ---: |
+  | Typical (`800 × 600`, 4 layers) | `9.85 ms` med / `10.32 ms` max | `0.15 ms` med / `0.15 ms` max | `0.11 ms` med / `0.13 ms` max | `4.56 ms` med / `5.20 ms` max | `38,524 kB` |
+  | Large (`2560 × 1440`, 8 layers) | `124.85 ms` med / `136.81 ms` max | `0.19 ms` med / `0.19 ms` max | `0.12 ms` med / `0.14 ms` max | `56.92 ms` med / `59.64 ms` max | `250,404 kB` |
+
+  Per-tool workloads (median and maximum over all timed frames; T = typical, L = large):
+
+  | Workload | Variant | Phase | Samples | T frame ms (med / max) | L frame ms (med / max) | Peak `VmHWM` kB (T / L) | Undo bytes per entry (T / L) |
+  | --- | --- | --- | ---: | ---: | ---: | ---: | ---: |
+  | `transform_layer` | nearest | preview | 100 | 6.28 / 7.26 | 71.81 / 86.38 | 45,388 / 275,864 | — |
+  | `transform_layer` | nearest | commit | 10 | 8.26 / 8.96 | 110.03 / 111.15 | 45,388 / 275,864 | 1,920,128 / 14,745,728 |
+  | `transform_floating` | bilinear-64x64 | preview | 100 | 9.78 / 10.21 | 98.68 / 110.44 | 41,584 / 250,456 | — |
+  | `transform_floating` | bilinear-64x64 | commit | 10 | 11.27 / 11.58 | 129.94 / 140.18 | 41,584 / 250,456 | 1,920,128 / 14,745,728 |
+  | `rotate_zoom` | nearest | preview | 100 | 6.16 / 6.97 | 71.96 / 78.70 | 45,644 / 276,124 | — |
+  | `rotate_zoom` | nearest | commit | 10 | 8.31 / 8.65 | 113.76 / 115.09 | 45,644 / 276,124 | 1,920,128 / 14,745,728 |
+  | `gradient` | linear | preview | 100 | 24.42 / 25.21 | 211.65 / 219.73 | 47,828 / 250,332 | — |
+  | `gradient` | linear | commit | 10 | 28.08 / 29.04 | 278.00 / 279.59 | 47,828 / 250,332 | 7,680,064 / 58,982,464 |
+  | `gradient` | conical | preview | 100 | 32.25 / 38.81 | 270.09 / 286.15 | 47,464 / 250,680 | — |
+  | `gradient` | conical | commit | 10 | 35.55 / 44.48 | 334.59 / 335.37 | 47,464 / 250,680 | 7,680,064 / 58,982,464 |
+  | `shape_star` | star5 | preview | 100 | 3.74 / 6.32 | 53.51 / 88.76 | 41,572 / 250,484 | — |
+  | `shape_star` | star5 | commit | 10 | 8.91 / 10.62 | 124.12 / 132.67 | 41,572 / 250,484 | 1,797,536 / 13,509,632 |
+  | `shape_freeform` | spiral | preview | 600 | 4.32 / 12.24 | 57.97 / 105.34 | 43,636 / 250,696 | — |
+  | `shape_freeform` | spiral | commit | 10 | 11.27 / 12.96 | 148.82 / 153.07 | 43,636 / 250,696 | 2,452,528 / 18,414,576 |
+  | `text` | 24px | typing | 140 | 3.20 / 3.70 | 45.25 / 46.71 | 43,592 / 250,672 | — |
+  | `text` | 24px | commit | 10 | 5.79 / 6.25 | 87.51 / 88.45 | 43,592 / 250,672 | 20,752 / 21,056 |
+  | `text` | 96px | typing | 140 | 11.29 / 17.68 | 53.31 / 71.12 | 54,856 / 250,692 | — |
+  | `text` | 96px | commit | 10 | 19.66 / 19.98 | 100.56 / 102.74 | 54,856 / 250,692 | 203,792 / 204,944 |
+  | `text` | 240px | typing | 140 | 44.58 / 55.66 | 99.17 / 149.11 | 116,972 / 250,664 | — |
+  | `text` | 240px | commit | 10 | 55.67 / 56.49 | 190.27 / 192.37 | 116,972 / 250,664 | 524,832 / 1,156,192 |
+  | `bucket` | contiguous | click | 10 | 20.79 / 20.89 | 172.51 / 173.97 | 41,268 / 250,520 | 1,920,128 / 14,745,728 |
+  | `bucket` | contiguous | refresh | 10 | 4.83 / 5.33 | 86.23 / 86.92 | 41,268 / 250,520 | — |
+  | `bucket` | global | click | 10 | 4.69 / 4.74 | 35.69 / 35.99 | 41,872 / 250,708 | 1,920,128 / 14,745,728 |
+  | `bucket` | global | refresh | 10 | 4.92 / 5.15 | 85.94 / 87.17 | 41,872 / 250,708 | — |
+  | `magic_wand` | default | click | 10 | 7.92 / 8.13 | 73.10 / 73.65 | 40,116 / 250,384 | 256 / 256 |
+  | `magic_wand` | default | refresh | 10 | 0.56 / 0.59 | 0.99 / 1.02 | 40,116 / 250,384 | — |
+  | `clone_stamp` | default | start | 10 | 0.20 / 0.22 | 1.01 / 1.10 | 44,148 / 276,116 | — |
+  | `clone_stamp` | default | stroke | 100 | 0.14 / 0.17 | 0.27 / 0.31 | 44,148 / 276,116 | — |
+  | `clone_stamp` | default | release | 10 | 0.15 / 0.15 | 0.33 / 0.34 | 44,148 / 276,116 | 80,128 / 237,152 |
+  | `layer_opacity` | default | drag | 100 | 2.52 / 2.77 | 42.96 / 43.35 | 39,668 / 251,140 | 128 / 128 |
+  | `thumbnails` | after-stroke | refresh | 100 | 2.10 / 2.21 | 40.39 / 59.33 | 39,604 / 250,168 | — |
+  | `save_dialog` | pdn-1 | encode | 10 | 11.61 / 11.78 | 105.35 / 106.41 | 41,992 / 269,700 | — |
+  | `save_dialog` | pdn-5 | encode | 10 | 14.10 / 15.18 | 119.31 / 128.12 | 42,320 / 269,864 | — |
+  | `save_dialog` | pdn-9 | encode | 10 | 13.90 / 21.07 | 117.07 / 122.54 | 42,328 / 269,644 | — |
+  | `save_dialog` | png-none | encode | 10 | 8.38 / 8.45 | 111.90 / 114.26 | 26,756 / 250,196 | — |
+  | `save_dialog` | png-fast | encode | 10 | 5.02 / 5.23 | 82.38 / 84.77 | 26,960 / 250,984 | — |
+  | `save_dialog` | png-balanced | encode | 10 | 7.22 / 7.29 | 96.46 / 101.14 | 26,568 / 250,296 | — |
+  | `save_dialog` | png-high | encode | 10 | 7.79 / 7.87 | 97.63 / 100.64 | 26,080 / 250,656 | — |
+  | `pdn_open` | default | open | 10 | 10.46 / 10.91 | 124.03 / 128.98 | 39,344 / 250,144 | — |
+  | `pdn_save` | default | save | 10 | 8.40 / 8.78 | 85.40 / 87.90 | 41,080 / 258,528 | — |
+  | `png_export` | default | export | 10 | 4.55 / 4.76 | 57.00 / 59.38 | 26,824 / 250,616 | — |
+
+  Reading the table:
+
+  - Layers are uniform, as in phase 1, so encoding times are favorable. `transform_layer`, `rotate_zoom`, and `clone_stamp` use a patterned top layer.
+  - `layer_opacity` and `save_dialog` call the work their control triggers instead of locating the widget. Each `save_dialog` sample is one re-encoding with its preview.
+  - Shape previews grow during the drag, so their maximum is well above the median.
+  - `VmHWM` includes document setup. Undo bytes are the history's own estimate (plan item 3.2).
+
 **Acceptance criteria** — Publish the format and metadata support matrix, test file and clipboard integration on Wayland and X11, and record reproducible interactive benchmarks.
 
 ### Formats shown in the Paint.NET 5.2 Open dialog
