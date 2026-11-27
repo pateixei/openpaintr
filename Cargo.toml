@@ -2,6 +2,7 @@
 name = "openpaintr"
 version = "0.1.0"
 edition = "2024"
+publish = false
 description = "Editor raster em Rust para Linux"
 
 [features]
