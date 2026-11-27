@@ -2,7 +2,7 @@
 
 This guide describes the planned workflow for building, testing, and packaging a portable OpenPaintR **`.rpdn-plugin`**. A package is designed to run on **Linux, Windows, and macOS** (`x86_64` and `aarch64`).
 
-See the [plugin architecture](arquitetura-plugins.md) for the format and API specification. The runtime, SDK, and packaging commands are planned for phase 4.
+See the [plugin architecture](plugin-architecture.md) for the format and API specification. The runtime, SDK, and packaging commands are planned for phase 4.
 
 ---
 

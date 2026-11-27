@@ -94,5 +94,5 @@ The `jflib-img-pdn` crate reads and writes layered Paint.NET documents. OpenPain
 ## Project documentation
 
 - [Roadmap and acceptance criteria](docs/roadmap.md)
-- [Technical references and compatibility experiments](docs/referencias.md)
-- [Plugin architecture](docs/arquitetura-plugins.md) and [extensibility guide](docs/extensibilidade.md) for the planned cross-platform `.rpdn-plugin` format. The plan requires all effects to use WebAssembly, optional WGSL shaders, and a declarative UI.
+- [Technical references and compatibility experiments](docs/references.md)
+- [Plugin architecture](docs/plugin-architecture.md) and [extensibility guide](docs/extensibility.md) for the planned cross-platform `.rpdn-plugin` format. The plan requires all effects to use WebAssembly, optional WGSL shaders, and a declarative UI.

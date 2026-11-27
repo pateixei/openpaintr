@@ -773,7 +773,7 @@ impl Shortcuts {
     }
 
     pub fn settings(&mut self, ctx: &egui::Context, dialog: &mut ShortcutDialog) -> bool {
-        let response = modal(ctx, "configurar_atalhos").show(ctx, |ui| {
+        let response = modal(ctx, "configure_shortcuts").show(ctx, |ui| {
             ui.set_width((ctx.content_rect().width() - 36.0).clamp(320.0, 560.0));
             ui.heading(tr("shortcuts"));
             if let Some(path) = &self.path {
@@ -781,7 +781,7 @@ impl Shortcuts {
             }
             ui.horizontal(|ui| {
                 ui.label(tr("active-profile"));
-                egui::ComboBox::from_id_salt("perfil_atalhos")
+                egui::ComboBox::from_id_salt("shortcut_profile")
                     .selected_text(&dialog.draft.active)
                     .show_ui(ui, |ui| {
                         for name in dialog.draft.profiles.keys() {
@@ -825,7 +825,7 @@ impl Shortcuts {
             egui::ScrollArea::vertical()
                 .max_height((ctx.content_rect().height() - 250.0).max(140.0))
                 .show(ui, |ui| {
-                    egui::Grid::new("comandos_atalhos")
+                    egui::Grid::new("shortcut_commands")
                         .num_columns(3)
                         .striped(true)
                         .show(ui, |ui| {

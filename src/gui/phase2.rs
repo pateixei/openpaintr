@@ -589,7 +589,7 @@ impl App {
     pub fn geometry_dialogs(&mut self, ctx: &egui::Context) {
         if let Some(mut dialog) = self.size_dialog.take() {
             let limit = max_canvas_side(ctx);
-            let response = modal(ctx, "dimensoes").show(ctx, |ui| {
+            let response = modal(ctx, "dimensions").show(ctx, |ui| {
                 ui.heading(if dialog.kind == SizeKind::Resize {
                     tr("resize")
                 } else {

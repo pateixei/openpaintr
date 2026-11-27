@@ -193,7 +193,7 @@ impl SaveOptionsDialog {
         checker: &TextureHandle,
     ) -> SaveDialogAction {
         let mut changed = false;
-        let response = modal(ctx, "opcoes_salvamento").show(ctx, |ui| {
+        let response = modal(ctx, "save_options").show(ctx, |ui| {
             ui.set_width((ctx.content_rect().width() - 40.0).clamp(320.0, 480.0));
             let title = if self.is_project() {
                 tr("pdn-save-options")
@@ -320,7 +320,7 @@ impl LayerPropertiesDialog {
 
     pub fn show(&mut self, ctx: &egui::Context) -> LayerDialogAction {
         let mut live_changed = false;
-        let response = modal(ctx, "propriedades_camada").show(ctx, |ui| {
+        let response = modal(ctx, "layer_properties").show(ctx, |ui| {
             ui.set_width((ctx.content_rect().width() - 40.0).clamp(280.0, 380.0));
             ui.heading(tr("layer-properties"));
             ui.separator();

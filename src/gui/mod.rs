@@ -1226,7 +1226,7 @@ impl App {
                 }
             }
             egui::ScrollArea::horizontal()
-                .id_salt("documentos_abertos")
+                .id_salt("open_documents")
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 4.0;
