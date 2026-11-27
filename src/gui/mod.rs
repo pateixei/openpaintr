@@ -4607,6 +4607,7 @@ mod tests {
 
     mod golden_gradient;
     mod golden_resample;
+    mod golden_vector;
     mod perf_baseline;
 
     fn fixture_path(name: &str) -> PathBuf {
