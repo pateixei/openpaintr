@@ -1,7 +1,7 @@
 use super::i18n::text as tr;
 use std::{
     f32::consts::TAU,
-    fs, io,
+    io,
     path::{Path, PathBuf},
 };
 
@@ -168,14 +168,34 @@ pub struct ColorPalette {
     palette_path: Option<PathBuf>,
 }
 
+/// Largest palette file that is read.
+const PALETTE_LIMIT: u64 = 64 * 1024;
+
+fn read_palette_text(path: &Path) -> io::Result<String> {
+    let bytes = super::storage::read_capped(path, PALETTE_LIMIT)?;
+    String::from_utf8(bytes).map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
+}
+
 impl ColorPalette {
     pub fn new(primary: [u8; 3], secondary: [u8; 3]) -> Self {
         let palette_path = super::storage::exe_adjacent(PALETTE_FILE).ok();
-        let loaded = palette_path
-            .as_deref()
-            .and_then(|p| fs::read_to_string(p).ok())
-            .map(|text| Self::parse_palette_txt(&text))
-            .filter(|s| !s.is_empty());
+        Self::with_palette_file(primary, secondary, palette_path)
+    }
+
+    fn with_palette_file(
+        primary: [u8; 3],
+        secondary: [u8; 3],
+        mut palette_path: Option<PathBuf>,
+    ) -> Self {
+        let loaded = match palette_path.as_deref().map(read_palette_text) {
+            Some(Ok(text)) => Some(Self::parse_palette_txt(&text)).filter(|s| !s.is_empty()),
+            // Never overwrite a file that exists but could not be read.
+            Some(Err(error)) if error.kind() != io::ErrorKind::NotFound => {
+                palette_path = None;
+                None
+            }
+            _ => None,
+        };
         let p_rgba = [primary[0], primary[1], primary[2], 255];
         Self {
             primary_swatches: [
@@ -338,7 +358,7 @@ impl ColorPalette {
     }
 
     pub fn load_from(&mut self, path: &Path) -> io::Result<()> {
-        let text = fs::read_to_string(path)?;
+        let text = read_palette_text(path)?;
         let parsed = Self::parse_palette_txt(&text);
         if parsed.is_empty() {
             return Err(io::Error::new(
@@ -1001,6 +1021,28 @@ fn snap_hue(h: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_unreadable_palette_falls_back_and_is_left_untouched() -> io::Result<()> {
+        let temp = tempfile::tempdir()?;
+        let path = temp.path().join("palette.txt");
+        let oversized = "FF112233\n".repeat(PALETTE_LIMIT as usize / 9 + 1);
+        std::fs::write(&path, &oversized)?;
+
+        let mut palette = ColorPalette::with_palette_file([0; 3], [0; 3], Some(path.clone()));
+        assert_eq!(palette.swatches, DEFAULT_SWATCHES);
+        palette.autosave();
+        assert_eq!(std::fs::read_to_string(&path)?, oversized);
+        let error = palette.load_from(&path).expect_err("oversized");
+        assert_eq!(error.kind(), io::ErrorKind::FileTooLarge);
+
+        // A missing file is still created on the first change.
+        let missing = temp.path().join("new.txt");
+        let palette = ColorPalette::with_palette_file([0; 3], [0; 3], Some(missing.clone()));
+        palette.autosave();
+        assert!(missing.is_file());
+        Ok(())
+    }
 
     #[test]
     fn hex_round_trip_and_paint_net_palette_txt_work() {
