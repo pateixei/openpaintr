@@ -33,7 +33,14 @@ pub struct SizeDialog {
 }
 
 pub(super) fn resampling_selector(ui: &mut egui::Ui, method: &mut Resampling) {
-    enum_combo(ui, "reamostragem", None, method, &Resampling::ALL, Resampling::label);
+    enum_combo(
+        ui,
+        "reamostragem",
+        None,
+        method,
+        &Resampling::ALL,
+        Resampling::label,
+    );
 }
 
 pub fn menu_check_item(ui: &mut egui::Ui, checked: bool, label: &str, hint: &str) -> bool {
@@ -482,10 +489,15 @@ impl App {
                 self.install_geometry(result, selected, operation.label());
             }
             Flatten => {
-                let result = self.tab().editor.document.flattened().and_then(|mut document| {
-                    document.set_layer_name(0, super::i18n::logical_text("merged-image"))?;
-                    Ok(document)
-                });
+                let result = self
+                    .tab()
+                    .editor
+                    .document
+                    .flattened()
+                    .and_then(|mut document| {
+                        document.set_layer_name(0, super::i18n::logical_text("merged-image"))?;
+                        Ok(document)
+                    });
                 self.install_geometry(result, 0, "flatten");
             }
             AddLayer => self.run_layer_op(Editor::add_layer),

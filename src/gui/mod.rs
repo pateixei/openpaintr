@@ -54,7 +54,9 @@ use i18n::text as tr;
 use mouse_shortcuts::{MouseAction, Scope, Trigger};
 use phase2::SizeDialog;
 use selection::{Combine, Point, Region, Selection, Shape};
-use session::{ActiveSession, CanvasResizeDrag, CanvasResizeSession, SessionOutcome, rectangle_outline};
+use session::{
+    ActiveSession, CanvasResizeDrag, CanvasResizeSession, SessionOutcome, rectangle_outline,
+};
 use shortcuts::{Command, ShortcutDialog, Shortcuts};
 use text_tool::{FontCatalog, TextAlign, TextParams, TextSession};
 use theme::{CARD_CORNER_RADIUS, CARD_GAP, Theme};
@@ -866,9 +868,10 @@ impl App {
 
     fn save_settings(&mut self) {
         self.notice = self.locale.with(|| {
-            self.settings.save().err().map(|error| {
-                (i18n::format("settings-save-error", &[&error]), true)
-            })
+            self.settings
+                .save()
+                .err()
+                .map(|error| (i18n::format("settings-save-error", &[&error]), true))
         });
     }
 
@@ -1044,8 +1047,13 @@ impl App {
             let theme = self.settings.theme;
             match self.tab().session.as_ref() {
                 Some(ActiveSession::Transform(t)) => {
-                    let (target, mut method, shift, scale, degrees) =
-                        (t.target, t.method, t.affine.shift, t.affine.scale, t.affine.degrees);
+                    let (target, mut method, shift, scale, degrees) = (
+                        t.target,
+                        t.method,
+                        t.affine.shift,
+                        t.affine.scale,
+                        t.affine.degrees,
+                    );
                     ui.label(theme.muted_label(tr("transform-field")));
                     ui.label(theme.section_label(target.short_label()));
                     if target != TransformTarget::Mask {
@@ -1053,7 +1061,11 @@ impl App {
                         phase2::resampling_selector(ui, &mut method);
                         if method != prev {
                             let tab = self.tab_mut();
-                            if let Some(transform) = tab.session.as_mut().and_then(ActiveSession::as_transform_mut) {
+                            if let Some(transform) = tab
+                                .session
+                                .as_mut()
+                                .and_then(ActiveSession::as_transform_mut)
+                            {
                                 transform.method = method;
                             }
                             tab.editor.mark_full_refresh();
@@ -1142,7 +1154,11 @@ impl App {
                         false,
                     );
                     if (wc || hc)
-                        && let Some(cr) = self.tab_mut().session.as_mut().and_then(ActiveSession::as_canvas_resize_mut)
+                        && let Some(cr) = self
+                            .tab_mut()
+                            .session
+                            .as_mut()
+                            .and_then(ActiveSession::as_canvas_resize_mut)
                     {
                         cr.preview_size = preview_size;
                     }
@@ -1206,12 +1222,20 @@ impl App {
                                     .tab_thumb
                                     .as_ref()
                                     .map_or((None, Vec2::ZERO), |t| (Some(t.id()), t.size_vec2()));
-                                (i18n::display(&title).into_owned(), tab.editor.has_unsaved_edits(), tid, tsz)
+                                (
+                                    i18n::display(&title).into_owned(),
+                                    tab.editor.has_unsaved_edits(),
+                                    tid,
+                                    tsz,
+                                )
                             };
                             let frame = if active {
                                 egui::Frame::new()
                                     .fill(self.settings.theme.card_fill())
-                                    .stroke(egui::Stroke::new(1.0_f32, self.settings.theme.border_color()))
+                                    .stroke(egui::Stroke::new(
+                                        1.0_f32,
+                                        self.settings.theme.border_color(),
+                                    ))
                                     .corner_radius(egui::CornerRadius {
                                         nw: 6,
                                         ne: 6,
@@ -1287,7 +1311,9 @@ impl App {
                                     .inner
                                 })
                                 .inner;
-                            if let Some(pair) = dnd_reorder(ui, tab_resp.rect, ("tab_dnd", index), index) {
+                            if let Some(pair) =
+                                dnd_reorder(ui, tab_resp.rect, ("tab_dnd", index), index)
+                            {
                                 reorder = Some(pair);
                             }
                         }
@@ -1361,7 +1387,8 @@ impl App {
                 .spacing(vec2(4.0, 4.0))
                 .show(ui, |ui| {
                     for (idx, tool) in tools.into_iter().enumerate() {
-                        let resp = tool_icons::button(ui, self.settings.theme, tool, self.tool == tool);
+                        let resp =
+                            tool_icons::button(ui, self.settings.theme, tool, self.tool == tool);
                         let double_action = match tool {
                             Tool::Pan => {
                                 self.shortcuts.mouse.click(&resp, Scope::ToolbarHand, true)
@@ -1642,11 +1669,13 @@ impl App {
                                             name
                                         };
                                         let label_text =
-                                            RichText::new(i18n::display(&display).into_owned()).size(12.5).color(if active {
-                                                theme.pill_active_fg()
-                                            } else {
-                                                theme.text_primary()
-                                            });
+                                            RichText::new(i18n::display(&display).into_owned())
+                                                .size(12.5)
+                                                .color(if active {
+                                                    theme.pill_active_fg()
+                                                } else {
+                                                    theme.text_primary()
+                                                });
                                         let label_resp = ui
                                             .add(
                                                 egui::Button::new(label_text)
@@ -1673,7 +1702,9 @@ impl App {
                                     .inner
                                 })
                                 .inner;
-                            if let Some(pair) = dnd_reorder(ui, row_resp.rect, ("layer_dnd", layer), layer) {
+                            if let Some(pair) =
+                                dnd_reorder(ui, row_resp.rect, ("layer_dnd", layer), layer)
+                            {
                                 move_pair = Some(pair);
                             }
                         }
@@ -1886,14 +1917,21 @@ impl App {
                             })
                             .inner
                         };
-                        if item(ui, i18n::display(&format!("0. {}", i18n::logical_text("new-image"))).into_owned(), undo_len == 0, false) {
+                        if item(
+                            ui,
+                            i18n::display(&format!("0. {}", i18n::logical_text("new-image")))
+                                .into_owned(),
+                            undo_len == 0,
+                            false,
+                        ) {
                             target_state = Some(0);
                         }
                         for (index, label) in self.tab().editor.history().enumerate() {
                             let state = index + 1;
                             if item(
                                 ui,
-                                i18n::display(&format!("{state}. {}", i18n::logical_text(label))).into_owned(),
+                                i18n::display(&format!("{state}. {}", i18n::logical_text(label)))
+                                    .into_owned(),
                                 undo_len == state,
                                 false,
                             ) {
@@ -1902,7 +1940,13 @@ impl App {
                         }
                         for (offset, label) in self.tab().editor.redo_history().rev().enumerate() {
                             let state = undo_len + offset + 1;
-                            if item(ui, i18n::display(&format!("{state}. {}", i18n::logical_text(label))).into_owned(), false, true) {
+                            if item(
+                                ui,
+                                i18n::display(&format!("{state}. {}", i18n::logical_text(label)))
+                                    .into_owned(),
+                                false,
+                                true,
+                            ) {
                                 target_state = Some(state);
                             }
                         }
@@ -1999,7 +2043,11 @@ impl App {
             let tab = &mut self.tabs[self.active_tab];
             let layer = tab.editor.selected;
             let selection = tab.editor.selection.as_ref();
-            let src = tab.editor.document.layer_pixels(layer).expect("active layer");
+            let src = tab
+                .editor
+                .document
+                .layer_pixels(layer)
+                .expect("active layer");
             session.render_layer_preview(&mut self.font_catalog, src, size, selection, aa_mode)
         };
         if let Some(after) = preview {
@@ -2015,7 +2063,12 @@ impl App {
             self.commit_active_session();
             if matches!(
                 self.tool,
-                Tool::Brush | Tool::Pencil | Tool::Eraser | Tool::CloneStamp | Tool::Recolor | Tool::Bucket
+                Tool::Brush
+                    | Tool::Pencil
+                    | Tool::Eraser
+                    | Tool::CloneStamp
+                    | Tool::Recolor
+                    | Tool::Bucket
             ) {
                 self.last_paint_tool = self.tool;
             }
@@ -2049,15 +2102,7 @@ impl App {
         let composite = self.bucket_composite;
         let aa_mode = self.settings.antialiasing;
         let result = self.tab_mut().editor.bucket_fill(
-            seed,
-            primary,
-            secondary,
-            pattern,
-            blend,
-            tolerance,
-            alpha_mode,
-            contiguous,
-            composite,
+            seed, primary, secondary, pattern, blend, tolerance, alpha_mode, contiguous, composite,
             aa_mode,
         );
         self.finish_change(result);
@@ -2141,7 +2186,11 @@ impl App {
                 return tab.editor.document.composite();
             }
             let layer = tab.editor.selected;
-            let src = tab.editor.document.layer_pixels(layer).expect("active layer");
+            let src = tab
+                .editor
+                .document
+                .layer_pixels(layer)
+                .expect("active layer");
             let sel = tab.editor.selection.as_ref();
             let mut preview = match tab.session.as_mut() {
                 Some(ActiveSession::Transform(transform)) => {
@@ -2273,8 +2322,7 @@ impl App {
             let scaled = pixels * next;
             let space = canvas_space(scaled);
             tab.zoom = Some(next);
-            tab.view.scroll_to =
-                Some((space - scaled) * 0.5 + doc_point * next - available * 0.5);
+            tab.view.scroll_to = Some((space - scaled) * 0.5 + doc_point * next - available * 0.5);
         };
         let fit_selection = std::mem::take(&mut self.tab_mut().view.fit_selection);
         if fit_selection
@@ -2367,7 +2415,8 @@ impl App {
                         tab.zoom = Some(next);
                     }
                     let target_zoom = tab.zoom.unwrap_or(fit);
-                    let target_max = (canvas_space(pixels * target_zoom) - available).max(Vec2::ZERO);
+                    let target_max =
+                        (canvas_space(pixels * target_zoom) - available).max(Vec2::ZERO);
                     let next_offset = (offset - scroll).clamp(Vec2::ZERO, target_max);
                     if magnify != 0.0 || (next_offset - tab.view.offset).length_sq() > 1e-4 {
                         tab.view.scroll_to = Some(next_offset);
@@ -2407,7 +2456,8 @@ impl App {
                     input.pointer.button_released(gesture.button),
                 )
             });
-            if can_pan && (down || released)
+            if can_pan
+                && (down || released)
                 && let Some((previous, current)) = gesture.last_position.zip(position)
                 && current != previous
             {
@@ -2593,8 +2643,10 @@ impl App {
                         });
                         if let Some(pos) = ptr {
                             let doc_px = viewport.to_world(pos);
-                            let next_w = (doc_px.x.round() as i64).clamp(1, i64::from(limit)) as u32;
-                            let next_h = (doc_px.y.round() as i64).clamp(1, i64::from(limit)) as u32;
+                            let next_w =
+                                (doc_px.x.round() as i64).clamp(1, i64::from(limit)) as u32;
+                            let next_h =
+                                (doc_px.y.round() as i64).clamp(1, i64::from(limit)) as u32;
                             match kind {
                                 CanvasResizeDrag::RightEdge => preview_size.0 = next_w,
                                 CanvasResizeDrag::BottomEdge => preview_size.1 = next_h,
@@ -2661,7 +2713,10 @@ impl App {
                     if preview_size.0 > width {
                         let right_strip = Rect::from_min_max(
                             pos2(rect.right(), rect.top()),
-                            pos2(preview_rect.right(), preview_rect.bottom().min(rect.bottom())),
+                            pos2(
+                                preview_rect.right(),
+                                preview_rect.bottom().min(rect.bottom()),
+                            ),
                         );
                         paint_checker_strip(right_strip);
                     } else if preview_size.0 < width {
@@ -2715,10 +2770,8 @@ impl App {
                         egui::FontId::proportional(11.5),
                         Color32::WHITE,
                     );
-                    let badge_rect = Rect::from_min_size(
-                        badge_pos,
-                        badge_galley.size() + vec2(10.0, 6.0),
-                    );
+                    let badge_rect =
+                        Rect::from_min_size(badge_pos, badge_galley.size() + vec2(10.0, 6.0));
                     overlay.rect_filled(badge_rect, 4.0, Color32::from_black_alpha(190));
                     overlay.galley(badge_pos + vec2(5.0, 3.0), badge_galley, Color32::WHITE);
 
@@ -2870,22 +2923,24 @@ impl App {
                     Some(gesture.button)
                 } else if response.hovered() || response.is_pointer_button_down_on() {
                     let allow_hand = self.tool == Tool::Pan;
-                    self.shortcuts.mouse.active_match(ui.ctx(), true, |mouse, input, btn| {
-                        let is_canvas_pan = mouse.resolve(
-                            Scope::Canvas,
-                            Trigger::Button(btn),
-                            input.modifiers,
-                            |k| input.key_down(k),
-                        ) == Some(MouseAction::Pan);
-                        let is_hand_pan = allow_hand
-                            && mouse.resolve(
-                                Scope::Hand,
+                    self.shortcuts
+                        .mouse
+                        .active_match(ui.ctx(), true, |mouse, input, btn| {
+                            let is_canvas_pan = mouse.resolve(
+                                Scope::Canvas,
                                 Trigger::Button(btn),
                                 input.modifiers,
                                 |k| input.key_down(k),
-                            ) == Some(MouseAction::Hand);
-                        (is_canvas_pan || is_hand_pan).then_some(btn)
-                    })
+                            ) == Some(MouseAction::Pan);
+                            let is_hand_pan = allow_hand
+                                && mouse.resolve(
+                                    Scope::Hand,
+                                    Trigger::Button(btn),
+                                    input.modifiers,
+                                    |k| input.key_down(k),
+                                ) == Some(MouseAction::Hand);
+                            (is_canvas_pan || is_hand_pan).then_some(btn)
+                        })
                 } else {
                     None
                 };
@@ -2973,8 +3028,8 @@ impl App {
                                 if let Some(pos) = ptr {
                                     let p0 = ((press_pos - rect.min) / start_zoom)
                                         .clamp(Vec2::ZERO, pixels);
-                                    let p1 = ((pos - rect.min) / start_zoom)
-                                        .clamp(Vec2::ZERO, pixels);
+                                    let p1 =
+                                        ((pos - rect.min) / start_zoom).clamp(Vec2::ZERO, pixels);
                                     let box_w = (p1.x - p0.x).abs().max(2.0);
                                     let box_h = (p1.y - p0.y).abs().max(2.0);
                                     let next = ((usable.x - padding) / box_w)
@@ -3022,7 +3077,11 @@ impl App {
                                         | MouseAction::ZoomIn
                                         | MouseAction::ZoomOut
                                 )
-                                .then_some((btn, pos, act == MouseAction::ZoomScrubby))
+                                .then_some((
+                                    btn,
+                                    pos,
+                                    act == MouseAction::ZoomScrubby,
+                                ))
                             });
                         if let Some((btn, pos, is_scrubby)) = started {
                             self.tab_mut().zoom_drag = Some((btn, pos, zoom, is_scrubby));
@@ -3056,13 +3115,13 @@ impl App {
 
                 if self.tool == Tool::Eyedropper {
                     if let Some(point) = response.interact_pointer_pos().and_then(document_point)
-                        && let Some(action) = self
-                            .shortcuts
-                            .mouse
-                            .click(&response, Scope::Eyedropper, false)
+                        && let Some(action) =
+                            self.shortcuts
+                                .mouse
+                                .click(&response, Scope::Eyedropper, false)
                     {
-                        let sample_comp = self.eyedropper_composite
-                            || action == MouseAction::EyedropperComposite;
+                        let sample_comp =
+                            self.eyedropper_composite || action == MouseAction::EyedropperComposite;
                         let px = self.tab().editor.sample_pixel(point, sample_comp);
                         if action == MouseAction::EyedropperSecondary {
                             self.palette.set_secondary(px);
@@ -3200,10 +3259,8 @@ impl App {
                                         (g.anchor_f.x + delta.x).clamp(0.0, (width - 1) as f32);
                                     g.anchor_f.y =
                                         (g.anchor_f.y + delta.y).clamp(0.0, (height - 1) as f32);
-                                    g.anchor = (
-                                        g.anchor_f.x.round() as u32,
-                                        g.anchor_f.y.round() as u32,
-                                    );
+                                    g.anchor =
+                                        (g.anchor_f.x.round() as u32, g.anchor_f.y.round() as u32);
                                 }
                                 g.last_world = pixel;
                             }
@@ -3275,10 +3332,8 @@ impl App {
                                             .selection_path
                                             .iter()
                                             .map(|&(x, y)| {
-                                                viewport.to_screen(vec2(
-                                                    x as f32 + 0.5,
-                                                    y as f32 + 0.5,
-                                                ))
+                                                viewport
+                                                    .to_screen(vec2(x as f32 + 0.5, y as f32 + 0.5))
                                             })
                                             .collect::<Vec<_>>();
                                         paint_dashed_line(&painter, &points);
@@ -3399,11 +3454,7 @@ impl App {
                         };
                         let sc = viewport.to_screen(src_pt);
                         let r = (self.diameter as f32 * 0.5 * zoom).max(4.0);
-                        painter.circle_stroke(
-                            sc,
-                            r,
-                            egui::Stroke::new(1.0_f32, Color32::WHITE),
-                        );
+                        painter.circle_stroke(sc, r, egui::Stroke::new(1.0_f32, Color32::WHITE));
                         painter.line_segment(
                             [sc - vec2(5.0, 0.0), sc + vec2(5.0, 0.0)],
                             egui::Stroke::new(1.0_f32, Color32::BLACK),
@@ -3469,10 +3520,11 @@ impl App {
                                             },
                                             self.diameter,
                                         )),
-                                        MouseAction::PencilPrimary | MouseAction::PencilSecondary => {
-                                            let primary = self.palette.color(
-                                                action == MouseAction::PencilSecondary,
-                                            );
+                                        MouseAction::PencilPrimary
+                                        | MouseAction::PencilSecondary => {
+                                            let primary = self
+                                                .palette
+                                                .color(action == MouseAction::PencilSecondary);
                                             Some((
                                                 StrokeSpec::Paint {
                                                     primary,
@@ -3505,9 +3557,9 @@ impl App {
                                         }
                                         MouseAction::RecolorPrimary
                                         | MouseAction::RecolorSecondary => {
-                                            let replacement = self.palette.color(
-                                                action == MouseAction::RecolorSecondary,
-                                            );
+                                            let replacement = self
+                                                .palette
+                                                .color(action == MouseAction::RecolorSecondary);
                                             let target = self
                                                 .recolor_target
                                                 .unwrap_or(self.palette.secondary());
@@ -3569,9 +3621,9 @@ impl App {
                                         let aa_mode = self.settings.antialiasing;
                                         let tab = self.tab_mut();
                                         let waiting_for_drag =
-                                            tab.editor.selection.as_ref().is_some_and(|selection| {
-                                                selection.coverage_u8(start_pt) == 0
-                                            });
+                                            tab.editor.selection.as_ref().is_some_and(
+                                                |selection| selection.coverage_u8(start_pt) == 0,
+                                            );
                                         tab.stroke_gesture = Some(StrokeGesture {
                                             button: btn,
                                             waiting_for_drag,
@@ -4295,7 +4347,10 @@ impl App {
             .frame(
                 egui::Frame::new()
                     .fill(self.settings.theme.toolbar_fill())
-                    .stroke(egui::Stroke::new(1.0_f32, self.settings.theme.border_color()))
+                    .stroke(egui::Stroke::new(
+                        1.0_f32,
+                        self.settings.theme.border_color(),
+                    ))
                     .inner_margin(egui::Margin::symmetric(10, 5)),
             )
             .show_separator_line(false)
@@ -4303,7 +4358,10 @@ impl App {
 
         let ribbon_frame = egui::Frame::new()
             .fill(self.settings.theme.toolbar_fill())
-            .stroke(egui::Stroke::new(1.0_f32, self.settings.theme.border_color()))
+            .stroke(egui::Stroke::new(
+                1.0_f32,
+                self.settings.theme.border_color(),
+            ))
             .inner_margin(egui::Margin::symmetric(6, 4));
         let ribbon = egui::TopBottomPanel::top("color_ribbon")
             // Include the stroke in the initial clip height and let the content size the panel.
@@ -4333,7 +4391,10 @@ impl App {
             .frame(
                 egui::Frame::new()
                     .fill(self.settings.theme.status_fill())
-                    .stroke(egui::Stroke::new(1.0_f32, self.settings.theme.border_color()))
+                    .stroke(egui::Stroke::new(
+                        1.0_f32,
+                        self.settings.theme.border_color(),
+                    ))
                     .corner_radius(egui::CornerRadius {
                         nw: 0,
                         ne: 0,
@@ -4530,7 +4591,11 @@ mod tests {
             }
         }
 
-        fn run(&mut self, modifiers: egui::Modifiers, events: Vec<egui::Event>) -> egui::FullOutput {
+        fn run(
+            &mut self,
+            modifiers: egui::Modifiers,
+            events: Vec<egui::Event>,
+        ) -> egui::FullOutput {
             let input = egui::RawInput {
                 screen_rect: Some(self.screen),
                 modifiers,
@@ -4666,7 +4731,10 @@ mod tests {
     fn new_document_has_one_opaque_white_background_layer() -> io::Result<()> {
         let document = new_document(32, 24)?;
         assert_eq!(document.layer_count(), 1);
-        assert_eq!(document.layer_name(0), Some(i18n::logical_text("background")));
+        assert_eq!(
+            document.layer_name(0),
+            Some(i18n::logical_text("background"))
+        );
         assert!(
             document
                 .layer_pixels(0)
@@ -4831,13 +4899,20 @@ mod tests {
             Selection::new(Shape::Rectangle, (7, 7), (14, 14)),
             Selection::new(Shape::Ellipse, (7, 7), (14, 14)),
             Selection::lasso(size, &[(7, 7), (14, 7), (14, 14), (7, 14)])?,
-            Selection::wand(size, (7, 7), 0, AlphaMatchMode::Premultiplied, true, |(x, y)| {
-                if (7..=14).contains(&x) && (7..=14).contains(&y) {
-                    color
-                } else {
-                    Pixel::default()
-                }
-            })?,
+            Selection::wand(
+                size,
+                (7, 7),
+                0,
+                AlphaMatchMode::Premultiplied,
+                true,
+                |(x, y)| {
+                    if (7..=14).contains(&x) && (7..=14).contains(&y) {
+                        color
+                    } else {
+                        Pixel::default()
+                    }
+                },
+            )?,
         ];
         for candidate in candidates {
             let point = (10, 15);
@@ -4876,7 +4951,10 @@ mod tests {
         let mut drv = TestDriver::new(Document::new(100, 100)?);
         let center = pos2(556.0, 440.0);
         let click = |drv: &mut TestDriver| {
-            drv.run(egui::Modifiers::NONE, vec![egui::Event::PointerMoved(center)]);
+            drv.run(
+                egui::Modifiers::NONE,
+                vec![egui::Event::PointerMoved(center)],
+            );
             drv.click(center, PointerButton::Primary, egui::Modifiers::NONE);
         };
         let selection = Selection::new(Shape::Rectangle, (0, 0), (4, 4));
@@ -4894,7 +4972,11 @@ mod tests {
                 .set_selection(Some(selection.clone()), "Seleção");
             click(&mut drv);
             assert!(drv.app.tab().editor.selection.is_none(), "{}", tool.label());
-            assert!(!drv.app.tab().editor.has_unsaved_edits(), "{}", tool.label());
+            assert!(
+                !drv.app.tab().editor.has_unsaved_edits(),
+                "{}",
+                tool.label()
+            );
         }
 
         drv.app
@@ -4942,11 +5024,21 @@ mod tests {
         let mut app = App::new(&context, Document::new(8, 8)?);
         app.tab_mut().editor.add_layer()?;
         app.start_transform(TransformTarget::Layer);
-        assert!(app.tab().session.as_ref().is_some_and(ActiveSession::is_transform));
+        assert!(
+            app.tab()
+                .session
+                .as_ref()
+                .is_some_and(ActiveSession::is_transform)
+        );
         app.open_in_new_tab(Document::new(4, 4)?, "Novo.pdn".into(), None);
         assert_eq!(app.tabs.len(), 2);
         app.switch_tab(0);
-        assert!(app.tab().session.as_ref().is_some_and(ActiveSession::is_transform));
+        assert!(
+            app.tab()
+                .session
+                .as_ref()
+                .is_some_and(ActiveSession::is_transform)
+        );
         assert_eq!(app.tab().editor.document.layer_count(), 2);
         app.reorder_tab(0, 1);
         assert_eq!(app.active_tab, 1);
@@ -4965,7 +5057,12 @@ mod tests {
             pixels: vec![red; 4],
         });
         app.paste_from_clipboard(false);
-        assert!(app.tab().session.as_ref().is_some_and(ActiveSession::is_transform));
+        assert!(
+            app.tab()
+                .session
+                .as_ref()
+                .is_some_and(ActiveSession::is_transform)
+        );
         app.tab_mut()
             .session
             .as_mut()
@@ -5093,7 +5190,13 @@ mod tests {
             "Seleção retangular",
         );
         drv.app.execute_command(&drv.ctx, Command::MovePixels);
-        assert!(drv.app.tab().session.as_ref().is_some_and(ActiveSession::is_transform));
+        assert!(
+            drv.app
+                .tab()
+                .session
+                .as_ref()
+                .is_some_and(ActiveSession::is_transform)
+        );
 
         drv.send_key(egui::Key::ArrowRight, egui::Modifiers::NONE);
         drv.send_key(egui::Key::ArrowDown, egui::Modifiers::CTRL);
@@ -5136,7 +5239,10 @@ mod tests {
             .unwrap()
             .nudge(2.0, 0.0);
         let center = pos2(640.0, 400.0);
-        drv.run(egui::Modifiers::NONE, vec![egui::Event::PointerMoved(center)]);
+        drv.run(
+            egui::Modifiers::NONE,
+            vec![egui::Event::PointerMoved(center)],
+        );
         drv.click(center, PointerButton::Primary, egui::Modifiers::NONE);
         assert!(drv.app.tab().session.is_none());
         assert_eq!(drv.app.tab().editor.document.pixel(0, 5, 12), Some(red));
@@ -5153,7 +5259,13 @@ mod tests {
             pixels: vec![Pixel([0, 200, 0, 255]); 4],
         });
         drv.app.paste_from_clipboard(false);
-        assert!(drv.app.tab().session.as_ref().is_some_and(ActiveSession::is_transform));
+        assert!(
+            drv.app
+                .tab()
+                .session
+                .as_ref()
+                .is_some_and(ActiveSession::is_transform)
+        );
         assert!(drv.app.tab().editor.selection.is_some());
         drv.send_key(egui::Key::Escape, egui::Modifiers::NONE);
         assert!(drv.app.tab().session.is_none());
@@ -5173,9 +5285,18 @@ mod tests {
         let trans_blue = Pixel([0, 0, 255, 0]);
         let soft_blue = Pixel([40, 80, 200, 255]);
         let near_soft_blue = Pixel([58, 94, 212, 255]);
-        app.tab_mut().editor.document.set_pixel(0, 0, 0, trans_red)?;
-        app.tab_mut().editor.document.set_pixel(0, 1, 0, trans_blue)?;
-        app.tab_mut().editor.document.set_pixel(0, 3, 3, soft_blue)?;
+        app.tab_mut()
+            .editor
+            .document
+            .set_pixel(0, 0, 0, trans_red)?;
+        app.tab_mut()
+            .editor
+            .document
+            .set_pixel(0, 1, 0, trans_blue)?;
+        app.tab_mut()
+            .editor
+            .document
+            .set_pixel(0, 3, 3, soft_blue)?;
         app.tab_mut()
             .editor
             .document
@@ -5231,8 +5352,7 @@ mod tests {
     }
 
     #[test]
-    fn eyedropper_samples_layer_or_composite_and_clone_stamp_copies_with_undo() -> io::Result<()>
-    {
+    fn eyedropper_samples_layer_or_composite_and_clone_stamp_copies_with_undo() -> io::Result<()> {
         let ctx = egui::Context::default();
         let mut app = App::new(&ctx, Document::new(16, 16)?);
         let green = Pixel([30, 180, 70, 255]);
@@ -5250,13 +5370,7 @@ mod tests {
         );
 
         // Clone stamp from layer 1 pixel (2, 2) to (8, 8)
-        let src = app
-            .tab()
-            .editor
-            .document
-            .layer_pixels(1)
-            .unwrap()
-            .to_vec();
+        let src = app.tab().editor.document.layer_pixels(1).unwrap().to_vec();
         let aa_mode = app.settings.antialiasing;
         app.tab_mut().editor.begin_stroke_with(
             StrokeSpec::Clone {
@@ -5646,7 +5760,10 @@ mod tests {
     fn wslg_prefers_x11_and_fullscreen_keeps_the_window_borderless() {
         assert_eq!(linux_backend_choice(None, true, true), Some(true));
         assert_eq!(linux_backend_choice(None, true, false), None);
-        assert_eq!(linux_backend_choice(Some("wayland"), true, true), Some(false));
+        assert_eq!(
+            linux_backend_choice(Some("wayland"), true, true),
+            Some(false)
+        );
         assert_eq!(linux_backend_choice(Some("x11"), false, false), Some(true));
         assert_eq!(linux_backend_choice(None, false, true), None);
 
@@ -5680,13 +5797,17 @@ mod tests {
             Some(false),
         );
         assert!(app.fullscreen);
-        assert!(output.viewport_output[&egui::ViewportId::ROOT]
-            .commands
-            .contains(&egui::ViewportCommand::Fullscreen(true)));
-        assert!(!output.viewport_output[&egui::ViewportId::ROOT]
-            .commands
-            .iter()
-            .any(|command| matches!(command, egui::ViewportCommand::Decorations(_))));
+        assert!(
+            output.viewport_output[&egui::ViewportId::ROOT]
+                .commands
+                .contains(&egui::ViewportCommand::Fullscreen(true))
+        );
+        assert!(
+            !output.viewport_output[&egui::ViewportId::ROOT]
+                .commands
+                .iter()
+                .any(|command| matches!(command, egui::ViewportCommand::Decorations(_)))
+        );
 
         // Intermediate frame before OS ack must keep fullscreen & decorations hidden.
         let _ = run_frame(&mut app, Vec::new(), Some(false));
@@ -5696,10 +5817,12 @@ mod tests {
         let _ = run_frame(&mut app, Vec::new(), Some(true));
         let exit_out = run_frame(&mut app, Vec::new(), Some(false));
         assert!(!app.fullscreen);
-        assert!(!exit_out.viewport_output[&egui::ViewportId::ROOT]
-            .commands
-            .iter()
-            .any(|command| matches!(command, egui::ViewportCommand::Decorations(_))));
+        assert!(
+            !exit_out.viewport_output[&egui::ViewportId::ROOT]
+                .commands
+                .iter()
+                .any(|command| matches!(command, egui::ViewportCommand::Decorations(_)))
+        );
     }
 
     #[test]
@@ -5719,9 +5842,10 @@ mod tests {
         drv.app.colors_open = true;
         drv.step();
         drv.step();
-        let ribbon = egui::containers::panel::PanelState::load(&drv.ctx, egui::Id::new("color_ribbon"))
-            .unwrap()
-            .rect;
+        let ribbon =
+            egui::containers::panel::PanelState::load(&drv.ctx, egui::Id::new("color_ribbon"))
+                .unwrap()
+                .rect;
         let at = |x| pos2(ribbon.left() + x, ribbon.center().y);
         let opacity_start = at(80.0);
         let opacity_midpoint = at(133.0);
@@ -5737,10 +5861,19 @@ mod tests {
         assert_eq!(drv.app.palette.primary(), Pixel([255, 255, 255, 255]));
         drv.click(opacity_start, left, egui::Modifiers::NONE);
         assert_eq!(drv.app.palette.primary(), Pixel([255, 255, 255, 0]));
-        drv.run(egui::Modifiers::NONE, vec![pointer_button(opacity_start, left, true)]);
-        drv.run(egui::Modifiers::NONE, vec![egui::Event::PointerMoved(opacity_drag_end)]);
+        drv.run(
+            egui::Modifiers::NONE,
+            vec![pointer_button(opacity_start, left, true)],
+        );
+        drv.run(
+            egui::Modifiers::NONE,
+            vec![egui::Event::PointerMoved(opacity_drag_end)],
+        );
         assert_eq!(drv.app.palette.primary(), Pixel([255, 255, 255, 255]));
-        drv.run(egui::Modifiers::NONE, vec![pointer_button(opacity_drag_end, left, false)]);
+        drv.run(
+            egui::Modifiers::NONE,
+            vec![pointer_button(opacity_drag_end, left, false)],
+        );
         drv.click(opacity_start, left, egui::Modifiers::NONE);
         drv.click(at(40.0), right, egui::Modifiers::NONE);
         assert_eq!(drv.app.palette.secondary(), half_black);
@@ -5763,9 +5896,16 @@ mod tests {
         assert_eq!(drv.app.palette.primary(), half_black);
         drv.app.colors_open = false;
         drv.step();
-        let canvas = drv.ctx.read_response(egui::Id::new(CANVAS_ID)).unwrap().rect;
+        let canvas = drv
+            .ctx
+            .read_response(egui::Id::new(CANVAS_ID))
+            .unwrap()
+            .rect;
         drv.click(canvas.center(), left, egui::Modifiers::NONE);
-        assert_eq!(drv.app.tab().editor.document.pixel(0, 50, 50), Some(half_black));
+        assert_eq!(
+            drv.app.tab().editor.document.pixel(0, 50, 50),
+            Some(half_black)
+        );
         Ok(())
     }
 
@@ -5817,7 +5957,11 @@ mod tests {
 
         drv.step();
         drv.step();
-        let canvas_rect = drv.ctx.read_response(egui::Id::new(CANVAS_ID)).unwrap().rect;
+        let canvas_rect = drv
+            .ctx
+            .read_response(egui::Id::new(CANVAS_ID))
+            .unwrap()
+            .rect;
         let corner = canvas_rect.right_bottom();
 
         // Ctrl + Double-Click on bottom-right corner enters interactive canvas resize mode
@@ -6022,7 +6166,10 @@ mod tests {
         drv.app.open_path(&drv.ctx, fixture_path);
         assert_eq!(drv.app.tab().editor.document.dimensions(), (96, 64));
         assert_eq!(drv.app.tab().editor.document.layer_count(), 4);
-        assert_eq!(drv.app.tab().editor.document.layer_name(1), Some("Sombra 50"));
+        assert_eq!(
+            drv.app.tab().editor.document.layer_name(1),
+            Some("Sombra 50")
+        );
         assert_eq!(
             drv.app.tab().editor.document.layer_name(2),
             Some("Camada oculta")
@@ -6040,7 +6187,10 @@ mod tests {
         for _ in 0..3 {
             assert!(drv.app.tab_mut().editor.undo()?);
         }
-        assert_eq!(drv.app.tab().editor.document.layer_name(1), Some("Sombra 50"));
+        assert_eq!(
+            drv.app.tab().editor.document.layer_name(1),
+            Some("Sombra 50")
+        );
         assert_eq!(
             drv.app.tab().editor.document.layer_name(2),
             Some("Camada oculta")
@@ -6112,7 +6262,10 @@ mod tests {
         drv.app.open_path(&drv.ctx, saved_pdn);
         assert_eq!(drv.app.tab().editor.document.dimensions(), (96, 64));
         assert_eq!(drv.app.tab().editor.document.layer_count(), 4);
-        assert_eq!(drv.app.tab().editor.document.layer_name(1), Some("Sombra 50"));
+        assert_eq!(
+            drv.app.tab().editor.document.layer_name(1),
+            Some("Sombra 50")
+        );
         assert_eq!(
             drv.app.tab().editor.document.layer_properties(1),
             Some((true, 180))
@@ -6228,7 +6381,8 @@ mod tests {
                 for step in 0..10_u32 {
                     let t2 = std::time::Instant::now();
                     app.tab_mut().zoom = Some(1.0 + step as f32 * 0.2);
-                    app.tab_mut().view.scroll_to = Some(vec2(step as f32 * 16.0, step as f32 * 12.0));
+                    app.tab_mut().view.scroll_to =
+                        Some(vec2(step as f32 * 16.0, step as f32 * 12.0));
                     let _ = ctx.run(
                         egui::RawInput {
                             screen_rect: Some(screen),
@@ -6435,7 +6589,11 @@ mod tests {
         drv.step();
         drv.press_key(egui::Key::Insert);
         assert_eq!(drv.app.tab().editor.document.layer_count(), 2);
-        let card = drv.ctx.read_response(egui::Id::new(LAYERS_ID)).unwrap().rect;
+        let card = drv
+            .ctx
+            .read_response(egui::Id::new(LAYERS_ID))
+            .unwrap()
+            .rect;
         drv.click(
             card.left_top() + vec2(12.0, 12.0),
             PointerButton::Primary,
@@ -6459,8 +6617,16 @@ mod tests {
         assert_eq!(drv.app.tab().editor.document.layer_count(), 2);
 
         drv.app.tool = Tool::Pan;
-        let canvas = drv.ctx.read_response(egui::Id::new(CANVAS_ID)).unwrap().rect;
-        drv.click(canvas.center(), PointerButton::Primary, egui::Modifiers::NONE);
+        let canvas = drv
+            .ctx
+            .read_response(egui::Id::new(CANVAS_ID))
+            .unwrap()
+            .rect;
+        drv.click(
+            canvas.center(),
+            PointerButton::Primary,
+            egui::Modifiers::NONE,
+        );
         assert!(!drv.app.layers_clicked);
         drv.app.tab_mut().editor.select_all();
         drv.press_key(egui::Key::Delete);
@@ -6513,9 +6679,9 @@ mod tests {
                 let has_rect = |predicate: &dyn Fn(&egui::epaint::RectShape) -> bool| {
                     output.shapes.iter().any(|clipped| match &clipped.shape {
                         egui::Shape::Rect(rect) => predicate(rect),
-                        egui::Shape::Vec(shapes) => shapes.iter().any(|shape| {
-                            matches!(shape, egui::Shape::Rect(rect) if predicate(rect))
-                        }),
+                        egui::Shape::Vec(shapes) => shapes.iter().any(
+                            |shape| matches!(shape, egui::Shape::Rect(rect) if predicate(rect)),
+                        ),
                         _ => false,
                     })
                 };

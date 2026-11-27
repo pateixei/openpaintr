@@ -293,11 +293,14 @@ impl GradientSession {
         for (handle, pos, id, size) in handles {
             let response = handle_response(ui, pos, size, id);
             set_grab_cursor(ui.ctx(), &response);
-            let Some((drag, current)) =
-                track_handle_drag(&mut self.dragging, handle, &response, viewport, false, || {
-                    (self.start, self.end)
-                })
-            else {
+            let Some((drag, current)) = track_handle_drag(
+                &mut self.dragging,
+                handle,
+                &response,
+                viewport,
+                false,
+                || (self.start, self.end),
+            ) else {
                 continue;
             };
             let constrain = ui.ctx().input(|i| i.modifiers.shift);

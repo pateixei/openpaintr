@@ -1,8 +1,7 @@
 use super::i18n::text as tr;
 use std::{
     collections::{BTreeMap, HashMap},
-    fs,
-    io,
+    fs, io,
     path::{Path, PathBuf},
 };
 
@@ -11,8 +10,8 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     dialogs::modal,
-    storage::JsonWrite,
     mouse_shortcuts::{self, MouseBindings},
+    storage::JsonWrite,
 };
 
 const FILE_NAME: &str = "atalhos.json";
@@ -305,7 +304,10 @@ pub(super) fn backfill_missing<A: BindableAction>(
 /// Error for a binding value that `action` cannot use (`key` takes the
 /// action label and the value).
 pub(super) fn binding_value_error(key: &str, action: impl BindableAction, value: &str) -> String {
-    super::i18n::format_logical(key, &[&super::i18n::logical_text(action.label_key()), &value])
+    super::i18n::format_logical(
+        key,
+        &[&super::i18n::logical_text(action.label_key()), &value],
+    )
 }
 
 /// Error for `binding` claimed by both `other` and `action` (`key` takes the
@@ -387,7 +389,10 @@ impl Profile {
         Self::actions_for(self.base, &self.bindings)
     }
 
-    fn actions_for(base: Base, all_bindings: &BTreeMap<String, Vec<String>>) -> Result<Bindings, String> {
+    fn actions_for(
+        base: Base,
+        all_bindings: &BTreeMap<String, Vec<String>>,
+    ) -> Result<Bindings, String> {
         let mut mapped = Bindings::default();
         for &action in Command::ALL {
             for binding in all_bindings.get(action.id()).into_iter().flatten() {
@@ -652,7 +657,8 @@ impl Shortcuts {
     pub fn held(&self, ctx: &egui::Context, action: Command) -> bool {
         ctx.input(|input| {
             self.bindings.iter().any(|((chord, layers_only), actions)| {
-                !layers_only && actions.contains(&action)
+                !layers_only
+                    && actions.contains(&action)
                     && input.key_down(chord.key)
                     && *chord == Chord::from_input(chord.key, input.modifiers)
             })
@@ -726,7 +732,12 @@ impl Shortcuts {
                         && previous == chord
                         && input.time - at <= 1.0
                     {
-                        (index + if chord.mods.shift { actions.len() - 1 } else { 1 })
+                        (index
+                            + if chord.mods.shift {
+                                actions.len() - 1
+                            } else {
+                                1
+                            })
                             % actions.len()
                     } else if chord.mods.shift {
                         actions.len() - 1
@@ -833,7 +844,10 @@ impl Shortcuts {
                         });
                 });
             if let Some(problem) = &dialog.problem {
-                ui.colored_label(ui.visuals().error_fg_color, super::i18n::display(problem).into_owned());
+                ui.colored_label(
+                    ui.visuals().error_fg_color,
+                    super::i18n::display(problem).into_owned(),
+                );
             }
             ui.horizontal(|ui| {
                 (
@@ -855,10 +869,7 @@ impl Shortcuts {
     fn save_draft(&mut self, mut config: Profiles) -> Result<(), String> {
         for profile in config.profiles.values_mut() {
             for &action in Command::ALL {
-                let values = profile
-                    .bindings
-                    .get_mut(action.id())
-                    .expect("known action");
+                let values = profile.bindings.get_mut(action.id()).expect("known action");
                 values.retain(|value| !value.trim().is_empty());
                 for value in values {
                     if let Some(chord) = Chord::parse(value) {

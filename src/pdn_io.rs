@@ -68,7 +68,10 @@ impl Document {
         let mut bytes = Vec::new();
         input.take(MAX_FILE_BYTES + 1).read_to_end(&mut bytes)?;
         if bytes.len() as u64 > MAX_FILE_BYTES {
-            return Err(crate::Diagnostic::io(io::ErrorKind::InvalidData, msg::PDN_FILE_SIZE));
+            return Err(crate::Diagnostic::io(
+                io::ErrorKind::InvalidData,
+                msg::PDN_FILE_SIZE,
+            ));
         }
         let options = ImgDec {
             maxpx: MAX_PIXELS,
@@ -99,7 +102,10 @@ impl Document {
             },
         };
         if document.width == 0 || document.height == 0 || source.layers.is_empty() {
-            return Err(crate::Diagnostic::io(io::ErrorKind::InvalidData, msg::PDN_EMPTY));
+            return Err(crate::Diagnostic::io(
+                io::ErrorKind::InvalidData,
+                msg::PDN_EMPTY,
+            ));
         }
         let pixel_count = check_layer_pixel_limit(
             document.width,
@@ -117,7 +123,10 @@ impl Document {
                 || stride < row_bytes
                 || surface.px.len() / stride < document.height as usize
             {
-                return Err(crate::Diagnostic::io(io::ErrorKind::InvalidData, msg::PDN_LAYER_SIZE));
+                return Err(crate::Diagnostic::io(
+                    io::ErrorKind::InvalidData,
+                    msg::PDN_LAYER_SIZE,
+                ));
             }
             let name = layer.name.strip_suffix(&[0]).unwrap_or(&layer.name);
             let mut pixels = try_vec_with_capacity(pixel_count as usize)?;
@@ -205,12 +214,20 @@ impl Document {
             effort: effort.clamp(1, 9),
             ..Default::default()
         };
-        let bytes = img_pdn::encode_ex(&source, Some(&options), img_pdn::PDNE_BLENDOP).map_err(|code| match code {
-            ERR_NOMEM => crate::Diagnostic::io(io::ErrorKind::OutOfMemory, msg::PDN_SAVE_MEMORY),
-            _ => crate::Diagnostic::io(io::ErrorKind::InvalidInput, msg::PDN_ENCODE),
-        })?;
+        let bytes =
+            img_pdn::encode_ex(&source, Some(&options), img_pdn::PDNE_BLENDOP).map_err(|code| {
+                match code {
+                    ERR_NOMEM => {
+                        crate::Diagnostic::io(io::ErrorKind::OutOfMemory, msg::PDN_SAVE_MEMORY)
+                    }
+                    _ => crate::Diagnostic::io(io::ErrorKind::InvalidInput, msg::PDN_ENCODE),
+                }
+            })?;
         if bytes.len() as u64 > MAX_FILE_BYTES {
-            return Err(crate::Diagnostic::io(io::ErrorKind::InvalidInput, msg::PDN_FILE_SIZE));
+            return Err(crate::Diagnostic::io(
+                io::ErrorKind::InvalidInput,
+                msg::PDN_FILE_SIZE,
+            ));
         }
         output.write_all(&bytes)
     }

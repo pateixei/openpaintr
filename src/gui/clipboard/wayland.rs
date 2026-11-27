@@ -16,7 +16,7 @@ use wayland_client::{
 };
 use winit::raw_window_handle::{HasDisplayHandle, RawDisplayHandle};
 
-use super::{MAX_IMAGE_BYTES, super::selection::Point, files, tr};
+use super::{super::selection::Point, MAX_IMAGE_BYTES, files, tr};
 
 const PNG: &str = "image/png";
 const URI_LIST: &str = "text/uri-list";

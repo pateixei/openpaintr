@@ -1,8 +1,5 @@
 use super::i18n::text as tr;
-use std::{
-    io,
-    path::PathBuf,
-};
+use std::{io, path::PathBuf};
 
 use eframe::egui::{self, Color32, TextureHandle, TextureOptions};
 use openpaintr::{Document, PngCompression, PngDepth, is_valid_layer_name};
@@ -11,7 +8,9 @@ use super::{
     editor::LayerMeta,
     storage::{JsonWrite, atomic_write_bytes, exe_adjacent, read_json, write_json_atomic},
     theme::CARD_CORNER_RADIUS,
-    widgets::{blend_mode_combo, enum_combo_box, opacity_slider, paint_thumbnail, pixels_to_color_image},
+    widgets::{
+        blend_mode_combo, enum_combo_box, opacity_slider, paint_thumbnail, pixels_to_color_image,
+    },
     window_chrome,
 };
 
@@ -23,8 +22,11 @@ pub(super) fn modal(ctx: &egui::Context, id: &str) -> egui::Modal {
     let fullscreen = ctx.input(|input| input.viewport().fullscreen.unwrap_or(false));
     let radius = window_chrome::corner_radius(ctx, fullscreen);
     // Keep the shaded area inside the rounded window while retaining the modal's input blocker.
-    ctx.layer_painter(modal.area.layer())
-        .rect_filled(ctx.content_rect(), radius, modal.backdrop_color);
+    ctx.layer_painter(modal.area.layer()).rect_filled(
+        ctx.content_rect(),
+        radius,
+        modal.backdrop_color,
+    );
     modal
         .backdrop_color(Color32::TRANSPARENT)
         .frame(egui::Frame::popup(&ctx.style()).corner_radius(CARD_CORNER_RADIUS))
@@ -83,8 +85,13 @@ impl RecentFiles {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum SaveFormat {
-    Pdn { effort: u32 },
-    Png { depth: PngDepth, compression: PngCompression },
+    Pdn {
+        effort: u32,
+    },
+    Png {
+        depth: PngDepth,
+        compression: PngCompression,
+    },
 }
 
 impl SaveFormat {

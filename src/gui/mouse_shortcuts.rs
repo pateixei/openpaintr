@@ -3,8 +3,8 @@ use std::collections::{BTreeMap, HashMap};
 use eframe::egui::{self, Key, Modifiers, PointerButton};
 
 use super::shortcuts::{
-    Base, ModFlags, backfill_missing, binding_conflict_error, binding_editor_row,
-    binding_value_error, bindable_actions, parse_key,
+    Base, ModFlags, backfill_missing, bindable_actions, binding_conflict_error, binding_editor_row,
+    binding_value_error, parse_key,
 };
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -281,7 +281,12 @@ impl MouseBindings {
                         && other != action
                         && scope.conflicts_with(other_scope)
                     {
-                        return Err(binding_conflict_error("gesture-conflict", value, other, action));
+                        return Err(binding_conflict_error(
+                            "gesture-conflict",
+                            value,
+                            other,
+                            action,
+                        ));
                     }
                 }
                 bindings.insert((scope, gesture), action);

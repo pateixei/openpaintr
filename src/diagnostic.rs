@@ -91,9 +91,15 @@ mod tests {
     #[test]
     fn fallback_messages_match_the_english_catalog() {
         let catalog: std::collections::BTreeMap<String, String> =
-            serde_json::from_str(include_str!("../translations/en-us.json")).expect("valid catalog");
+            serde_json::from_str(include_str!("../translations/en-us.json"))
+                .expect("valid catalog");
         for message in super::msg::ALL {
-            assert_eq!(catalog.get(message.key).map(String::as_str), Some(message.text), "{}", message.key);
+            assert_eq!(
+                catalog.get(message.key).map(String::as_str),
+                Some(message.text),
+                "{}",
+                message.key
+            );
         }
     }
 }

@@ -95,7 +95,11 @@ fn walk_capsule_band(
     if size.0 == 0 || size.1 == 0 {
         return;
     }
-    let (start, end) = if start <= end { (start, end) } else { (end, start) };
+    let (start, end) = if start <= end {
+        (start, end)
+    } else {
+        (end, start)
+    };
     let transpose = start.0.abs_diff(end.0) < start.1.abs_diff(end.1);
     let axis = |(x, y)| if transpose { (y, x) } else { (x, y) };
     let start = axis(start);
@@ -280,7 +284,11 @@ pub fn segment_dabs(
     aa_mode: AaMode,
     mut visit: impl FnMut(Point, u8),
 ) {
-    let offset = if diameter.is_multiple_of(2) { -0.5 } else { 0.0 };
+    let offset = if diameter.is_multiple_of(2) {
+        -0.5
+    } else {
+        0.0
+    };
     let step = (f64::from(diameter) * f64::from(spacing_pct.max(1)) / 100.0).max(0.25);
     let ax = f64::from(start.0) + offset;
     let ay = f64::from(start.1) + offset;

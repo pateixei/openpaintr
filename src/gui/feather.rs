@@ -89,7 +89,9 @@ pub fn expand(
                 };
                 let opacity = match aa_mode {
                     AaMode::Analytical => falloff(dx, dy),
-                    AaMode::Ssaa4x4 => stroke_raster::average_samples(|sx, sy| falloff(dx + sx, dy + sy)),
+                    AaMode::Ssaa4x4 => {
+                        stroke_raster::average_samples(|sx, sy| falloff(dx + sx, dy + sy))
+                    }
                 };
                 value = base.max(stroke_raster::coverage_to_u8(opacity));
             }

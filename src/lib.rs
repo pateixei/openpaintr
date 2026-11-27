@@ -8,8 +8,8 @@ mod diagnostic;
 mod pdn_io;
 mod png_io;
 
-use diagnostic::{Message, msg};
 pub use diagnostic::Diagnostic;
+use diagnostic::{Message, msg};
 pub use png_io::{DecodedPng, PngCompression, PngDepth, decode_png_rgba};
 
 pub const BLEND_MODES: [&str; 14] = [
@@ -472,7 +472,10 @@ impl Document {
                 .len()
                 .checked_mul(4)
                 .ok_or_else(|| io::Error::new(io::ErrorKind::OutOfMemory, "layer too large"))?;
-            Some((try_vec_filled(byte_len, 0u8)?, try_vec_filled(byte_len, 0u8)?))
+            Some((
+                try_vec_filled(byte_len, 0u8)?,
+                try_vec_filled(byte_len, 0u8)?,
+            ))
         } else {
             None
         };
@@ -591,12 +594,12 @@ impl Document {
         }
         let rect_w = (max.0 - min.0 + 1) as usize;
         let rect_h = (max.1 - min.1 + 1) as usize;
-        let count = rect_w.checked_mul(rect_h).ok_or_else(|| {
-            invalid_input(msg::REGION_TOO_LARGE)
-        })?;
-        let byte_len = count.checked_mul(4).ok_or_else(|| {
-            invalid_input(msg::REGION_TOO_LARGE)
-        })?;
+        let count = rect_w
+            .checked_mul(rect_h)
+            .ok_or_else(|| invalid_input(msg::REGION_TOO_LARGE))?;
+        let byte_len = count
+            .checked_mul(4)
+            .ok_or_else(|| invalid_input(msg::REGION_TOO_LARGE))?;
         let mut dst = try_vec_filled(byte_len, 0u8)?;
         let mut src_row = try_vec_filled(rect_w * 4, 0u8)?;
 
@@ -614,7 +617,11 @@ impl Document {
                 let src_start = (start_y + row_idx) * full_w + start_x;
                 pixels_to_bytes(&layer.pixels[src_start..src_start + rect_w], &mut src_row);
                 let dst_start = row_idx * rect_w * 4;
-                bm_row_inplace(&mut dst[dst_start..dst_start + rect_w * 4], &src_row, mode_op);
+                bm_row_inplace(
+                    &mut dst[dst_start..dst_start + rect_w * 4],
+                    &src_row,
+                    mode_op,
+                );
             }
         }
 
@@ -633,11 +640,15 @@ impl Document {
     }
 
     fn layer(&self, layer: usize) -> io::Result<&Layer> {
-        self.layers.get(layer).ok_or_else(|| invalid_input(msg::LAYER_MISSING))
+        self.layers
+            .get(layer)
+            .ok_or_else(|| invalid_input(msg::LAYER_MISSING))
     }
 
     fn layer_mut(&mut self, layer: usize) -> io::Result<&mut Layer> {
-        self.layers.get_mut(layer).ok_or_else(|| invalid_input(msg::LAYER_MISSING))
+        self.layers
+            .get_mut(layer)
+            .ok_or_else(|| invalid_input(msg::LAYER_MISSING))
     }
 
     fn allocate_pixels(&self) -> io::Result<Vec<Pixel>> {
@@ -668,7 +679,12 @@ fn bytes_to_pixels(bytes: &[u8], pixels: &mut [Pixel]) {
     }
 }
 
-fn sample_thumbnail(pixels: &[Pixel], width: u32, height: u32, max_side: u32) -> (u32, u32, Vec<Pixel>) {
+fn sample_thumbnail(
+    pixels: &[Pixel],
+    width: u32,
+    height: u32,
+    max_side: u32,
+) -> (u32, u32, Vec<Pixel>) {
     let max_side = max_side.max(1);
     let (thumb_w, thumb_h) = if width >= height {
         let thumb_w = width.min(max_side).max(1);

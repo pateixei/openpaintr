@@ -96,11 +96,7 @@ impl App {
                         },
                         |(x, y)| i18n::format("clone-source", &[&x, &y]),
                     );
-                    ui.label(
-                        RichText::new(hint)
-                            .size(11.5)
-                            .color(theme.text_muted()),
-                    );
+                    ui.label(RichText::new(hint).size(11.5).color(theme.text_muted()));
                 }
             }
             Tool::Pencil => {
@@ -171,8 +167,15 @@ impl App {
                 ui.add_space(6.0);
                 ui.label(theme.muted_label(tr("mode-field")));
                 self.combine_selector(ui);
-                labeled_slider(ui, theme, "feather-field", &mut self.selection_feather, 0..=100, "%")
-                    .on_hover_text(tr("feather-help"));
+                labeled_slider(
+                    ui,
+                    theme,
+                    "feather-field",
+                    &mut self.selection_feather,
+                    0..=100,
+                    "%",
+                )
+                .on_hover_text(tr("feather-help"));
                 if self.tool == Tool::Wand && !wrap_wand {
                     ui.add_space(4.0);
                     self.wand_options(ui);
@@ -185,7 +188,14 @@ impl App {
     /// Diameter and hardness sliders shared by the brush-like tools.
     fn brush_size_controls(&mut self, ui: &mut egui::Ui, size_key: &str, hardness_key: &str) {
         let theme = self.settings.theme;
-        labeled_slider(ui, theme, size_key, &mut self.diameter, 1..=MAX_BRUSH_DIAMETER, " px");
+        labeled_slider(
+            ui,
+            theme,
+            size_key,
+            &mut self.diameter,
+            1..=MAX_BRUSH_DIAMETER,
+            " px",
+        );
         labeled_slider(ui, theme, hardness_key, &mut self.hardness, 0..=100, "%");
     }
 
@@ -218,7 +228,14 @@ impl App {
 
     fn tolerance_options(&mut self, ui: &mut egui::Ui, id_salt: &str) {
         let theme = self.settings.theme;
-        labeled_slider(ui, theme, "tolerance-field", &mut self.color_tolerance, 0..=100, "%");
+        labeled_slider(
+            ui,
+            theme,
+            "tolerance-field",
+            &mut self.color_tolerance,
+            0..=100,
+            "%",
+        );
         enum_combo(
             ui,
             id_salt,
@@ -244,11 +261,25 @@ impl App {
     }
 
     fn pattern_selector(ui: &mut egui::Ui, id_salt: &str, pattern: &mut FillPattern) -> bool {
-        enum_combo(ui, id_salt, Some(110.0), pattern, &FillPattern::ALL, FillPattern::label)
+        enum_combo(
+            ui,
+            id_salt,
+            Some(110.0),
+            pattern,
+            &FillPattern::ALL,
+            FillPattern::label,
+        )
     }
 
     fn blend_selector(ui: &mut egui::Ui, id_salt: &str, blend: &mut StrokeBlend) -> bool {
-        enum_combo(ui, id_salt, Some(90.0), blend, &StrokeBlend::ALL, StrokeBlend::label)
+        enum_combo(
+            ui,
+            id_salt,
+            Some(90.0),
+            blend,
+            &StrokeBlend::ALL,
+            StrokeBlend::label,
+        )
     }
 
     pub(super) fn gradient_controls(ui: &mut egui::Ui, p: &mut GradientParams) -> bool {
@@ -351,14 +382,22 @@ impl App {
             .changed();
         if p.kind == ShapeKind::RoundedRect {
             changed |= ui
-                .add(egui::DragValue::new(&mut p.corner_radius).range(0.0..=120.0).prefix("R "))
+                .add(
+                    egui::DragValue::new(&mut p.corner_radius)
+                        .range(0.0..=120.0)
+                        .prefix("R "),
+                )
                 .changed();
         }
         changed |= Self::pattern_selector(ui, "shape_pattern", &mut p.pattern);
         changed | Self::blend_selector(ui, "shape_blend", &mut p.blend)
     }
 
-    pub(super) fn text_controls(ui: &mut egui::Ui, families: &[String], p: &mut TextParams) -> bool {
+    pub(super) fn text_controls(
+        ui: &mut egui::Ui,
+        families: &[String],
+        p: &mut TextParams,
+    ) -> bool {
         let mut changed = false;
         let prev_f = p.family.clone();
         egui::ComboBox::from_id_salt("text_family")
@@ -371,7 +410,11 @@ impl App {
             });
         changed |= p.family != prev_f;
         changed |= ui
-            .add(egui::DragValue::new(&mut p.size_px).range(6.0..=240.0).suffix(" px"))
+            .add(
+                egui::DragValue::new(&mut p.size_px)
+                    .range(6.0..=240.0)
+                    .suffix(" px"),
+            )
             .changed();
         for (flag, label, tooltip) in [
             (&mut p.bold, "B", "text-bold"),

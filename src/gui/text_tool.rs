@@ -12,8 +12,7 @@ use eframe::egui::{
 use openpaintr::Pixel;
 
 use super::{
-    i18n,
-    paint_dashed_line,
+    i18n, paint_dashed_line,
     selection::{Point, Selection},
     session::{
         HandleDrag, SessionOutcome, handle_response, paint_crosshair, rectangle_outline,
@@ -83,9 +82,18 @@ impl FontCatalog {
         let mut defs = i18n::fonts(locale);
         let mut families = vec![DEFAULT_FAMILY.to_owned(), MONOSPACE_FAMILY.to_owned()];
         let candidates = [
-            ("DejaVu Sans", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
-            ("DejaVu Serif", "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf"),
-            ("Liberation Sans", "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"),
+            (
+                "DejaVu Sans",
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            ),
+            (
+                "DejaVu Serif",
+                "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf",
+            ),
+            (
+                "Liberation Sans",
+                "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+            ),
             ("Ubuntu", "/usr/share/fonts/truetype/ubuntu/Ubuntu-R.ttf"),
             ("Arial", "C:\\Windows\\Fonts\\arial.ttf"),
             ("Times New Roman", "C:\\Windows\\Fonts\\times.ttf"),
@@ -100,7 +108,8 @@ impl FontCatalog {
                     .insert(name.to_owned(), Arc::new(FontData::from_owned(bytes)));
                 let mut family = vec![name.to_owned()];
                 family.extend(defs.families[&FontFamily::Proportional].iter().cloned());
-                defs.families.insert(FontFamily::Name(Arc::from(name)), family);
+                defs.families
+                    .insert(FontFamily::Name(Arc::from(name)), family);
                 families.push(name.to_owned());
             }
         }
@@ -127,7 +136,10 @@ impl FontCatalog {
         let color = Color32::WHITE;
         let line_w = (session.params.size_px * 0.075).max(1.0);
         let format = TextFormat {
-            font_id: FontId::new(session.params.size_px, self.font_family(&session.params.family)),
+            font_id: FontId::new(
+                session.params.size_px,
+                self.font_family(&session.params.family),
+            ),
             color,
             italics: session.params.italic,
             underline: if session.params.underline {
@@ -254,7 +266,9 @@ impl TextSession {
             let y1 = (y + 1).min(atlas_h - 1);
             let fx = u - x as f32;
             let fy = v - y as f32;
-            let a_at = |px: i32, py: i32| f32::from(atlas.pixels[py as usize * atlas_w as usize + px as usize].a());
+            let a_at = |px: i32, py: i32| {
+                f32::from(atlas.pixels[py as usize * atlas_w as usize + px as usize].a())
+            };
             let top = a_at(x, y) * (1.0 - fx) + a_at(x1, y) * fx;
             let bot = a_at(x, y1) * (1.0 - fx) + a_at(x1, y1) * fx;
             (top * (1.0 - fy) + bot * fy).round().clamp(0.0, 255.0) as u8
@@ -276,8 +290,8 @@ impl TextSession {
 
                 let min_x = (p0.x.min(p1.x).min(p2.x).floor() as i32).max(0);
                 let min_y = (p0.y.min(p1.y).min(p2.y).floor() as i32).max(0);
-                let max_x = ((p0.x.max(p1.x).max(p2.x) + bold_dx).ceil() as i32)
-                    .min(size.0 as i32 - 1);
+                let max_x =
+                    ((p0.x.max(p1.x).max(p2.x) + bold_dx).ceil() as i32).min(size.0 as i32 - 1);
                 let max_y = (p0.y.max(p1.y).max(p2.y).ceil() as i32).min(size.1 as i32 - 1);
                 if min_x > max_x || min_y > max_y {
                     continue;
@@ -307,16 +321,20 @@ impl TextSession {
 
                 for py in min_y..=max_y {
                     for px in min_x..=max_x {
-                        for (sy, &oy) in super::stroke_raster::SSAA_OFFSETS_UNIT.iter().enumerate() {
+                        for (sy, &oy) in super::stroke_raster::SSAA_OFFSETS_UNIT.iter().enumerate()
+                        {
                             let y_sub = py as f32 + oy as f32;
-                            for (sx, &ox) in super::stroke_raster::SSAA_OFFSETS_UNIT.iter().enumerate() {
+                            for (sx, &ox) in
+                                super::stroke_raster::SSAA_OFFSETS_UNIT.iter().enumerate()
+                            {
                                 let x_sub = px as f32 + ox as f32;
                                 let mut a = eval_sample(x_sub, y_sub);
                                 if bold_dx > 0.0 {
                                     a = a.max(eval_sample(x_sub - bold_dx, y_sub));
                                 }
                                 if a > 0 {
-                                    let slot = cov_map.entry((px as u32, py as u32)).or_insert([0; 16]);
+                                    let slot =
+                                        cov_map.entry((px as u32, py as u32)).or_insert([0; 16]);
                                     let idx = sy * 4 + sx;
                                     slot[idx] = slot[idx].max(a);
                                 }
@@ -350,7 +368,10 @@ impl TextSession {
             TextAlign::Right => -self.last_bounds.x,
         };
         let box_min = self.anchor + vec2(left_offset, 0.0);
-        let box_rect = Rect::from_min_size(viewport.to_screen(box_min), self.last_bounds * viewport.zoom);
+        let box_rect = Rect::from_min_size(
+            viewport.to_screen(box_min),
+            self.last_bounds * viewport.zoom,
+        );
 
         let bg_response = ui.interact(
             ui.clip_rect(),
@@ -361,9 +382,14 @@ impl TextSession {
         let mut changed = false;
         set_grab_cursor(ui.ctx(), &anchor_resp);
         let anchor = self.anchor;
-        if let Some((drag, current)) =
-            track_handle_drag(&mut self.dragging_anchor, (), &anchor_resp, viewport, false, || anchor)
-        {
+        if let Some((drag, current)) = track_handle_drag(
+            &mut self.dragging_anchor,
+            (),
+            &anchor_resp,
+            viewport,
+            false,
+            || anchor,
+        ) {
             self.anchor = drag.start + (current - drag.origin);
             changed = true;
         }
@@ -375,19 +401,26 @@ impl TextSession {
         // Blinking caret hint at top-right / cursor end when editing
         if ((ui.input(|i| i.time) * 2.0) as u64).is_multiple_of(2) {
             let caret_x = match self.params.align {
-                TextAlign::Left => {
-                    box_rect.right().min(box_rect.left() + self.last_bounds.x * viewport.zoom)
-                }
+                TextAlign::Left => box_rect
+                    .right()
+                    .min(box_rect.left() + self.last_bounds.x * viewport.zoom),
                 TextAlign::Center => box_rect.center().x + self.last_bounds.x * viewport.zoom * 0.5,
                 TextAlign::Right => box_rect.right(),
             };
             painter.line_segment(
-                [pos2(caret_x, box_rect.top()), pos2(caret_x, box_rect.bottom())],
+                [
+                    pos2(caret_x, box_rect.top()),
+                    pos2(caret_x, box_rect.bottom()),
+                ],
                 Stroke::new(1.4_f32, accent),
             );
         }
 
-        SessionOutcome::from_interaction(bg_response.clicked(), self.dragging_anchor.is_none(), changed)
+        SessionOutcome::from_interaction(
+            bg_response.clicked(),
+            self.dragging_anchor.is_none(),
+            changed,
+        )
     }
 }
 

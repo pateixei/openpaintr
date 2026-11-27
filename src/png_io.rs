@@ -84,12 +84,15 @@ pub fn decode_png_rgba(input: impl BufRead + Seek) -> io::Result<DecodedPng> {
     decoder.set_transformations(Transformations::normalize_to_color8());
     let mut reader = decoder.read_info()?;
     if reader.info().animation_control.is_some() {
-        return Err(crate::Diagnostic::io(io::ErrorKind::Unsupported, msg::ANIMATED_PNG));
+        return Err(crate::Diagnostic::io(
+            io::ErrorKind::Unsupported,
+            msg::ANIMATED_PNG,
+        ));
     }
 
-    let size = reader.output_buffer_size().ok_or_else(|| {
-        crate::Diagnostic::io(io::ErrorKind::InvalidData, msg::INVALID_PNG_SIZE)
-    })?;
+    let size = reader
+        .output_buffer_size()
+        .ok_or_else(|| crate::Diagnostic::io(io::ErrorKind::InvalidData, msg::INVALID_PNG_SIZE))?;
     let mut bytes = try_vec_filled(size, 0u8)?;
     let frame = reader.next_frame(&mut bytes)?;
     reader.finish()?;
@@ -97,7 +100,10 @@ pub fn decode_png_rgba(input: impl BufRead + Seek) -> io::Result<DecodedPng> {
     let pixel_count = usize::try_from(u64::from(frame.width) * u64::from(frame.height))
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
     if frame.width == 0 || frame.height == 0 {
-        return Err(crate::Diagnostic::io(io::ErrorKind::InvalidData, msg::INVALID_PNG_SIZE));
+        return Err(crate::Diagnostic::io(
+            io::ErrorKind::InvalidData,
+            msg::INVALID_PNG_SIZE,
+        ));
     }
     let mut pixels = try_vec_with_capacity(pixel_count)?;
     let channels = frame.color_type.samples();
@@ -114,7 +120,12 @@ pub fn decode_png_rgba(input: impl BufRead + Seek) -> io::Result<DecodedPng> {
         .info()
         .pixel_dims
         .filter(|density| density.unit == Unit::Meter)
-        .map(|density| (f64::from(density.xppu) * 0.0254, f64::from(density.yppu) * 0.0254));
+        .map(|density| {
+            (
+                f64::from(density.xppu) * 0.0254,
+                f64::from(density.yppu) * 0.0254,
+            )
+        });
     Ok(DecodedPng {
         width: frame.width,
         height: frame.height,

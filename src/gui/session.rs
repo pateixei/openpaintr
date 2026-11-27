@@ -113,13 +113,7 @@ pub fn rectangle_outline(rect: Rect) -> [Pos2; 5] {
     ]
 }
 
-pub fn paint_crosshair(
-    painter: &Painter,
-    center: Pos2,
-    radius: f32,
-    fill_alpha: u8,
-    arm: f32,
-) {
+pub fn paint_crosshair(painter: &Painter, center: Pos2, radius: f32, fill_alpha: u8, arm: f32) {
     painter.circle(
         center,
         radius,
@@ -310,7 +304,9 @@ impl ActiveSession {
 mod tests {
     use super::*;
     use crate::gui::{
-        gradient_tool::GradientParams, text_tool::TextParams, vector_tools::{LineCurveParams, ShapeParams},
+        gradient_tool::GradientParams,
+        text_tool::TextParams,
+        vector_tools::{LineCurveParams, ShapeParams},
     };
     use eframe::egui::{PointerButton, pos2};
 
@@ -353,7 +349,10 @@ mod tests {
     }
 
     fn assert_near(actual: Vec2, expected: Vec2) {
-        assert!((actual - expected).length() < 0.01, "{actual:?} != {expected:?}");
+        assert!(
+            (actual - expected).length() < 0.01,
+            "{actual:?} != {expected:?}"
+        );
     }
 
     #[test]
@@ -423,7 +422,11 @@ mod tests {
         drag(corner, corner + vec2(40.0, 30.0), |ui| {
             s.handles(VIEW, ui);
         });
-        assert!(s.affine.scale.0 > 1.5 && s.affine.scale.1 > 1.5, "{:?}", s.affine);
+        assert!(
+            s.affine.scale.0 > 1.5 && s.affine.scale.1 > 1.5,
+            "{:?}",
+            s.affine
+        );
     }
 
     #[test]

@@ -97,7 +97,11 @@ impl JsonWrite {
     };
 }
 
-pub fn write_json_atomic<T: Serialize>(path: &Path, value: &T, options: JsonWrite) -> io::Result<()> {
+pub fn write_json_atomic<T: Serialize>(
+    path: &Path,
+    value: &T,
+    options: JsonWrite,
+) -> io::Result<()> {
     ensure_parent_dir(path)?;
     let mut bytes = if options.pretty {
         serde_json::to_vec_pretty(value)

@@ -4,7 +4,7 @@ use image::{ImageFormat, ImageReader};
 use openpaintr::Pixel;
 use url::Url;
 
-use super::{MAX_IMAGE_BYTES, super::selection::Point, tr};
+use super::{super::selection::Point, MAX_IMAGE_BYTES, tr};
 
 pub(super) fn read_uri_list(bytes: &[u8]) -> io::Result<Option<(Point, Vec<Pixel>)>> {
     let Ok(list) = str::from_utf8(bytes) else {

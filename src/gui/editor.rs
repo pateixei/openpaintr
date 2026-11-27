@@ -344,9 +344,13 @@ impl StrokeSpec {
                 alpha_mode,
                 ..
             } => {
-                let Some(recolored) =
-                    tolerance::recolor_pixel(before, *target, *replacement, *tolerance_pct, *alpha_mode)
-                else {
+                let Some(recolored) = tolerance::recolor_pixel(
+                    before,
+                    *target,
+                    *replacement,
+                    *tolerance_pct,
+                    *alpha_mode,
+                ) else {
                     return before;
                 };
                 tolerance::blend_covered(recolored, before, eff, StrokeBlend::Overwrite)
@@ -649,7 +653,8 @@ impl Editor {
 
     pub fn insert_blank_layer(&mut self, index: usize) -> io::Result<()> {
         self.finish_stroke();
-        let name = super::i18n::format_logical("layer-number", &[&(self.document.layer_count() + 1)]);
+        let name =
+            super::i18n::format_logical("layer-number", &[&(self.document.layer_count() + 1)]);
         self.document.insert_blank_layer(index, name)?;
         let prev_selected = self.selected;
         self.record_inserted_layer("add-layer", index, prev_selected, self.selection.clone());
@@ -674,10 +679,15 @@ impl Editor {
     pub fn duplicate_layer(&mut self, index: usize) -> io::Result<()> {
         self.finish_stroke();
         let prev_selected = self.selected;
-        let target = self
-            .document
-            .duplicate_layer_with_name(index, |name| super::i18n::format_logical("layer-copy", &[&name]))?;
-        self.record_inserted_layer("duplicate-layer", target, prev_selected, self.selection.clone());
+        let target = self.document.duplicate_layer_with_name(index, |name| {
+            super::i18n::format_logical("layer-copy", &[&name])
+        })?;
+        self.record_inserted_layer(
+            "duplicate-layer",
+            target,
+            prev_selected,
+            self.selection.clone(),
+        );
         Ok(())
     }
 
@@ -727,7 +737,12 @@ impl Editor {
             let index = self.document.layer_count();
             let prev_selected = self.selected;
             self.document.insert_layer_data(index, data)?;
-            self.record_inserted_layer("import-layer", index, prev_selected, self.selection.clone());
+            self.record_inserted_layer(
+                "import-layer",
+                index,
+                prev_selected,
+                self.selection.clone(),
+            );
             return Ok(());
         }
 
@@ -915,14 +930,11 @@ impl Editor {
                         continue;
                     }
                     let local_bg = source[i];
-                    if let Some(transition) = bucket_edges::detect(
-                        edge,
-                        direction,
-                        size,
-                        local_bg,
-                        aa_mode,
-                        |p| source[index(p)],
-                    ) {
+                    if let Some(transition) =
+                        bucket_edges::detect(edge, direction, size, local_bg, aa_mode, |p| {
+                            source[index(p)]
+                        })
+                    {
                         let edge_fg = paint_at(edge, local_bg, mask);
                         let recolored = transition.over(edge_fg);
                         changed |= recolored != source[edge_index];
@@ -1082,7 +1094,9 @@ impl Editor {
         let size = self.document.dimensions();
         let origin = image.clamped_origin(size);
         let mut pixels = blit_onto_blank(&image.pixels, image.size, size, origin)?;
-        let index = self.document.add_layer(super::i18n::logical_text("paste-in-progress"))?;
+        let index = self
+            .document
+            .add_layer(super::i18n::logical_text("paste-in-progress"))?;
         self.document.swap_layer_pixels(index, &mut pixels)?;
         let prev_selected = self.selected;
         let prev_selection = self.selection.take();
@@ -1162,7 +1176,11 @@ impl Editor {
                     out.push(fg);
                 } else {
                     let base = base_at(x, y);
-                    out.push(if fg.0[3] == 0 { base } else { fg.over(base, 255) });
+                    out.push(if fg.0[3] == 0 {
+                        base
+                    } else {
+                        fg.over(base, 255)
+                    });
                 }
             }
         }
@@ -1396,7 +1414,8 @@ impl Editor {
                 st.insert(pt, entry.0, combined_mask, combined_alpha, entry.3);
             }
             if next != current {
-                doc.set_pixel(st.layer, x, y, next).expect("pixel existente");
+                doc.set_pixel(st.layer, x, y, next)
+                    .expect("pixel existente");
                 dirty.push(pt);
                 *ch = true;
             }
@@ -1409,7 +1428,15 @@ impl Editor {
                 stroke_size,
                 dimensions,
                 |pt, mask| {
-                    apply_sample(document, stroke, &mut dirty_points, &mut changed, pt, mask, 0);
+                    apply_sample(
+                        document,
+                        stroke,
+                        &mut dirty_points,
+                        &mut changed,
+                        pt,
+                        mask,
+                        0,
+                    );
                 },
             );
         } else if stroke.aa_mode == AaMode::Analytical && spacing <= 15 {
@@ -1420,7 +1447,15 @@ impl Editor {
                 hardness,
                 dimensions,
                 |pt, alpha| {
-                    apply_sample(document, stroke, &mut dirty_points, &mut changed, pt, 0, alpha);
+                    apply_sample(
+                        document,
+                        stroke,
+                        &mut dirty_points,
+                        &mut changed,
+                        pt,
+                        0,
+                        alpha,
+                    );
                 },
             );
         } else {
@@ -1437,7 +1472,15 @@ impl Editor {
                 is_first,
                 stroke.aa_mode,
                 |pt, alpha| {
-                    apply_sample(document, stroke, &mut dirty_points, &mut changed, pt, 0, alpha);
+                    apply_sample(
+                        document,
+                        stroke,
+                        &mut dirty_points,
+                        &mut changed,
+                        pt,
+                        0,
+                        alpha,
+                    );
                 },
             );
             stroke.carry = carry;

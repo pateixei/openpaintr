@@ -89,12 +89,7 @@ impl Affine {
         (self.center.0 + self.shift.0, self.center.1 + self.shift.1)
     }
 
-    pub fn rotate_from_drag(
-        self,
-        origin: (f64, f64),
-        current: (f64, f64),
-        snap_15: bool,
-    ) -> Self {
+    pub fn rotate_from_drag(self, origin: (f64, f64), current: (f64, f64), snap_15: bool) -> Self {
         let center = self.world_center();
         let a0 = (origin.1 - center.1).atan2(origin.0 - center.0);
         let a1 = (current.1 - center.1).atan2(current.0 - center.0);

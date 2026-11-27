@@ -28,24 +28,14 @@ impl Edge {
             .all(|(&a, b)| a.abs_diff(b) <= 1)
     }
 
-    pub fn deeper(
-        &self,
-        observed: Pixel,
-        background: Pixel,
-        aa_mode: AaMode,
-    ) -> Option<Self> {
+    pub fn deeper(&self, observed: Pixel, background: Pixel, aa_mode: AaMode) -> Option<Self> {
         let next = Self::fit(observed, background, self.foreground, aa_mode)?;
         // A second antialiased fringe pixel can occur on a diagonal. It must have
         // more foreground coverage, so this never tracks a falling edge.
         (next.coverage > self.coverage).then_some(next)
     }
 
-    fn fit(
-        observed: Pixel,
-        background: Pixel,
-        foreground: Pixel,
-        aa_mode: AaMode,
-    ) -> Option<Self> {
+    fn fit(observed: Pixel, background: Pixel, foreground: Pixel, aa_mode: AaMode) -> Option<Self> {
         if background.0[3] != 255
             || observed.0[3] != 255
             || foreground.0[3] != 255
@@ -64,7 +54,8 @@ impl Edge {
         }
 
         if aa_mode == AaMode::Ssaa4x4 {
-            let samples = (16.0 * (f32::from(observed.0[channel]) - base) / contrast).round() as u32;
+            let samples =
+                (16.0 * (f32::from(observed.0[channel]) - base) / contrast).round() as u32;
             if (1..16).contains(&samples) {
                 let edge = Self {
                     foreground,

@@ -58,13 +58,7 @@ pub(super) fn trace_path(
     }
 }
 
-fn stroke_style(
-    thickness: u32,
-    scale: f32,
-    dash: u32,
-    cap0: u32,
-    cap1: u32,
-) -> DStyle<'static> {
+fn stroke_style(thickness: u32, scale: f32, dash: u32, cap0: u32, cap1: u32) -> DStyle<'static> {
     DStyle {
         width: (f64::from(thickness.max(1)) * f64::from(scale)).max(0.2),
         pat: dash_pattern(dash),
@@ -552,7 +546,9 @@ impl LineCurveSession {
             let grip = CurveGrip::Point(idx);
             let points = self.points;
             if let Some((_, mut next)) =
-                track_handle_drag(&mut self.dragging, grip, &response, viewport, false, || points)
+                track_handle_drag(&mut self.dragging, grip, &response, viewport, false, || {
+                    points
+                })
             {
                 if ui.ctx().input(|i| i.modifiers.shift) {
                     match idx {
@@ -568,11 +564,14 @@ impl LineCurveSession {
 
         // Dragging the canvas away from a control handle moves the whole curve.
         let points = self.points;
-        if let Some((drag, current)) =
-            track_handle_drag(&mut self.dragging, CurveGrip::Body, &bg_response, viewport, true, || {
-                points
-            })
-        {
+        if let Some((drag, current)) = track_handle_drag(
+            &mut self.dragging,
+            CurveGrip::Body,
+            &bg_response,
+            viewport,
+            true,
+            || points,
+        ) {
             let delta = current - drag.origin;
             self.points = drag.start.map(|p| p + delta);
             changed = true;
@@ -667,7 +666,11 @@ impl ShapeSession {
 
     pub fn set_creation_bounds(&mut self, anchor: Vec2, current: Vec2, constrain: bool) {
         if self.params.kind == ShapeKind::Freeform {
-            if self.freeform_pts.last().is_none_or(|p| (*p - current).length() >= 1.5) {
+            if self
+                .freeform_pts
+                .last()
+                .is_none_or(|p| (*p - current).length() >= 1.5)
+            {
                 self.freeform_pts.push(current);
             }
             return;
@@ -729,8 +732,11 @@ impl ShapeSession {
             self.affine,
             scale,
         );
-        let do_fill = matches!(self.params.fill_mode, ShapeFillMode::Fill | ShapeFillMode::Both)
-            && !(self.params.kind == ShapeKind::Freeform && self.freeform_pts.len() < 3);
+        let do_fill = matches!(
+            self.params.fill_mode,
+            ShapeFillMode::Fill | ShapeFillMode::Both
+        ) && !(self.params.kind == ShapeKind::Freeform
+            && self.freeform_pts.len() < 3);
         let do_outline = matches!(
             self.params.fill_mode,
             ShapeFillMode::Outline | ShapeFillMode::Both
@@ -758,8 +764,13 @@ impl ShapeSession {
             );
         }
         if do_outline {
-            let style =
-                stroke_style(self.params.thickness, scale, DASH_SOLID, LCAP_ROUND, LCAP_ROUND);
+            let style = stroke_style(
+                self.params.thickness,
+                scale,
+                DASH_SOLID,
+                LCAP_ROUND,
+                LCAP_ROUND,
+            );
             dash_stroke(&mut fill_path, &style);
             let stroke_map = rasterize_path(&fill_path, RULE_NONZERO, size, aa_mode);
             tolerance::blend_coverage_in_place(
@@ -853,18 +864,22 @@ impl ShapeSession {
                 ),
                 // `Body` is only dragged through the background response below.
                 ShapeGrip::Rotate | ShapeGrip::Body => {
-                    drag.start.rotate_from_drag(world(drag.origin), world(current), shift)
+                    drag.start
+                        .rotate_from_drag(world(drag.origin), world(current), shift)
                 }
             };
             changed = true;
         }
 
         let affine = self.affine;
-        if let Some((drag, current)) =
-            track_handle_drag(&mut self.dragging, ShapeGrip::Body, &bg_response, viewport, true, || {
-                affine
-            })
-        {
+        if let Some((drag, current)) = track_handle_drag(
+            &mut self.dragging,
+            ShapeGrip::Body,
+            &bg_response,
+            viewport,
+            true,
+            || affine,
+        ) {
             let d = current - drag.origin;
             self.affine.shift = (
                 drag.start.shift.0 + f64::from(d.x),
@@ -910,25 +925,45 @@ fn build_shape_path(
     };
 
     match kind {
-        ShapeKind::Rectangle => poly(&[(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)], true, &mut path),
+        ShapeKind::Rectangle => poly(
+            &[(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)],
+            true,
+            &mut path,
+        ),
         ShapeKind::RoundedRect => {
             let rx = (corner_radius / w).clamp(0.0, 0.48);
             let ry = (corner_radius / h).clamp(0.0, 0.48);
             if rx <= 0.005 || ry <= 0.005 {
-                poly(&[(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)], true, &mut path);
+                poly(
+                    &[(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)],
+                    true,
+                    &mut path,
+                );
             } else {
                 let k = BEZIER_CIRCLE_KAPPA;
                 let (p0x, p0y) = tx(rx, 0.0);
                 path.move_f(p0x, p0y);
                 let l = tx(1.0 - rx, 0.0);
                 path.line_f(l.0, l.1);
-                path.cubic_f(tx(1.0 - rx * (1.0 - k), 0.0), tx(1.0, ry * (1.0 - k)), tx(1.0, ry));
+                path.cubic_f(
+                    tx(1.0 - rx * (1.0 - k), 0.0),
+                    tx(1.0, ry * (1.0 - k)),
+                    tx(1.0, ry),
+                );
                 let l = tx(1.0, 1.0 - ry);
                 path.line_f(l.0, l.1);
-                path.cubic_f(tx(1.0, 1.0 - ry * (1.0 - k)), tx(1.0 - rx * (1.0 - k), 1.0), tx(1.0 - rx, 1.0));
+                path.cubic_f(
+                    tx(1.0, 1.0 - ry * (1.0 - k)),
+                    tx(1.0 - rx * (1.0 - k), 1.0),
+                    tx(1.0 - rx, 1.0),
+                );
                 let l = tx(rx, 1.0);
                 path.line_f(l.0, l.1);
-                path.cubic_f(tx(rx * (1.0 - k), 1.0), tx(0.0, 1.0 - ry * (1.0 - k)), tx(0.0, 1.0 - ry));
+                path.cubic_f(
+                    tx(rx * (1.0 - k), 1.0),
+                    tx(0.0, 1.0 - ry * (1.0 - k)),
+                    tx(0.0, 1.0 - ry),
+                );
                 let l = tx(0.0, ry);
                 path.line_f(l.0, l.1);
                 path.cubic_f(tx(0.0, ry * (1.0 - k)), tx(rx * (1.0 - k), 0.0), (p0x, p0y));
@@ -945,22 +980,85 @@ fn build_shape_path(
             path.cubic_f(tx(0.0, 0.5 - k), tx(0.5 - k, 0.0), (p0x, p0y));
             path.close();
         }
-        ShapeKind::Diamond => poly(&[(0.5, 0.0), (1.0, 0.5), (0.5, 1.0), (0.0, 0.5)], true, &mut path),
-        ShapeKind::Trapezoid => poly(&[(0.2, 0.0), (0.8, 0.0), (1.0, 1.0), (0.0, 1.0)], true, &mut path),
-        ShapeKind::Parallelogram => poly(&[(0.25, 0.0), (1.0, 0.0), (0.75, 1.0), (0.0, 1.0)], true, &mut path),
+        ShapeKind::Diamond => poly(
+            &[(0.5, 0.0), (1.0, 0.5), (0.5, 1.0), (0.0, 0.5)],
+            true,
+            &mut path,
+        ),
+        ShapeKind::Trapezoid => poly(
+            &[(0.2, 0.0), (0.8, 0.0), (1.0, 1.0), (0.0, 1.0)],
+            true,
+            &mut path,
+        ),
+        ShapeKind::Parallelogram => poly(
+            &[(0.25, 0.0), (1.0, 0.0), (0.75, 1.0), (0.0, 1.0)],
+            true,
+            &mut path,
+        ),
         ShapeKind::Triangle => poly(&[(0.5, 0.0), (1.0, 1.0), (0.0, 1.0)], true, &mut path),
         ShapeKind::RightTriangle => poly(&[(0.0, 0.0), (1.0, 1.0), (0.0, 1.0)], true, &mut path),
         ShapeKind::Pentagon => radial_polygon(5, |_| 0.5, &tx, &mut path),
         ShapeKind::Hexagon => radial_polygon(6, |_| 0.5, &tx, &mut path),
-        ShapeKind::Star4 => radial_polygon(8, |i| if i.is_multiple_of(2) { 0.5 } else { 0.5 * 0.38 }, &tx, &mut path),
-        ShapeKind::Star5 => radial_polygon(10, |i| if i.is_multiple_of(2) { 0.5 } else { 0.5 * 0.38 }, &tx, &mut path),
-        ShapeKind::Star6 => radial_polygon(12, |i| if i.is_multiple_of(2) { 0.5 } else { 0.5 * 0.45 }, &tx, &mut path),
+        ShapeKind::Star4 => radial_polygon(
+            8,
+            |i| if i.is_multiple_of(2) { 0.5 } else { 0.5 * 0.38 },
+            &tx,
+            &mut path,
+        ),
+        ShapeKind::Star5 => radial_polygon(
+            10,
+            |i| if i.is_multiple_of(2) { 0.5 } else { 0.5 * 0.38 },
+            &tx,
+            &mut path,
+        ),
+        ShapeKind::Star6 => radial_polygon(
+            12,
+            |i| if i.is_multiple_of(2) { 0.5 } else { 0.5 * 0.45 },
+            &tx,
+            &mut path,
+        ),
         ShapeKind::ArrowRight => poly(&ARROW_RIGHT, true, &mut path),
-        ShapeKind::ArrowLeft => trace_path(&mut path, ARROW_RIGHT.iter().map(|&(x, y)| tx(1.0 - x, y)), true),
-        ShapeKind::ArrowUp => trace_path(&mut path, ARROW_RIGHT.iter().map(|&(x, y)| tx(y, 1.0 - x)), true),
-        ShapeKind::ArrowDown => trace_path(&mut path, ARROW_RIGHT.iter().map(|&(x, y)| tx(y, x)), true),
-        ShapeKind::DoubleArrow => poly(&[(0.0, 0.5), (0.28, 0.15), (0.28, 0.34), (0.72, 0.34), (0.72, 0.15), (1.0, 0.5), (0.72, 0.85), (0.72, 0.66), (0.28, 0.66), (0.28, 0.85)], true, &mut path),
-        ShapeKind::Chevron => poly(&[(0.0, 0.1), (0.55, 0.1), (1.0, 0.5), (0.55, 0.9), (0.0, 0.9), (0.45, 0.5)], true, &mut path),
+        ShapeKind::ArrowLeft => trace_path(
+            &mut path,
+            ARROW_RIGHT.iter().map(|&(x, y)| tx(1.0 - x, y)),
+            true,
+        ),
+        ShapeKind::ArrowUp => trace_path(
+            &mut path,
+            ARROW_RIGHT.iter().map(|&(x, y)| tx(y, 1.0 - x)),
+            true,
+        ),
+        ShapeKind::ArrowDown => {
+            trace_path(&mut path, ARROW_RIGHT.iter().map(|&(x, y)| tx(y, x)), true)
+        }
+        ShapeKind::DoubleArrow => poly(
+            &[
+                (0.0, 0.5),
+                (0.28, 0.15),
+                (0.28, 0.34),
+                (0.72, 0.34),
+                (0.72, 0.15),
+                (1.0, 0.5),
+                (0.72, 0.85),
+                (0.72, 0.66),
+                (0.28, 0.66),
+                (0.28, 0.85),
+            ],
+            true,
+            &mut path,
+        ),
+        ShapeKind::Chevron => poly(
+            &[
+                (0.0, 0.1),
+                (0.55, 0.1),
+                (1.0, 0.5),
+                (0.55, 0.9),
+                (0.0, 0.9),
+                (0.45, 0.5),
+            ],
+            true,
+            &mut path,
+        ),
         ShapeKind::Heart => {
             let (p0x, p0y) = tx(0.5, 0.92);
             path.move_f(p0x, p0y);
@@ -970,10 +1068,61 @@ fn build_shape_path(
             path.cubic_f(tx(1.0, 0.22), tx(0.95, 0.62), (p0x, p0y));
             path.close();
         }
-        ShapeKind::Lightning => poly(&[(0.58, 0.0), (0.18, 0.55), (0.46, 0.55), (0.35, 1.0), (0.82, 0.42), (0.52, 0.42)], true, &mut path),
-        ShapeKind::Cross => poly(&[(0.34, 0.0), (0.66, 0.0), (0.66, 0.34), (1.0, 0.34), (1.0, 0.66), (0.66, 0.66), (0.66, 1.0), (0.34, 1.0), (0.34, 0.66), (0.0, 0.66), (0.0, 0.34), (0.34, 0.34)], true, &mut path),
-        ShapeKind::Checkmark => poly(&[(0.08, 0.56), (0.22, 0.42), (0.40, 0.62), (0.78, 0.16), (0.92, 0.30), (0.40, 0.88)], true, &mut path),
-        ShapeKind::CalloutRect => poly(&[(0.0, 0.0), (1.0, 0.0), (1.0, 0.72), (0.48, 0.72), (0.22, 1.0), (0.26, 0.72), (0.0, 0.72)], true, &mut path),
+        ShapeKind::Lightning => poly(
+            &[
+                (0.58, 0.0),
+                (0.18, 0.55),
+                (0.46, 0.55),
+                (0.35, 1.0),
+                (0.82, 0.42),
+                (0.52, 0.42),
+            ],
+            true,
+            &mut path,
+        ),
+        ShapeKind::Cross => poly(
+            &[
+                (0.34, 0.0),
+                (0.66, 0.0),
+                (0.66, 0.34),
+                (1.0, 0.34),
+                (1.0, 0.66),
+                (0.66, 0.66),
+                (0.66, 1.0),
+                (0.34, 1.0),
+                (0.34, 0.66),
+                (0.0, 0.66),
+                (0.0, 0.34),
+                (0.34, 0.34),
+            ],
+            true,
+            &mut path,
+        ),
+        ShapeKind::Checkmark => poly(
+            &[
+                (0.08, 0.56),
+                (0.22, 0.42),
+                (0.40, 0.62),
+                (0.78, 0.16),
+                (0.92, 0.30),
+                (0.40, 0.88),
+            ],
+            true,
+            &mut path,
+        ),
+        ShapeKind::CalloutRect => poly(
+            &[
+                (0.0, 0.0),
+                (1.0, 0.0),
+                (1.0, 0.72),
+                (0.48, 0.72),
+                (0.22, 1.0),
+                (0.26, 0.72),
+                (0.0, 0.72),
+            ],
+            true,
+            &mut path,
+        ),
         ShapeKind::CalloutOval => {
             let k = BEZIER_CIRCLE_KAPPA * 0.5;
             let (p0x, p0y) = tx(0.5, 0.0);
@@ -1002,8 +1151,8 @@ fn radial_polygon(
     trace_path(
         path,
         (0..count).map(|i| {
-            let angle = -std::f32::consts::FRAC_PI_2
-                + i as f32 * std::f32::consts::TAU / count as f32;
+            let angle =
+                -std::f32::consts::FRAC_PI_2 + i as f32 * std::f32::consts::TAU / count as f32;
             let r = radius_at(i);
             tx(0.5 + r * angle.cos(), 0.5 + r * angle.sin())
         }),

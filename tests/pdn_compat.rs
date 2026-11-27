@@ -26,7 +26,11 @@ fn assert_layers_equal(actual: &Document, expected: &Document, check_pixels: boo
     assert_eq!(actual.dimensions(), expected.dimensions(), "{label}");
     assert_eq!(actual.layer_count(), expected.layer_count(), "{label}");
     for idx in 0..expected.layer_count() {
-        assert_eq!(actual.layer_name(idx), expected.layer_name(idx), "{label}#{idx}");
+        assert_eq!(
+            actual.layer_name(idx),
+            expected.layer_name(idx),
+            "{label}#{idx}"
+        );
         assert_eq!(
             actual.layer_properties(idx),
             expected.layer_properties(idx),
@@ -279,10 +283,7 @@ fn png_export_preserves_alpha_and_depth_options_separately() -> io::Result<()> {
 }
 
 fn channel_diff(a: Pixel, b: Pixel) -> u8 {
-    (0..4)
-        .map(|i| a.0[i].abs_diff(b.0[i]))
-        .max()
-        .unwrap_or(0)
+    (0..4).map(|i| a.0[i].abs_diff(b.0[i])).max().unwrap_or(0)
 }
 
 fn premul_rgb_diff(a: Pixel, b: Pixel) -> u8 {

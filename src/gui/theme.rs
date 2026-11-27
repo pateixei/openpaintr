@@ -243,7 +243,9 @@ impl Theme {
     }
 
     pub fn muted_label(self, text: impl Into<String>) -> egui::RichText {
-        egui::RichText::new(text).size(12.0).color(self.text_muted())
+        egui::RichText::new(text)
+            .size(12.0)
+            .color(self.text_muted())
     }
 
     pub fn section_label(self, text: impl Into<String>) -> egui::RichText {
@@ -307,17 +309,17 @@ impl Theme {
                             );
                         });
                     });
-                let line = ui.allocate_exact_size(Vec2::new(ui.available_width(), 1.0), egui::Sense::hover()).0;
+                let line = ui
+                    .allocate_exact_size(Vec2::new(ui.available_width(), 1.0), egui::Sense::hover())
+                    .0;
                 ui.painter().line_segment(
                     [line.left_center(), line.right_center()],
                     Stroke::new(1.0_f32, self.border_color()),
                 );
-                Frame::new()
-                    .inner_margin(Margin::same(8))
-                    .show(ui, |ui| {
-                        ui.spacing_mut().item_spacing = Vec2::splat(6.0);
-                        body(ui);
-                    });
+                Frame::new().inner_margin(Margin::same(8)).show(ui, |ui| {
+                    ui.spacing_mut().item_spacing = Vec2::splat(6.0);
+                    body(ui);
+                });
             })
             .response
     }
@@ -347,10 +349,34 @@ fn style_menu_widgets(
     active_open: Color32,
     radius: u8,
 ) {
-    set_widget_state(&mut widgets.inactive, Color32::TRANSPARENT, Stroke::NONE, None, None);
-    set_widget_state(&mut widgets.hovered, hover, Stroke::NONE, None, Some(radius));
-    set_widget_state(&mut widgets.active, active_open, Stroke::NONE, None, Some(radius));
-    set_widget_state(&mut widgets.open, active_open, Stroke::NONE, None, Some(radius));
+    set_widget_state(
+        &mut widgets.inactive,
+        Color32::TRANSPARENT,
+        Stroke::NONE,
+        None,
+        None,
+    );
+    set_widget_state(
+        &mut widgets.hovered,
+        hover,
+        Stroke::NONE,
+        None,
+        Some(radius),
+    );
+    set_widget_state(
+        &mut widgets.active,
+        active_open,
+        Stroke::NONE,
+        None,
+        Some(radius),
+    );
+    set_widget_state(
+        &mut widgets.open,
+        active_open,
+        Stroke::NONE,
+        None,
+        Some(radius),
+    );
 }
 
 const fn rgb(r: u8, g: u8, b: u8) -> Color32 {

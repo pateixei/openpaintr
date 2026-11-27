@@ -62,11 +62,7 @@ impl Transform {
         }
     }
 
-    pub fn with_floating(
-        affine: Affine,
-        bounds: (Vec2, Vec2),
-        floating: Image,
-    ) -> Self {
+    pub fn with_floating(affine: Affine, bounds: (Vec2, Vec2), floating: Image) -> Self {
         Self {
             target: TransformTarget::Pixels,
             affine,
@@ -146,7 +142,12 @@ impl Transform {
         // 2. Corner and edge-midpoint scale handles (registered after bg so handles take priority).
         // Each group lists its id tag and the cursor angles for even/odd handles.
         let scale_handles = [
-            (points, "transform_corner", Handle::ScaleCorner as fn(usize) -> Handle, [45.0, 135.0]),
+            (
+                points,
+                "transform_corner",
+                Handle::ScaleCorner as fn(usize) -> Handle,
+                [45.0, 135.0],
+            ),
             (edges, "transform_edge", Handle::ScaleEdge, [90.0, 0.0]),
         ];
         for (positions, tag, make_handle, base_degs) in scale_handles {
@@ -167,7 +168,8 @@ impl Transform {
         changed |= self.interact_handle(Handle::Rotate, &rot_response, viewport, mouse);
 
         // 4. Pivot crosshair (only interactive when the transformed box is large enough not to block moving).
-        let show_pivot = points[0].distance(points[1]) >= 28.0 && points[1].distance(points[2]) >= 28.0;
+        let show_pivot =
+            points[0].distance(points[1]) >= 28.0 && points[1].distance(points[2]) >= 28.0;
         if show_pivot || matches!(self.gesture, Some((Handle::Pivot, ..))) {
             let pivot_response = handle_response(ui, pivot_screen, 14.0, "transform_pivot");
             if pivot_response.hovered() || pivot_response.dragged() {
@@ -197,7 +199,11 @@ impl Transform {
             Handle::Rotate | Handle::BgRotate => Scope::TransformRotate,
             Handle::Pivot => Scope::TransformMove,
         };
-        let resolve_action = || mouse.active_in(&response.ctx, scope).map(|(_, action)| action);
+        let resolve_action = || {
+            mouse
+                .active_in(&response.ctx, scope)
+                .map(|(_, action)| action)
+        };
 
         if response.drag_started()
             && let Some(position) = response.interact_pointer_pos()
@@ -356,7 +362,10 @@ mod tests {
 
         let mut transform = Transform::new(TransformTarget::Pixels, affine, bounds);
         transform.move_pivot(vec2(35.0, 48.0));
-        let after: Vec<_> = corners.iter().map(|&c| transform.affine.forward(c)).collect();
+        let after: Vec<_> = corners
+            .iter()
+            .map(|&c| transform.affine.forward(c))
+            .collect();
         for (a, b) in before.into_iter().zip(after) {
             assert!((a.0 - b.0).abs() < 1e-6);
             assert!((a.1 - b.1).abs() < 1e-6);

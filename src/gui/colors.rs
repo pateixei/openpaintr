@@ -322,7 +322,10 @@ impl ColorPalette {
     }
 
     pub fn serialize_palette_txt(&self) -> String {
-        let mut out = format!("; {} (AARRGGBB)\n", super::i18n::logical_text("palette-file-comment"));
+        let mut out = format!(
+            "; {} (AARRGGBB)\n",
+            super::i18n::logical_text("palette-file-comment")
+        );
         for [r, g, b, a] in &self.swatches {
             out.push_str(&format!("{a:02X}{r:02X}{g:02X}{b:02X}\n"));
         }
@@ -757,10 +760,8 @@ pub fn picker(
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
             ui.label(RichText::new("Hex").size(11.0).color(theme.text_muted()));
-            let resp = ui.add(
-                egui::TextEdit::singleline(&mut palette.hex_draft)
-                    .desired_width(68.0),
-            );
+            let resp =
+                ui.add(egui::TextEdit::singleline(&mut palette.hex_draft).desired_width(68.0));
             if resp.changed()
                 && let Some(parsed) = parse_hex(&palette.hex_draft)
             {
@@ -824,10 +825,8 @@ pub fn picker(
             ui.spacing_mut().item_spacing.x = gap;
             for (col_idx, &rgba) in chunk.iter().enumerate() {
                 let idx = row_idx * cols + col_idx;
-                let (rect, resp) = ui.allocate_exact_size(
-                    vec2(swatch_size, swatch_size),
-                    Sense::click(),
-                );
+                let (rect, resp) =
+                    ui.allocate_exact_size(vec2(swatch_size, swatch_size), Sense::click());
                 let selected = active_rgba == rgba;
                 let border = Stroke::new(
                     if selected { 1.8_f32 } else { 1.0_f32 },
@@ -870,7 +869,12 @@ pub fn parse_hex(raw: &str) -> Option<[u8; 4]> {
     let hex = trimmed.strip_prefix('#').unwrap_or(trimmed);
     if hex.len() == 6 {
         let v = u32::from_str_radix(hex, 16).ok()?;
-        Some([((v >> 16) & 0xff) as u8, ((v >> 8) & 0xff) as u8, (v & 0xff) as u8, 255])
+        Some([
+            ((v >> 16) & 0xff) as u8,
+            ((v >> 8) & 0xff) as u8,
+            (v & 0xff) as u8,
+            255,
+        ])
     } else if hex.len() == 8 {
         let v = u32::from_str_radix(hex, 16).ok()?;
         Some([
@@ -923,7 +927,10 @@ fn gradient_bar(
     let value = updated.unwrap_or(value);
     let p = ui.painter();
     if let Some(tex) = checker {
-        let tiles = vec2((inner.width() / 8.0).max(1.0), (inner.height() / 8.0).max(1.0));
+        let tiles = vec2(
+            (inner.width() / 8.0).max(1.0),
+            (inner.height() / 8.0).max(1.0),
+        );
         paint_checker(p, tex, inner, tiles);
     }
     paint_horizontal_gradient_mesh(p, inner, 24, color_at);
