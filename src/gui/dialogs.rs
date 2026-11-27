@@ -138,6 +138,12 @@ impl SaveOptionsDialog {
         dialog
     }
 
+    /// Size of the last successful encoding.
+    #[cfg(test)]
+    pub fn encoded_len(&self) -> Option<usize> {
+        self.error.is_none().then_some(self.encoded.len())
+    }
+
     pub fn is_project(&self) -> bool {
         matches!(self.format, SaveFormat::Pdn { .. })
     }

@@ -507,6 +507,12 @@ impl Editor {
         self.undo_bytes
     }
 
+    /// Bytes accounted for the newest undo entry.
+    #[cfg(test)]
+    pub fn last_undo_entry_bytes(&self) -> Option<usize> {
+        self.undo.back().map(|entry| entry.bytes)
+    }
+
     pub fn can_redo(&self) -> bool {
         !self.redo.is_empty()
     }

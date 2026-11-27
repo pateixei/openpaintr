@@ -4562,6 +4562,8 @@ impl eframe::App for App {
 mod tests {
     use super::*;
 
+    mod perf_baseline;
+
     fn fixture_path(name: &str) -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/fixtures")
@@ -6296,57 +6298,99 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    #[ignore]
-    fn phase1_interactive_performance_baseline() -> io::Result<()> {
-        fn build_workload_pdn(width: u32, height: u32, layers: usize) -> io::Result<Vec<u8>> {
-            let mut doc = Document::new(width, height)?;
-            doc.fill_layer(0, Pixel([48, 84, 140, 255]))?;
-            for idx in 1..layers {
-                let l = doc.add_layer(format!("Camada {idx}"))?;
-                doc.set_layer_blend_mode(l, (idx % 4) as u8)?;
-                doc.set_layer_properties(l, idx != 2, if idx % 2 == 0 { 255 } else { 168 })?;
-                let fill = Pixel([
-                    ((idx * 53) % 256) as u8,
-                    ((idx * 97) % 256) as u8,
-                    ((idx * 37) % 256) as u8,
-                    192,
-                ]);
-                doc.fill_layer(l, fill)?;
-            }
-            let mut bytes = Vec::new();
-            doc.write_pdn(&mut bytes)?;
-            Ok(bytes)
+    /// The phase 1 documents: `layers` uniform layers with mixed blend modes.
+    fn build_workload_pdn(width: u32, height: u32, layers: usize) -> io::Result<Vec<u8>> {
+        let mut doc = Document::new(width, height)?;
+        doc.fill_layer(0, Pixel([48, 84, 140, 255]))?;
+        for idx in 1..layers {
+            let l = doc.add_layer(format!("Camada {idx}"))?;
+            doc.set_layer_blend_mode(l, (idx % 4) as u8)?;
+            doc.set_layer_properties(l, idx != 2, if idx % 2 == 0 { 255 } else { 168 })?;
+            let fill = Pixel([
+                ((idx * 53) % 256) as u8,
+                ((idx * 97) % 256) as u8,
+                ((idx * 37) % 256) as u8,
+                192,
+            ]);
+            doc.fill_layer(l, fill)?;
         }
+        let mut bytes = Vec::new();
+        doc.write_pdn(&mut bytes)?;
+        Ok(bytes)
+    }
 
-        fn stats(samples: &[f64]) -> (f64, f64) {
-            let mut sorted = samples.to_vec();
-            sorted.sort_by(f64::total_cmp);
-            let mid = sorted.len() / 2;
-            let median = if sorted.len().is_multiple_of(2) {
-                (sorted[mid - 1] + sorted[mid]) * 0.5
-            } else {
-                sorted[mid]
-            };
-            (median, *sorted.last().unwrap_or(&0.0))
-        }
+    /// Median and maximum.
+    fn stats(samples: &[f64]) -> (f64, f64) {
+        let mut sorted = samples.to_vec();
+        sorted.sort_by(f64::total_cmp);
+        let mid = sorted.len() / 2;
+        let median = if sorted.len().is_multiple_of(2) {
+            (sorted[mid - 1] + sorted[mid]) * 0.5
+        } else {
+            sorted[mid]
+        };
+        (median, *sorted.last().unwrap_or(&0.0))
+    }
 
-        fn measure_workload(name: &str, width: u32, height: u32, layers: usize) -> io::Result<()> {
-            let pdn_bytes = build_workload_pdn(width, height, layers)?;
-            let screen = Rect::from_min_size(pos2(0.0, 0.0), vec2(1280.0, 800.0));
-            let ctx = egui::Context::default();
+    fn vm_hwm_line() -> String {
+        std::fs::read_to_string("/proc/self/status")
+            .unwrap_or_default()
+            .lines()
+            .find(|line| line.starts_with("VmHWM:"))
+            .map_or_else(|| "n/a".into(), |line| line.trim().into())
+    }
 
-            let warmups = 2;
-            let runs = 10;
-            let mut open_ms = Vec::with_capacity(runs);
-            let mut stroke_ms = Vec::with_capacity(runs);
-            let mut nav_ms = Vec::with_capacity(runs);
-            let mut export_ms = Vec::with_capacity(runs);
+    /// Frame times in milliseconds, one inner vector per timed run.
+    #[derive(Default)]
+    struct Phase1Samples {
+        open: Vec<Vec<f64>>,
+        stroke: Vec<Vec<f64>>,
+        nav: Vec<Vec<f64>>,
+        export: Vec<Vec<f64>>,
+        stroke_undo_bytes: Vec<usize>,
+    }
 
-            for iter in 0..(warmups + runs) {
-                let t0 = std::time::Instant::now();
-                let doc = Document::read_pdn(pdn_bytes.as_slice())?;
-                let mut app = App::new(&ctx, doc);
+    fn run_means(runs: &[Vec<f64>]) -> Vec<f64> {
+        runs.iter()
+            .map(|frames| frames.iter().sum::<f64>() / frames.len() as f64)
+            .collect()
+    }
+
+    fn measure_phase1_workload(
+        width: u32,
+        height: u32,
+        layers: usize,
+        warmups: usize,
+        runs: usize,
+    ) -> io::Result<Phase1Samples> {
+        let pdn_bytes = build_workload_pdn(width, height, layers)?;
+        let screen = Rect::from_min_size(pos2(0.0, 0.0), vec2(1280.0, 800.0));
+        let ctx = egui::Context::default();
+        let mut samples = Phase1Samples::default();
+
+        for iter in 0..(warmups + runs) {
+            let t0 = std::time::Instant::now();
+            let doc = Document::read_pdn(pdn_bytes.as_slice())?;
+            let mut app = App::new(&ctx, doc);
+            let _ = ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(screen),
+                    ..Default::default()
+                },
+                |ctx| app.ui_frame(ctx),
+            );
+            let open = vec![t0.elapsed().as_secs_f64() * 1000.0];
+
+            let mut stroke = Vec::new();
+            for step in 0..8_u32 {
+                let t1 = std::time::Instant::now();
+                app.tab_mut()
+                    .editor
+                    .begin_stroke(Pixel([220, 40, 40, 255]), 24);
+                app.tab_mut()
+                    .editor
+                    .draw_to(Some((40 + step * 8, 40 + step * 4)));
+                app.tab_mut().editor.finish_stroke();
                 let _ = ctx.run(
                     egui::RawInput {
                         screen_rect: Some(screen),
@@ -6354,77 +6398,58 @@ mod tests {
                     },
                     |ctx| app.ui_frame(ctx),
                 );
-                let dt_open = t0.elapsed().as_secs_f64() * 1000.0;
-
-                let mut total_stroke = 0.0;
-                for step in 0..8_u32 {
-                    let t1 = std::time::Instant::now();
-                    app.tab_mut()
-                        .editor
-                        .begin_stroke(Pixel([220, 40, 40, 255]), 24);
-                    app.tab_mut()
-                        .editor
-                        .draw_to(Some((40 + step * 8, 40 + step * 4)));
-                    app.tab_mut().editor.finish_stroke();
-                    let _ = ctx.run(
-                        egui::RawInput {
-                            screen_rect: Some(screen),
-                            ..Default::default()
-                        },
-                        |ctx| app.ui_frame(ctx),
-                    );
-                    total_stroke += t1.elapsed().as_secs_f64() * 1000.0;
-                }
-                let dt_stroke = total_stroke / 8.0;
-
-                let mut total_nav = 0.0;
-                for step in 0..10_u32 {
-                    let t2 = std::time::Instant::now();
-                    app.tab_mut().zoom = Some(1.0 + step as f32 * 0.2);
-                    app.tab_mut().view.scroll_to =
-                        Some(vec2(step as f32 * 16.0, step as f32 * 12.0));
-                    let _ = ctx.run(
-                        egui::RawInput {
-                            screen_rect: Some(screen),
-                            ..Default::default()
-                        },
-                        |ctx| app.ui_frame(ctx),
-                    );
-                    total_nav += t2.elapsed().as_secs_f64() * 1000.0;
-                }
-                let dt_nav = total_nav / 10.0;
-
-                let t3 = std::time::Instant::now();
-                let mut png_out = Vec::new();
-                app.tab().editor.document.write_png(&mut png_out)?;
-                let dt_export = t3.elapsed().as_secs_f64() * 1000.0;
-
+                stroke.push(t1.elapsed().as_secs_f64() * 1000.0);
                 if iter >= warmups {
-                    open_ms.push(dt_open);
-                    stroke_ms.push(dt_stroke);
-                    nav_ms.push(dt_nav);
-                    export_ms.push(dt_export);
+                    samples
+                        .stroke_undo_bytes
+                        .extend(app.tab().editor.last_undo_entry_bytes());
                 }
             }
 
-            let status = std::fs::read_to_string("/proc/self/status").unwrap_or_default();
-            let vm_hwm = status
-                .lines()
-                .find(|line| line.starts_with("VmHWM:"))
-                .map_or("n/a", str::trim);
+            let mut nav = Vec::new();
+            for step in 0..10_u32 {
+                let t2 = std::time::Instant::now();
+                app.tab_mut().zoom = Some(1.0 + step as f32 * 0.2);
+                app.tab_mut().view.scroll_to = Some(vec2(step as f32 * 16.0, step as f32 * 12.0));
+                let _ = ctx.run(
+                    egui::RawInput {
+                        screen_rect: Some(screen),
+                        ..Default::default()
+                    },
+                    |ctx| app.ui_frame(ctx),
+                );
+                nav.push(t2.elapsed().as_secs_f64() * 1000.0);
+            }
 
-            let (o_med, o_max) = stats(&open_ms);
-            let (s_med, s_max) = stats(&stroke_ms);
-            let (n_med, n_max) = stats(&nav_ms);
-            let (e_med, e_max) = stats(&export_ms);
+            let t3 = std::time::Instant::now();
+            let mut png_out = Vec::new();
+            app.tab().editor.document.write_png(&mut png_out)?;
+            let export = vec![t3.elapsed().as_secs_f64() * 1000.0];
+
+            if iter >= warmups {
+                samples.open.push(open);
+                samples.stroke.push(stroke);
+                samples.nav.push(nav);
+                samples.export.push(export);
+            }
+        }
+        Ok(samples)
+    }
+
+    #[test]
+    #[ignore]
+    fn phase1_interactive_performance_baseline() -> io::Result<()> {
+        for (name, width, height, layers) in [("typical", 800, 600, 4), ("large", 2560, 1440, 8)] {
+            let samples = measure_phase1_workload(width, height, layers, 2, 10)?;
+            let (o_med, o_max) = stats(&run_means(&samples.open));
+            let (s_med, s_max) = stats(&run_means(&samples.stroke));
+            let (n_med, n_max) = stats(&run_means(&samples.nav));
+            let (e_med, e_max) = stats(&run_means(&samples.export));
+            let vm_hwm = vm_hwm_line();
             println!(
                 "BENCH {name} ({width}x{height} x{layers}): open={o_med:.2}/{o_max:.2} ms | stroke={s_med:.2}/{s_max:.2} ms | nav={n_med:.2}/{n_max:.2} ms | export={e_med:.2}/{e_max:.2} ms | {vm_hwm}"
             );
-            Ok(())
         }
-
-        measure_workload("typical", 800, 600, 4)?;
-        measure_workload("large", 2560, 1440, 8)?;
         Ok(())
     }
 
