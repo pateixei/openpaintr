@@ -484,7 +484,7 @@ This maps to the roadmap's phase 4 **Performance** item ("portable GPU backend")
 - [x] 0.3 Per-tool performance baseline
 - [x] 0.4 `unsafe` lint for the whole binary
 - [x] 1.1 Decode and allocation limits
-- [ ] 1.2 Translation loading
+- [x] 1.2 Translation loading
 - [ ] 1.3 Bounded reads
 - [ ] 1.4 XDG paths, portable mode, and migration
 - [ ] 1.5 English names for documents and internal identifiers
