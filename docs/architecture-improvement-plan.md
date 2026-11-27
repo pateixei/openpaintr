@@ -489,7 +489,7 @@ This maps to the roadmap's phase 4 **Performance** item ("portable GPU backend")
 - [x] 1.4 XDG paths, portable mode, and migration
 - [x] 1.5 English names for documents and internal identifiers
 - [x] 2.1 Zero-copy `Pixel`
-- [ ] 2.2 Affine resampling
+- [x] 2.2 Affine resampling
 - [ ] 2.3 Gradient row buffer
 - [ ] 2.4 Vector rasterization without `HashMap`
 - [ ] 2.5 Outline-based text rendering
