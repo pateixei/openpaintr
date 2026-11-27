@@ -179,6 +179,18 @@ Switching to Adobe, creating a custom profile, and restoring its binding after a
   - Shape previews grow during the drag, so their maximum is well above the median.
   - `VmHWM` includes document setup. Undo bytes are the history's own estimate (plan item 3.2).
 
+  **Zero-copy pixels (plan item 2.1, November 27, 2026).** Same environment and method, comparing commit `07e58e2` with `53c5107`; compare these columns only with each other. Large document unless noted, median milliseconds; output is byte-identical.
+
+  | Measurement | Before | After |
+  | --- | ---: | ---: |
+  | Open to editable canvas | `125.69` | `111.37` |
+  | PNG export | `56.95` | `49.44` |
+  | Layer opacity drag frame | `43.90` | `36.69` |
+  | Thumbnail refresh after a stroke | `41.21` | `34.02` |
+  | Peak `VmHWM`, open case | `249,888 kB` | `250,312 kB` |
+  | Importing and exporting an `8000 × 8000` RGBA PNG (CLI) | `870.4` | `578.9` |
+  | Peak resident memory of that conversion | `755,232 kB` | `505,616 kB` |
+
 **Acceptance criteria** — Publish the format and metadata support matrix, test file and clipboard integration on Wayland and X11, and record reproducible interactive benchmarks.
 
 ### Formats shown in the Paint.NET 5.2 Open dialog
