@@ -479,10 +479,10 @@ This maps to the roadmap's phase 4 **Performance** item ("portable GPU backend")
 
 ## Checklist
 
-- [ ] 0.1 Continuous integration
+- [x] 0.1 Continuous integration
 - [x] 0.2 Translation catalog check
-- [ ] 0.3 Per-tool performance baseline
-- [ ] 0.4 `unsafe` lint for the whole binary
+- [x] 0.3 Per-tool performance baseline
+- [x] 0.4 `unsafe` lint for the whole binary
 - [ ] 1.1 Decode and allocation limits
 - [ ] 1.2 Translation loading
 - [ ] 1.3 Bounded reads
