@@ -119,6 +119,7 @@
   "eraser": "Borracha",
   "error.animated-png": "PNG animado ainda não é suportado",
   "error.empty-canvas": "tela vazia",
+  "error.image-too-large": "A imagem excede o limite de tamanho.",
   "error.incompatible-layer-data": "dados de camada incompatíveis",
   "error.invalid-blend-mode": "modo de mesclagem inválido",
   "error.invalid-composite-region": "região de composição inválida",

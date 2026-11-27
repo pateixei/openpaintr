@@ -28,6 +28,7 @@ pub(crate) mod msg {
     messages! {
         ANIMATED_PNG = "error.animated-png" => "Animated PNG is not supported yet.";
         EMPTY_CANVAS = "error.empty-canvas" => "The canvas is empty.";
+        IMAGE_TOO_LARGE = "error.image-too-large" => "The image exceeds the size limit.";
         INCOMPATIBLE_LAYER_DATA = "error.incompatible-layer-data" => "Incompatible layer data.";
         INVALID_BLEND_MODE = "error.invalid-blend-mode" => "Invalid blend mode.";
         INVALID_COMPOSITE_REGION = "error.invalid-composite-region" => "Invalid compositing region.";

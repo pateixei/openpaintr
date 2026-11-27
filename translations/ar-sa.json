@@ -119,6 +119,7 @@
   "eraser": "ممحاة",
   "error.animated-png": "لا يتم دعم PNG المتحركة بعد.",
   "error.empty-canvas": "اللوحة فارغة.",
+  "error.image-too-large": "تتجاوز الصورة الحد المسموح به للحجم.",
   "error.incompatible-layer-data": "بيانات طبقة غير متوافقة.",
   "error.invalid-blend-mode": "وضع الخليط غير صالح.",
   "error.invalid-composite-region": "منطقة التركيب غير صالحة.",

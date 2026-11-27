@@ -119,6 +119,7 @@
   "eraser": "Radierer",
   "error.animated-png": "Animierte PNG-Dateien werden noch nicht unterstützt.",
   "error.empty-canvas": "Die Leinwand ist leer.",
+  "error.image-too-large": "Das Bild überschreitet die Größenbeschränkung.",
   "error.incompatible-layer-data": "Inkompatible Ebenendaten.",
   "error.invalid-blend-mode": "Ungültiger Mischmodus.",
   "error.invalid-composite-region": "Ungültiger Bereich für die Komposition.",

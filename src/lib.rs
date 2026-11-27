@@ -5,11 +5,14 @@ use std::io::{self, Write};
 use gfx::blendmode::{BM_NORMAL, BM_OPAC_SHIFT, bm_row_inplace};
 
 mod diagnostic;
+mod limits;
 mod pdn_io;
 mod png_io;
 
 pub use diagnostic::Diagnostic;
 use diagnostic::{Message, msg};
+pub(crate) use limits::check_layer_pixel_limit;
+pub use limits::{MAX_IMAGE_SIDE, MAX_PIXELS, check_image_dimensions, image_too_large};
 pub use png_io::{DecodedPng, PngCompression, PngDepth, decode_png_rgba};
 
 pub const BLEND_MODES: [&str; 14] = [
@@ -70,21 +73,6 @@ pub fn try_vec_filled<T: Clone>(len: usize, value: T) -> io::Result<Vec<T>> {
 
 fn invalid_input(message: Message) -> io::Error {
     Diagnostic::io(io::ErrorKind::InvalidInput, message)
-}
-
-pub(crate) fn check_layer_pixel_limit(
-    width: u32,
-    height: u32,
-    layers: usize,
-    kind: io::ErrorKind,
-    message: Message,
-) -> io::Result<u64> {
-    let pixel_count = u64::from(width) * u64::from(height);
-    let divisor = (layers as u64).max(1);
-    if pixel_count > pdn_io::MAX_PIXELS / divisor {
-        return Err(Diagnostic::io(kind, message));
-    }
-    Ok(pixel_count)
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -233,9 +221,7 @@ pub struct Document {
 
 impl Document {
     pub fn new(width: u32, height: u32) -> io::Result<Self> {
-        if width == 0 || height == 0 {
-            return Err(invalid_input(msg::EMPTY_CANVAS));
-        }
+        check_image_dimensions(width, height, 1)?;
         let mut document = Self {
             width,
             height,
@@ -301,16 +287,7 @@ impl Document {
         height: u32,
         mut sample: impl FnMut(&[Pixel], u32, u32) -> Pixel,
     ) -> io::Result<Self> {
-        if width == 0 || height == 0 {
-            return Err(invalid_input(msg::EMPTY_CANVAS));
-        }
-        check_layer_pixel_limit(
-            width,
-            height,
-            self.layers.len(),
-            io::ErrorKind::InvalidInput,
-            msg::TOTAL_LAYER_LIMIT,
-        )?;
+        check_image_dimensions(width, height, self.layers.len())?;
         let mut mapped = Self {
             width,
             height,
@@ -713,6 +690,31 @@ fn sample_thumbnail(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn documents_cannot_exceed_the_size_limits() -> io::Result<()> {
+        for (width, height) in [(MAX_IMAGE_SIDE + 1, 1), (1, 65535), (16384, 4097)] {
+            let error = Document::new(width, height).err().expect("accepted");
+            assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+            let document = Document::new(1, 1)?;
+            assert!(
+                document
+                    .remap(width, height, |_, _, _| Pixel::default())
+                    .is_err()
+            );
+        }
+        let mut document = Document::new(4096, 4096)?;
+        for _ in 0..3 {
+            document.add_layer("Layer")?;
+        }
+        assert!(document.add_layer("One too many").is_err());
+        assert!(
+            document
+                .remap(4097, 4096, |_, _, _| Pixel::default())
+                .is_err()
+        );
+        Ok(())
+    }
 
     #[test]
     fn composites_layers_in_order_and_honors_visibility() -> io::Result<()> {

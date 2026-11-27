@@ -1,10 +1,14 @@
 use std::io::{self, BufRead, Seek, Write};
 
-use png::{BitDepth, ColorType, Compression, Decoder, Encoder, Transformations, Unit};
+use png::{BitDepth, ColorType, Compression, Decoder, Encoder, Limits, Transformations, Unit};
 
 use crate::{
-    Document, Pixel, diagnostic::msg, pdn_io::PdnMetadata, try_vec_filled, try_vec_with_capacity,
+    Document, Pixel, check_image_dimensions, diagnostic::msg, pdn_io::PdnMetadata, try_vec_filled,
+    try_vec_with_capacity,
 };
+
+/// Memory the decoder may use for its own buffers and ancillary chunks.
+const DECODER_BYTES: usize = 64 * 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum PngDepth {
@@ -80,9 +84,16 @@ pub struct DecodedPng {
 }
 
 pub fn decode_png_rgba(input: impl BufRead + Seek) -> io::Result<DecodedPng> {
-    let mut decoder = Decoder::new(input);
+    let mut decoder = Decoder::new_with_limits(
+        input,
+        Limits {
+            bytes: DECODER_BYTES,
+        },
+    );
     decoder.set_transformations(Transformations::normalize_to_color8());
     let mut reader = decoder.read_info()?;
+    // The header alone decides how much is allocated below.
+    check_image_dimensions(reader.info().width, reader.info().height, 1)?;
     if reader.info().animation_control.is_some() {
         return Err(crate::Diagnostic::io(
             io::ErrorKind::Unsupported,
@@ -99,12 +110,6 @@ pub fn decode_png_rgba(input: impl BufRead + Seek) -> io::Result<DecodedPng> {
 
     let pixel_count = usize::try_from(u64::from(frame.width) * u64::from(frame.height))
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
-    if frame.width == 0 || frame.height == 0 {
-        return Err(crate::Diagnostic::io(
-            io::ErrorKind::InvalidData,
-            msg::INVALID_PNG_SIZE,
-        ));
-    }
     let mut pixels = try_vec_with_capacity(pixel_count)?;
     let channels = frame.color_type.samples();
     for sample in bytes[..frame.buffer_size()].chunks_exact(channels) {

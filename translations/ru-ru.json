@@ -119,6 +119,7 @@
   "eraser": "Ластик",
   "error.animated-png": "Анимационная PNG пока не поддерживается.",
   "error.empty-canvas": "Холст пуст.",
+  "error.image-too-large": "Изображение превышает ограничение размера.",
   "error.incompatible-layer-data": "Несовместимые данные слоев.",
   "error.invalid-blend-mode": "Недействительный режим смеси.",
   "error.invalid-composite-region": "Недействительная область композиции.",

@@ -119,6 +119,7 @@
   "eraser": "消しゴム",
   "error.animated-png": "アニメーション PNG はまだサポートされていません.",
   "error.empty-canvas": "キャンバスが空です。",
+  "error.image-too-large": "画像がサイズの上限を超えています。",
   "error.incompatible-layer-data": "互換性のない層データ",
   "error.invalid-blend-mode": "無効な混合モード",
   "error.invalid-composite-region": "無効な構成領域",

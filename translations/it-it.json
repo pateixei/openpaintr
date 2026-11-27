@@ -119,6 +119,7 @@
   "eraser": "Gomma",
   "error.animated-png": "PNG animato non è ancora supportato.",
   "error.empty-canvas": "La tela è vuota.",
+  "error.image-too-large": "L’immagine supera il limite di dimensione.",
   "error.incompatible-layer-data": "Dati di strati incompatibili.",
   "error.invalid-blend-mode": "Modalità di miscelazione invalida.",
   "error.invalid-composite-region": "Regione di composizione invalida.",

@@ -119,6 +119,7 @@
   "eraser": "Borrador",
   "error.animated-png": "PNG animado aún no es compatible.",
   "error.empty-canvas": "El lienzo está vacío.",
+  "error.image-too-large": "La imagen supera el límite de tamaño.",
   "error.incompatible-layer-data": "Datos de capa incompatibles.",
   "error.invalid-blend-mode": "Modo de fusión no válido.",
   "error.invalid-composite-region": "Región de composición no válida.",

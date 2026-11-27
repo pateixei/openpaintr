@@ -143,6 +143,7 @@ impl Clipboard {
                     tr("clipboard-image-invalid"),
                 ));
             }
+            openpaintr::check_image_dimensions(w, h, 1)?;
             return Ok(Some(((w, h), Pixel::from_rgba_bytes(&image.bytes)?)));
         }
         Ok(None)

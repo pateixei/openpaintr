@@ -119,6 +119,7 @@
   "eraser": "Gomme",
   "error.animated-png": "Les PNG animés ne sont pas encore pris en charge.",
   "error.empty-canvas": "La zone de travail est vide.",
+  "error.image-too-large": "L’image dépasse la limite de taille.",
   "error.incompatible-layer-data": "Données de calque incompatibles.",
   "error.invalid-blend-mode": "Mode de fusion non valide.",
   "error.invalid-composite-region": "Zone de composition non valide.",

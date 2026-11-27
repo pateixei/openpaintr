@@ -119,6 +119,7 @@
   "eraser": "Eraser",
   "error.animated-png": "Animated PNG is not supported yet.",
   "error.empty-canvas": "The canvas is empty.",
+  "error.image-too-large": "The image exceeds the size limit.",
   "error.incompatible-layer-data": "Incompatible layer data.",
   "error.invalid-blend-mode": "Invalid blend mode.",
   "error.invalid-composite-region": "Invalid compositing region.",

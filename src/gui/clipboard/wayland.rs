@@ -103,7 +103,12 @@ impl Clipboard {
             let bytes = self.receive(offer, PNG, MAX_IMAGE_BYTES)?;
             if !bytes.is_empty() {
                 let decoded = decode_png_rgba(Cursor::new(&bytes)).map_err(|error| {
-                    if error.kind() == io::ErrorKind::OutOfMemory {
+                    // Core errors, such as the size limit, already have a translation.
+                    if error.kind() == io::ErrorKind::OutOfMemory
+                        || error
+                            .get_ref()
+                            .is_some_and(|source| source.is::<openpaintr::Diagnostic>())
+                    {
                         error
                     } else {
                         io::Error::new(io::ErrorKind::InvalidData, tr("clipboard-image-invalid"))

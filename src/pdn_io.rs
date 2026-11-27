@@ -5,7 +5,7 @@ use img_core::{ERR_LIMIT, ERR_NOMEM, ERR_UNSUPPORTED, ImgDec, Surface};
 use img_pdn::{DocRef, LayerRef};
 
 use crate::{
-    Document, Layer, LayerData, Pixel, check_layer_pixel_limit, diagnostic::msg,
+    Document, Layer, LayerData, MAX_PIXELS, Pixel, check_layer_pixel_limit, diagnostic::msg,
     try_vec_with_capacity,
 };
 
@@ -13,7 +13,6 @@ use crate::{
 rt::test_main!();
 
 const MAX_FILE_BYTES: u64 = 256 * 1024 * 1024;
-pub(super) const MAX_PIXELS: u64 = 64 * 1024 * 1024;
 
 #[derive(Clone)]
 pub(super) struct PdnMetadata {
