@@ -2,7 +2,7 @@
 
 **Status** — Approved on November 25, 2026. Last updated on November 26, 2026.
 
-The first GitHub publication uses **OpenPaintR** as the project name and `openpaintr` as the executable. Phase 1 is complete, including layered editing, Paint.NET 5.2 compatibility validation, and the borderless window. Phase 2 selection and geometry and phase 3 tools are implemented. Color profiles, broader format support, desktop integration, and performance are next in phase 4, followed by the plugin infrastructure, adjustments, and effects in phase 5. [GitHub repository](https://github.com/pateixei/openpaintr)
+The first GitHub publication uses **OpenPaintR** as the project name and `openpaintr` as the executable. Phases 1 and 2 are complete. Phase 3 tools are implemented. Color profiles, broader format support, desktop integration, and performance are next in phase 4, followed by the plugin infrastructure, adjustments, and effects in phase 5. [GitHub repository](https://github.com/pateixei/openpaintr)
 
 The roadmap starts with a Linux baseline and a layered PDN editing and saving workflow. Human usability (SUS) and broader layout redesign decisions run after phase 5 once adjustments and `.rpdn-plugin` effects are integrated into the workspace. Later phases cover selection, tools, transforms, color profiles, broader format support, desktop integration, performance, and the 13 adjustments and 48 effects shown in Paint.NET 5.2. Milestones specify dependencies and acceptance criteria.
 
@@ -56,6 +56,8 @@ The five phase 1 workflows below, plus `Ctrl+double-click` bottom-right corner r
 - [x] **Interactive performance.** Measure typical (`800 × 600 × 4`) and large (`2560 × 1440 × 8`) projects on Linux (`target/release/openpaintr`). Record time to an editable canvas, stroke-to-display latency, zoom and scroll frame times, export duration, and peak memory (`VmHWM`). Use the baseline to set performance targets and locate bottlenecks.
 
 ## Phase 2 — Selection, clipboard, navigation, and geometry
+
+**Status** — Complete. Owner sign-off received on November 26, 2026.
 
 - [x] **Selection.** Rectangle, ellipse, lasso, and Magic Wand. Support tolerance, layer or composite sampling, contiguous and global selection, Replace, Add, Subtract, Intersect, and XOR. Move or transform the mask separately from the pixels. Move, resize, and rotate selected pixels with handles, constrain proportions, and choose a resampler, including antialiased nearest neighbor.
 - [x] **Selection feather.** Share the control across Rectangle Select, Ellipse Select, Lasso, and Magic Wand. At 0%, preserve the original SSAA selection. At 100%, fade coverage linearly to zero outside the selection over half the shorter side of its bounding box. Apply feather to each new gesture before combining it with an existing selection. Show partial coverage and preserve it when filling, erasing, copying, or moving the mask.
