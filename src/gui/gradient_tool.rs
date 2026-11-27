@@ -206,8 +206,9 @@ impl GradientSession {
         let row_bytes = w * 4 * 4;
         let mut sub_row = vec![0u8; row_bytes];
         let mut alpha_row = vec![0u8; w * 4];
+        let mut acc_rgba = vec![[0u32; 4]; w];
         for y in 0..h {
-            let mut acc_rgba = vec![[0u32; 4]; w];
+            acc_rgba.fill([0; 4]);
             for sy in 0..4 {
                 let gy = (y as i32) * 4 + sy;
                 match self.params.channel_mode {
