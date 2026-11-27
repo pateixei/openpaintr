@@ -4609,6 +4609,7 @@ mod tests {
     mod golden_resample;
     mod golden_vector;
     mod perf_baseline;
+    mod text_placement;
 
     fn fixture_path(name: &str) -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR"))
