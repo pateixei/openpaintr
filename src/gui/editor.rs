@@ -1622,6 +1622,46 @@ mod tests {
         Ok(())
     }
 
+    /// Pins the undo contents of a merge, whose blending architecture plan
+    /// item 2.1 rewrites.
+    #[test]
+    fn merge_undo_and_redo_restore_both_layers_byte_for_byte() -> io::Result<()> {
+        for (visible, opacity) in [(true, 255), (true, 101), (false, 77)] {
+            let mut editor = Editor::new(Document::new(19, 11)?);
+            editor.add_layer()?;
+            for (layer, step) in [(0, 37_u32), (1, 91)] {
+                let mut pixels: Vec<Pixel> = (0..19 * 11_u32)
+                    .map(|i| Pixel((i * step).wrapping_mul(2_654_435_761).to_le_bytes()))
+                    .collect();
+                editor.document.swap_layer_pixels(layer, &mut pixels)?;
+            }
+            editor.document.set_layer_properties(0, visible, opacity)?;
+            editor.document.set_layer_blend_mode(1, 7)?;
+            editor.document.set_layer_properties(1, true, 180)?;
+            let layers = |editor: &Editor| -> io::Result<Vec<LayerData>> {
+                (0..editor.document.layer_count())
+                    .map(|layer| editor.document.clone_layer_data(layer))
+                    .collect()
+            };
+            let before = layers(&editor)?;
+            let composite = editor.document.composite()?;
+
+            editor.merge_layer_down(1)?;
+            let merged = layers(&editor)?;
+            assert_eq!(merged.len(), 1);
+            // Two 19 x 11 layers of four bytes per pixel, plus the entry.
+            assert_eq!(editor.last_undo_entry_bytes(), Some(19 * 11 * 4 * 2 + 128));
+            for _ in 0..2 {
+                assert!(editor.undo()?);
+                assert_eq!(layers(&editor)?, before);
+                assert_eq!(editor.document.composite()?, composite);
+                assert!(editor.redo()?);
+                assert_eq!(layers(&editor)?, merged);
+            }
+        }
+        Ok(())
+    }
+
     #[test]
     fn bucket_fills_only_the_active_layer_and_preserves_selection_coverage() -> io::Result<()> {
         let red = Pixel([243, 70, 40, 255]);

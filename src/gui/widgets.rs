@@ -130,3 +130,33 @@ pub fn paint_thumbnail(
         painter.rect_stroke(rect, corner_radius, stroke, StrokeKind::Outside);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use eframe::egui::vec2;
+
+    use super::*;
+
+    /// Pins the texture conversion that architecture plan item 2.1 rewrites.
+    #[test]
+    fn color_images_are_identical_for_every_alpha() {
+        let pixels: Vec<Pixel> = (0..=u8::MAX)
+            .flat_map(|alpha| {
+                [0_u8, 1, 2, 63, 127, 128, 200, 254, 255]
+                    .map(|value| Pixel([value, 255 - value, value.wrapping_mul(7), alpha]))
+            })
+            .collect();
+        let image = pixels_to_color_image(48, 48, &pixels);
+        assert_eq!(image.size, [48, 48]);
+        assert_eq!(image.source_size, vec2(48.0, 48.0));
+        // 64-bit FNV-1a of the premultiplied RGBA bytes.
+        let hash = image
+            .pixels
+            .iter()
+            .flat_map(|color| color.to_array())
+            .fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
+                (hash ^ u64::from(byte)).wrapping_mul(0x100_0000_01b3)
+            });
+        assert_eq!(hash, 0x34ee_4493_a906_e9d5, "actual: {hash:#018x}");
+    }
+}
