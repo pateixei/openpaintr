@@ -191,6 +191,17 @@ Switching to Adobe, creating a custom profile, and restoring its binding after a
   | Importing and exporting an `8000 × 8000` RGBA PNG (CLI) | `870.4` | `578.9` |
   | Peak resident memory of that conversion | `755,232 kB` | `505,616 kB` |
 
+  **Affine resampling (plan item 2.2, November 27, 2026).** Same environment, comparing commit `cfa709b` with `35d85e7`: the middle of the median frame times from three rounds that alternated both builds, in milliseconds (typical / large). Output is byte-identical.
+
+  | Workload | Phase | Before | After |
+  | --- | --- | ---: | ---: |
+  | Move a whole layer (nearest) | preview | `8.45` / `84.94` | `5.18` / `59.39` |
+  | Move a whole layer (nearest) | commit | `9.90` / `118.95` | `6.23` / `91.02` |
+  | Move a `64 × 64` floating paste (bilinear) | preview | `14.72` / `133.02` | `2.61` / `39.37` |
+  | Move a `64 × 64` floating paste (bilinear) | commit | `16.90` / `167.69` | `5.94` / `86.30` |
+  | Rotate/Zoom a layer (nearest) | preview | `8.61` / `86.29` | `5.49` / `62.40` |
+  | Rotate/Zoom a layer (nearest) | commit | `10.22` / `123.94` | `7.04` / `100.17` |
+
 **Acceptance criteria** — Publish the format and metadata support matrix, test file and clipboard integration on Wayland and X11, and record reproducible interactive benchmarks.
 
 ### Formats shown in the Paint.NET 5.2 Open dialog
