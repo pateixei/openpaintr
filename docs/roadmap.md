@@ -241,6 +241,17 @@ Switching to Adobe, creating a custom profile, and restoring its binding after a
   | Open to editable canvas | `9.54` / `109.22` | `7.81` / `75.54` |
   | Layer opacity drag frame | `1.94` / `35.03` | `1.96` / `34.97` |
 
+  **Save size estimate off the UI thread (plan item 2.7, November 27, 2026).** Same environment, comparing commit `69aa009` with `8a880f6`, large document, five timed runs, in milliseconds. The `save_dialog` case now times opening the dialog and every frame while the estimate runs on a worker thread; before, each change of setting blocked the interface for the whole encoding.
+
+  | Format | Before: blocked per change | After: opening the dialog | After: frame (median / max) |
+  | --- | ---: | ---: | ---: |
+  | PDN, level 1 | `99.35` | `12.08` | `0.24` / `0.48` |
+  | PDN, level 9 | `116.56` | `12.07` | `0.24` / `0.47` |
+  | PNG, no compression | `101.09` | `12.02` | `0.21` / `0.38` |
+  | PNG, high compression | `83.15` | `11.81` | `0.25` / `0.78` |
+
+  Opening the dialog copies the document, so its peak `VmHWM` on the PDN case rose from `270,304 kB` to `394,460 kB`.
+
 **Acceptance criteria** — Publish the format and metadata support matrix, test file and clipboard integration on Wayland and X11, and record reproducible interactive benchmarks.
 
 ### Formats shown in the Paint.NET 5.2 Open dialog
