@@ -48,7 +48,13 @@ Open **Configurações → Atalhos de teclado e mouse** (Settings → Keyboard a
 
 Choose a language under **Settings → Language**. The change takes effect immediately and is saved in `$XDG_CONFIG_HOME/openpaintr/language.json` (defaults to `~/.config/openpaintr/language.json`). The first launch uses a supported system language or falls back to English. The bundled catalogs cover English, French, Spanish, German, Brazilian Portuguese, Italian, Russian, Arabic, Simplified Chinese, and Japanese. Arabic labels read right to left within the existing editor layout. System file-picker controls use the desktop's language.
 
-At startup, OpenPaintR scans `translations/` in the working directory and beside the executable. Catalogs beside the executable take precedence. To add a language, save a flat JSON object under a lowercase locale filename such as `nl-nl.json` and restart. Use `language-name` to set its name in the language menu. Use [`en-us.json`](translations/en-us.json) as the key reference and keep numbered placeholders such as `{0}` intact. Missing messages in an additional language fall back to English.
+At startup, OpenPaintR adds to or overrides its bundled catalogs from these locations, each one taking precedence over the previous ones:
+
+1. `openpaintr/translations/` in each directory of `$XDG_DATA_DIRS` (defaults to `/usr/local/share` and `/usr/share`; the first listed directory wins);
+2. `translations/` beside the executable;
+3. `$XDG_DATA_HOME/openpaintr/translations/` (defaults to `~/.local/share/openpaintr/translations/`).
+
+The working directory is not searched. Only regular files of up to 1 MiB are loaded. To add a language, save a flat JSON object under a lowercase locale filename such as `nl-nl.json` and restart. Use `language-name` to set its name in the language menu. Use [`en-us.json`](translations/en-us.json) as the key reference and keep numbered placeholders such as `{0}` intact. Missing messages in an additional language fall back to English.
 
 ### Window controls
 

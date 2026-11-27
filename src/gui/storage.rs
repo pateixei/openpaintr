@@ -1,6 +1,6 @@
 use std::{
     fs,
-    io::{self, BufWriter, Write},
+    io::{self, BufWriter, Read, Write},
     path::{Path, PathBuf},
 };
 
@@ -41,6 +41,35 @@ pub fn exe_adjacent(name: &str) -> io::Result<PathBuf> {
         .ok()
         .and_then(|exe| exe.parent().map(|dir| dir.join(name)))
         .ok_or_else(|| io::ErrorKind::NotFound.into())
+}
+
+/// Opens a file for reading without blocking, even when the path is a FIFO.
+/// Callers check the open file's type before reading it.
+pub fn open_nonblocking(path: &Path) -> io::Result<fs::File> {
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        // `O_NONBLOCK` on x86-64 and AArch64.
+        options.custom_flags(0o4000);
+    }
+    options.open(path)
+}
+
+/// Reads a regular file of at most `max` bytes.
+pub fn read_capped(path: &Path, max: u64) -> io::Result<Vec<u8>> {
+    let file = open_nonblocking(path)?;
+    if !file.metadata()?.is_file() {
+        return Err(io::ErrorKind::InvalidInput.into());
+    }
+    let mut bytes = Vec::new();
+    // Read one byte past the cap: the file can grow after it is opened.
+    file.take(max.saturating_add(1)).read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > max {
+        return Err(io::ErrorKind::FileTooLarge.into());
+    }
+    Ok(bytes)
 }
 
 pub fn ensure_parent_dir(path: &Path) -> io::Result<()> {

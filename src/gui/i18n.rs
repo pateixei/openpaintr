@@ -2,6 +2,7 @@ use std::{
     borrow::Cow,
     cell::Cell,
     collections::BTreeMap,
+    ffi::OsString,
     io,
     path::{Path, PathBuf},
     sync::LazyLock,
@@ -33,14 +34,50 @@ struct Catalogs(BTreeMap<String, Catalog>);
 
 static CATALOGS: LazyLock<Catalogs> = LazyLock::new(|| {
     let mut catalogs = Catalogs::bundled();
-    if let Ok(cwd) = std::env::current_dir() {
-        catalogs.scan(&cwd.join("translations"));
-    }
-    if let Ok(path) = super::storage::exe_adjacent("translations") {
-        catalogs.scan(&path);
+    let beside_executable = super::storage::exe_adjacent("translations").ok();
+    for directory in search_directories(|name| std::env::var_os(name), beside_executable) {
+        catalogs.scan(&directory);
     }
     catalogs
 });
+
+/// Largest translation file that is loaded.
+const CATALOG_LIMIT: u64 = 1024 * 1024;
+
+/// Directories that may override or add catalogs, later ones winning: system
+/// data directories, `translations/` beside the executable, then the user's
+/// data directory. The working directory is never searched, so relative paths
+/// in the environment are ignored.
+fn search_directories(
+    env: impl Fn(&str) -> Option<OsString>,
+    beside_executable: Option<PathBuf>,
+) -> Vec<PathBuf> {
+    let absolute = |path: PathBuf| path.is_absolute().then_some(path);
+    let translations = |base: PathBuf| base.join("openpaintr").join("translations");
+
+    let mut system: Vec<PathBuf> = env("XDG_DATA_DIRS").map_or_else(Vec::new, |list| {
+        std::env::split_paths(&list).filter_map(absolute).collect()
+    });
+    if system.is_empty() {
+        system = ["/usr/local/share", "/usr/share"].map(PathBuf::from).into();
+    }
+    // XDG lists the most important directory first.
+    let mut directories: Vec<_> = system.into_iter().rev().map(translations).collect();
+
+    directories.extend(beside_executable);
+
+    let user = env("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .and_then(absolute)
+        .or_else(|| {
+            env("HOME")
+                .map(PathBuf::from)
+                .and_then(absolute)
+                .map(|home| home.join(".local").join("share"))
+        });
+    directories.extend(user.map(translations));
+    directories
+}
 
 static VISUAL_LABELS: LazyLock<BTreeMap<&'static str, String>> = LazyLock::new(|| {
     CATALOGS
@@ -89,7 +126,7 @@ impl Catalogs {
             else {
                 continue;
             };
-            let Ok(data) = std::fs::read(&path) else {
+            let Ok(data) = super::storage::read_capped(&path, CATALOG_LIMIT) else {
                 continue;
             };
             let Ok(mut catalog) = serde_json::from_slice::<Catalog>(&data) else {
@@ -517,6 +554,121 @@ mod tests {
         assert_eq!(catalogs.lookup("fr-fr", "new"), "Nouveau");
         assert!(catalogs.code("tr-tr").is_none());
         assert!(catalogs.code("invalid_name").is_none());
+        Ok(())
+    }
+
+    fn environment<'a>(
+        variables: &'a [(&'a str, &'a str)],
+    ) -> impl Fn(&str) -> Option<OsString> + 'a {
+        |name| {
+            variables
+                .iter()
+                .find(|(key, _)| *key == name)
+                .map(|(_, value)| value.into())
+        }
+    }
+
+    #[test]
+    fn searches_only_data_directories_and_the_executable_directory() {
+        let paths = |list: &[&str]| list.iter().map(PathBuf::from).collect::<Vec<_>>();
+        assert_eq!(
+            search_directories(
+                environment(&[("HOME", "/home/user")]),
+                Some("/opt/app/translations".into()),
+            ),
+            paths(&[
+                "/usr/share/openpaintr/translations",
+                "/usr/local/share/openpaintr/translations",
+                "/opt/app/translations",
+                "/home/user/.local/share/openpaintr/translations",
+            ]),
+        );
+        assert_eq!(
+            search_directories(
+                environment(&[
+                    ("XDG_DATA_DIRS", "/first:relative::/second"),
+                    ("XDG_DATA_HOME", "/data"),
+                    ("HOME", "/home/user"),
+                ]),
+                None,
+            ),
+            paths(&[
+                "/second/openpaintr/translations",
+                "/first/openpaintr/translations",
+                "/data/openpaintr/translations",
+            ]),
+        );
+        // Relative values would reach into the working directory.
+        let relative = search_directories(
+            environment(&[
+                ("XDG_DATA_DIRS", ".:here"),
+                ("XDG_DATA_HOME", "."),
+                ("HOME", "."),
+            ]),
+            None,
+        );
+        assert!(relative.iter().all(|path| path.starts_with("/usr")));
+    }
+
+    #[test]
+    fn later_search_directories_override_earlier_ones() -> io::Result<()> {
+        let temp = tempfile::tempdir()?;
+        let root = temp.path().to_str().expect("UTF-8 temporary path");
+        let system = format!("{root}/high:{root}/low");
+        let user = format!("{root}/user");
+        let beside = temp.path().join("beside");
+        let directories = search_directories(
+            environment(&[("XDG_DATA_DIRS", &system), ("XDG_DATA_HOME", &user)]),
+            Some(beside),
+        );
+        // Each directory defines its own key and every key of the ones before it.
+        let keys = ["file", "new", "open", "save"];
+        for (rank, directory) in directories.iter().enumerate() {
+            std::fs::create_dir_all(directory)?;
+            let entries: Vec<_> = keys[rank..]
+                .iter()
+                .map(|key| format!(r#""{key}":"rank {rank}""#))
+                .collect();
+            std::fs::write(
+                directory.join("pt-br.json"),
+                format!("{{{}}}", entries.join(",")),
+            )?;
+        }
+        let mut catalogs = Catalogs::bundled();
+        for directory in &directories {
+            catalogs.scan(directory);
+        }
+        // low < high < beside the executable < user.
+        assert!(directories[0].starts_with(temp.path().join("low")));
+        assert!(directories[3].starts_with(&user));
+        for (rank, key) in keys.iter().enumerate() {
+            assert_eq!(catalogs.lookup("pt-br", key), format!("rank {rank}"));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn skips_oversized_and_non_regular_catalogs_without_blocking() -> io::Result<()> {
+        let temp = tempfile::tempdir()?;
+        let catalog = r#"{"file":"Loaded"}"#;
+        let padded = |size: u64| {
+            let padding = " ".repeat(size as usize - catalog.len());
+            format!("{catalog}{padding}")
+        };
+        std::fs::write(temp.path().join("aa-aa.json"), padded(CATALOG_LIMIT))?;
+        std::fs::write(temp.path().join("bb-bb.json"), padded(CATALOG_LIMIT + 1))?;
+        std::fs::create_dir(temp.path().join("cc-cc.json"))?;
+        let status = std::process::Command::new("mkfifo")
+            .arg(temp.path().join("xx-xx.json"))
+            .status()?;
+        assert!(status.success());
+
+        let mut catalogs = Catalogs::bundled();
+        catalogs.scan(temp.path());
+        assert_eq!(catalogs.lookup("aa-aa", "file"), "Loaded");
+        for code in ["bb-bb", "cc-cc", "xx-xx"] {
+            assert!(catalogs.code(code).is_none(), "{code}");
+        }
         Ok(())
     }
 

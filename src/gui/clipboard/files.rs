@@ -1,7 +1,5 @@
 use std::{
-    fs::OpenOptions,
     io::{self, BufReader},
-    os::unix::fs::OpenOptionsExt as _,
     path::Path,
 };
 
@@ -9,10 +7,10 @@ use image::{DynamicImage, ImageDecoder as _, ImageError, ImageFormat, ImageReade
 use openpaintr::{MAX_IMAGE_SIDE, MAX_PIXELS, Pixel, check_image_dimensions, image_too_large};
 use url::Url;
 
-use super::{super::selection::Point, MAX_IMAGE_BYTES, tr};
-
-/// `O_NONBLOCK` on Linux (x86-64 and AArch64): opening a FIFO returns at once.
-const O_NONBLOCK: i32 = 0o4000;
+use super::{
+    super::{selection::Point, storage::open_nonblocking},
+    MAX_IMAGE_BYTES, tr,
+};
 
 pub(super) fn read_uri_list(bytes: &[u8]) -> io::Result<Option<(Point, Vec<Pixel>)>> {
     let Ok(list) = str::from_utf8(bytes) else {
@@ -38,11 +36,7 @@ pub(super) fn read_image(path: &Path) -> io::Result<Option<(Point, Vec<Pixel>)>>
         return Ok(None);
     }
     // Open once, then inspect the open file, so it can't be swapped in between.
-    let Ok(file) = OpenOptions::new()
-        .read(true)
-        .custom_flags(O_NONBLOCK)
-        .open(path)
-    else {
+    let Ok(file) = open_nonblocking(path) else {
         return Ok(None);
     };
     let metadata = file.metadata()?;
