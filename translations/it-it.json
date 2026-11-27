@@ -148,6 +148,7 @@
   "error.region-too-large": "La regione è troppo grande.",
   "error.total-layer-limit": "Gli strati superano il limite totale dei pixel.",
   "estimated-size": "Dimensione stimata: {0}",
+  "estimating-size": "Stima delle dimensioni…",
   "exit": "Esci",
   "expand-history": "Espandi cronologia",
   "export-options": "Esportare PNG con opzioni",

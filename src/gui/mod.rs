@@ -3780,7 +3780,7 @@ impl App {
         }
 
         if let Some(mut dialog) = self.save_dialog.take() {
-            let action = dialog.show(ctx, &self.tab().editor.document, &self.checker);
+            let action = dialog.show(ctx, &self.checker);
             match action {
                 SaveDialogAction::Open => {
                     self.save_dialog = Some(dialog);
@@ -4951,6 +4951,93 @@ mod tests {
         Ok(())
     }
 
+    /// Runs frames until the dialog has an estimate.
+    fn wait_for_estimate(driver: &TestDriver, dialog: &mut SaveOptionsDialog) -> Option<usize> {
+        for _ in 0..2000 {
+            dialog.poll(&driver.ctx);
+            if let Some(size) = dialog.encoded_len() {
+                return Some(size);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        None
+    }
+
+    #[test]
+    fn save_size_is_estimated_after_a_pause_and_off_the_ui_thread() -> io::Result<()> {
+        let mut driver = TestDriver::new(Document::new(320, 200)?);
+        driver.step();
+        let document = driver.app.tab().editor.document.snapshot()?;
+        let size = |compression| -> io::Result<usize> {
+            let mut bytes = Vec::new();
+            document.write_png_with_options(
+                &mut bytes,
+                openpaintr::PngDepth::Rgba32,
+                compression,
+            )?;
+            Ok(bytes.len())
+        };
+        let balanced = size(openpaintr::PngCompression::Balanced)?;
+        let stored = size(openpaintr::PngCompression::None)?;
+        assert_ne!(balanced, stored);
+
+        let mut dialog = SaveOptionsDialog::new(
+            "unused.png".into(),
+            SaveFormat::png(),
+            false,
+            &document,
+            &driver.ctx,
+        );
+        assert_eq!(dialog.encoded_len(), None, "estimated on the UI thread");
+        assert_eq!(wait_for_estimate(&driver, &mut dialog), Some(balanced));
+
+        let now = driver.ctx.input(|input| input.time);
+        dialog.format = SaveFormat::Png {
+            depth: openpaintr::PngDepth::Rgba32,
+            compression: openpaintr::PngCompression::None,
+        };
+        dialog.format_changed(now);
+        assert_eq!(dialog.encoded_len(), None, "outdated estimate kept");
+        // Nothing starts while the changes keep coming.
+        for _ in 0..50 {
+            dialog.poll(&driver.ctx);
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        assert_eq!(dialog.encoded_len(), None, "started without a pause");
+        driver.time = now + 0.25;
+        driver.step();
+        assert_eq!(wait_for_estimate(&driver, &mut dialog), Some(stored));
+        Ok(())
+    }
+
+    #[test]
+    fn an_outdated_save_estimate_is_discarded() -> io::Result<()> {
+        let mut driver = TestDriver::new(Document::new(320, 200)?);
+        driver.step();
+        let document = driver.app.tab().editor.document.snapshot()?;
+        let mut dialog = SaveOptionsDialog::new(
+            "unused.png".into(),
+            SaveFormat::png(),
+            false,
+            &document,
+            &driver.ctx,
+        );
+        // The format changes while the first estimate runs.
+        dialog.format = SaveFormat::pdn();
+        dialog.format_changed(driver.ctx.input(|input| input.time));
+        for _ in 0..300 {
+            dialog.poll(&driver.ctx);
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        assert_eq!(dialog.encoded_len(), None);
+        driver.time += 1.0;
+        driver.step();
+        let mut pdn = Vec::new();
+        document.write_pdn_with_effort(&mut pdn, 1)?;
+        assert_eq!(wait_for_estimate(&driver, &mut dialog), Some(pdn.len()));
+        Ok(())
+    }
+
     #[test]
     fn new_document_has_one_opaque_white_background_layer() -> io::Result<()> {
         let document = new_document(32, 24)?;
@@ -5383,8 +5470,10 @@ mod tests {
             openpaintr::PngCompression::High,
         )?;
         assert!(!bytes.is_empty());
+        // Saved before the new format's estimate finished.
+        dialog.format_changed(0.0);
         dialog.write_to_disk()?;
-        assert!(std::fs::read(&path)?.starts_with(b"\x89PNG"));
+        assert_eq!(std::fs::read(&path)?, bytes);
         Ok(())
     }
 

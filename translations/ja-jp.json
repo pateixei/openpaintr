@@ -148,6 +148,7 @@
   "error.region-too-large": "範囲が大きすぎます。",
   "error.total-layer-limit": "層は総ピクセル制限を超えている.",
   "estimated-size": "推定サイズ: {0}",
+  "estimating-size": "サイズを見積もっています…",
   "exit": "終了",
   "expand-history": "履歴を展開",
   "export-options": "オプションで PNG を輸出する",

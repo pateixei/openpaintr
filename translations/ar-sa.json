@@ -148,6 +148,7 @@
   "error.region-too-large": "المنطقة كبيرة جدًا.",
   "error.total-layer-limit": "تتجاوز الطبقات الحد الإجمالي للبيكسلات.",
   "estimated-size": "الحجم المقدّر: {0}",
+  "estimating-size": "جارٍ تقدير الحجم…",
   "exit": "خروج",
   "expand-history": "توسيع السجل",
   "export-options": "تصدير PNG مع خيارات",

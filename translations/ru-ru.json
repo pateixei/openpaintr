@@ -148,6 +148,7 @@
   "error.region-too-large": "Область слишком велика.",
   "error.total-layer-limit": "Слои превышают общий предел пикселей.",
   "estimated-size": "Примерный размер: {0}",
+  "estimating-size": "Оценка размера…",
   "exit": "Выход",
   "expand-history": "Развернуть историю",
   "export-options": "Экспорт PNG с вариантами",

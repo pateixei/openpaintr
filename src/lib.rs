@@ -270,6 +270,21 @@ impl Document {
         })
     }
 
+    /// A copy of the whole document, for work on another thread.
+    pub fn snapshot(&self) -> io::Result<Self> {
+        let layers = self
+            .layers
+            .iter()
+            .map(|layer| layer.to_data().map(Layer))
+            .collect::<io::Result<_>>()?;
+        Ok(Self {
+            width: self.width,
+            height: self.height,
+            layers,
+            pdn_metadata: self.pdn_metadata.clone(),
+        })
+    }
+
     pub fn add_layer(&mut self, name: impl Into<String>) -> io::Result<usize> {
         let index = self.layers.len();
         self.insert_blank_layer(index, name)?;

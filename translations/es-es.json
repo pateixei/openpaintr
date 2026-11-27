@@ -148,6 +148,7 @@
   "error.region-too-large": "La región es demasiado grande.",
   "error.total-layer-limit": "Las capas superan el límite total de píxeles.",
   "estimated-size": "Tamaño estimado: {0}",
+  "estimating-size": "Estimando el tamaño…",
   "exit": "Salir",
   "expand-history": "Expandir historial",
   "export-options": "Exportar PNG con opciones",

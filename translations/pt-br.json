@@ -148,6 +148,7 @@
   "error.region-too-large": "região muito grande",
   "error.total-layer-limit": "limite total de pixels das camadas excedido",
   "estimated-size": "Tamanho estimado: {0}",
+  "estimating-size": "Estimando o tamanho…",
   "exit": "Sair",
   "expand-history": "Expandir histórico",
   "export-options": "Exportar PNG com opções",

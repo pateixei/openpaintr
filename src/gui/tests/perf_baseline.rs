@@ -441,13 +441,37 @@ fn run_once(
             }
         }
         "save_dialog" => {
-            let document = Document::read_pdn(bytes)?;
-            let ctx = egui::Context::default();
+            let mut driver = open(bytes, recorder)?;
             let format = save_format(variant);
-            let dialog = recorder.time("encode", || {
-                SaveOptionsDialog::new("perf".into(), format, false, &document, &ctx)
+            let dialog = recorder.time("open", || {
+                SaveOptionsDialog::new(
+                    "perf".into(),
+                    format,
+                    false,
+                    &driver.app.tab().editor.document,
+                    &driver.ctx,
+                )
             });
-            assert!(dialog.encoded_len().is_some_and(|len| len > 0));
+            driver.app.save_dialog = Some(dialog);
+            // Frames while the first estimate runs, then through a change of
+            // setting and its estimate.
+            for change in [false, true] {
+                if change {
+                    let now = driver.ctx.input(|input| input.time);
+                    let dialog = driver.app.save_dialog.as_mut().expect("dialog");
+                    dialog.format_changed(now);
+                }
+                let deadline = Instant::now() + std::time::Duration::from_secs(20);
+                loop {
+                    recorder.time("frame", || driver.step());
+                    let dialog = driver.app.save_dialog.as_ref().expect("dialog");
+                    if dialog.encoded_len().is_some() {
+                        break;
+                    }
+                    assert!(Instant::now() < deadline, "no estimate");
+                    std::thread::sleep(std::time::Duration::from_millis(8));
+                }
+            }
         }
         "pdn_open" => {
             let ctx = egui::Context::default();

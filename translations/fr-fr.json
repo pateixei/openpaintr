@@ -148,6 +148,7 @@
   "error.region-too-large": "La zone est trop grande.",
   "error.total-layer-limit": "Les calques dépassent la limite totale de pixels.",
   "estimated-size": "Taille estimée : {0}",
+  "estimating-size": "Estimation de la taille…",
   "exit": "Quitter",
   "expand-history": "Développer l’historique",
   "export-options": "Exporter en PNG avec options",

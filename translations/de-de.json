@@ -148,6 +148,7 @@
   "error.region-too-large": "Der Bereich ist zu groß.",
   "error.total-layer-limit": "Die Ebenen überschreiten das Gesamtpixellimit.",
   "estimated-size": "Geschätzte Größe: {0}",
+  "estimating-size": "Größe wird geschätzt…",
   "exit": "Beenden",
   "expand-history": "Verlauf ausklappen",
   "export-options": "PNG mit Optionen exportieren",

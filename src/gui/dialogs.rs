@@ -1,8 +1,17 @@
 use super::i18n::text as tr;
-use std::{io, path::PathBuf};
+use std::{
+    io,
+    path::PathBuf,
+    sync::{
+        Arc,
+        mpsc::{self, Receiver, TryRecvError},
+    },
+    thread,
+    time::Duration,
+};
 
 use eframe::egui::{self, Color32, TextureHandle, TextureOptions};
-use openpaintr::{Document, PngCompression, PngDepth, is_valid_layer_name};
+use openpaintr::{Document, Pixel, PngCompression, PngDepth, ThumbnailGrid, is_valid_layer_name};
 
 use super::{
     editor::LayerMeta,
@@ -110,12 +119,64 @@ impl SaveFormat {
     }
 }
 
+/// Quiet time after the last change before the size is estimated again.
+const ESTIMATE_DELAY: f64 = 0.2;
+const PREVIEW_SIDE: u32 = 160;
+
+/// A document encoded in one format, and the preview of that encoding.
+struct Estimate {
+    bytes: io::Result<Vec<u8>>,
+    preview: Option<(u32, u32, Vec<Pixel>)>,
+}
+
+impl SaveFormat {
+    fn encode(self, document: &Document) -> io::Result<Vec<u8>> {
+        let mut bytes = Vec::new();
+        match self {
+            Self::Pdn { effort } => document.write_pdn_with_effort(&mut bytes, effort)?,
+            Self::Png { depth, compression } => {
+                document.write_png_with_options(&mut bytes, depth, compression)?;
+            }
+        }
+        Ok(bytes)
+    }
+
+    fn estimate(self, document: &Document) -> Estimate {
+        let preview =
+            document
+                .composite_thumbnail(PREVIEW_SIDE)
+                .ok()
+                .map(|(width, height, mut pixels)| {
+                    if let Self::Png { depth, .. } = self {
+                        for pixel in &mut pixels {
+                            *pixel = depth.flatten_pixel(*pixel);
+                        }
+                    }
+                    (width, height, pixels)
+                });
+        Estimate {
+            bytes: self.encode(document),
+            preview,
+        }
+    }
+}
+
 pub struct SaveOptionsDialog {
     pub path: PathBuf,
     pub format: SaveFormat,
     pub needs_overwrite_confirm: bool,
     pub overwrite_confirmed: bool,
-    encoded: Vec<u8>,
+    /// The document as it was when the dialog opened; nothing edits it while
+    /// the dialog is up.
+    snapshot: Option<Arc<Document>>,
+    /// Counts format changes, to recognize outdated estimates.
+    generation: u64,
+    /// When the format last changed; `None` once its estimate has started.
+    changed_at: Option<f64>,
+    /// The generation being estimated on a worker thread.
+    running: Option<(u64, Receiver<Estimate>)>,
+    /// The encoding of the current format.
+    encoded: Option<Vec<u8>>,
     preview: Option<TextureHandle>,
     error: Option<String>,
 }
@@ -128,55 +189,106 @@ impl SaveOptionsDialog {
         document: &Document,
         ctx: &egui::Context,
     ) -> Self {
+        let (snapshot, error) = match document.snapshot() {
+            Ok(snapshot) => (Some(Arc::new(snapshot)), None),
+            Err(error) => (None, Some(super::i18n::error_message(&error))),
+        };
         let mut dialog = Self {
             path,
             format,
             needs_overwrite_confirm,
             overwrite_confirmed: !needs_overwrite_confirm,
-            encoded: Vec::new(),
+            snapshot,
+            generation: 0,
+            changed_at: None,
+            running: None,
+            encoded: None,
             preview: None,
-            error: None,
+            error,
         };
-        dialog.refresh(document, ctx);
+        dialog.start_estimate(ctx);
         dialog
     }
 
-    /// Size of the last successful encoding.
+    /// Size of the current format's encoding, once estimated.
     #[cfg(test)]
     pub fn encoded_len(&self) -> Option<usize> {
-        self.error.is_none().then_some(self.encoded.len())
+        self.encoded.as_ref().map(Vec::len)
     }
 
     pub fn is_project(&self) -> bool {
         matches!(self.format, SaveFormat::Pdn { .. })
     }
 
-    fn refresh(&mut self, document: &Document, ctx: &egui::Context) {
-        self.encoded.clear();
-        let res = match self.format {
-            SaveFormat::Pdn { effort } => document.write_pdn_with_effort(&mut self.encoded, effort),
-            SaveFormat::Png { depth, compression } => {
-                document.write_png_with_options(&mut self.encoded, depth, compression)
-            }
+    /// Notes a change of format at time `now`.
+    pub fn format_changed(&mut self, now: f64) {
+        self.generation += 1;
+        self.changed_at = Some(now);
+        self.encoded = None;
+        self.error = None;
+    }
+
+    fn start_estimate(&mut self, ctx: &egui::Context) {
+        let Some(document) = self.snapshot.clone() else {
+            return;
         };
-        self.error = res.err().as_ref().map(super::i18n::error_message);
-        if let Ok((w, h, mut pixels)) = document.composite_thumbnail(160) {
-            if let SaveFormat::Png { depth, .. } = self.format {
-                for px in &mut pixels {
-                    *px = depth.flatten_pixel(*px);
+        let (sender, receiver) = mpsc::channel();
+        let (format, repaint) = (self.format, ctx.clone());
+        let spawned = thread::Builder::new()
+            .name("save-estimate".into())
+            .spawn(move || {
+                // The dialog may have closed meanwhile.
+                let _ = sender.send(format.estimate(&document));
+                repaint.request_repaint();
+            });
+        match spawned {
+            Ok(_) => self.running = Some((self.generation, receiver)),
+            Err(error) => self.error = Some(super::i18n::error_message(&error)),
+        }
+        self.changed_at = None;
+    }
+
+    /// Collects a finished estimate and starts the next one when due.
+    pub fn poll(&mut self, ctx: &egui::Context) {
+        if let Some((generation, receiver)) = &self.running {
+            match receiver.try_recv() {
+                Ok(estimate) => {
+                    if *generation == self.generation {
+                        self.apply(ctx, estimate);
+                    }
+                    self.running = None;
                 }
+                Err(TryRecvError::Disconnected) => self.running = None,
+                Err(TryRecvError::Empty) => {}
             }
-            let image = pixels_to_color_image(w as usize, h as usize, &pixels);
+        }
+        // One estimate at a time, so that a long drag doesn't pile them up.
+        if self.running.is_none()
+            && let Some(changed_at) = self.changed_at
+        {
+            let wait = changed_at + ESTIMATE_DELAY - ctx.input(|input| input.time);
+            if wait <= 0.0 {
+                self.start_estimate(ctx);
+            } else {
+                ctx.request_repaint_after(Duration::from_secs_f64(wait));
+            }
+        }
+    }
+
+    fn apply(&mut self, ctx: &egui::Context, estimate: Estimate) {
+        match estimate.bytes {
+            Ok(bytes) => self.encoded = Some(bytes),
+            Err(error) => self.error = Some(super::i18n::error_message(&error)),
+        }
+        if let Some((width, height, pixels)) = estimate.preview {
+            let image = pixels_to_color_image(width as usize, height as usize, &pixels);
             self.preview = Some(ctx.load_texture("save_preview", image, TextureOptions::LINEAR));
         }
     }
 
-    pub fn show(
-        &mut self,
-        ctx: &egui::Context,
-        document: &Document,
-        checker: &TextureHandle,
-    ) -> SaveDialogAction {
+    pub fn show(&mut self, ctx: &egui::Context, checker: &TextureHandle) -> SaveDialogAction {
+        self.poll(ctx);
+        let document = self.snapshot.clone();
         let mut changed = false;
         let response = modal(ctx, "save_options").show(ctx, |ui| {
             ui.set_width((ctx.content_rect().width() - 40.0).clamp(320.0, 480.0));
@@ -189,27 +301,35 @@ impl SaveOptionsDialog {
             ui.weak(self.path.display().to_string());
             ui.separator();
 
-            let (w, h) = document.dimensions();
+            let (w, h) = document
+                .as_ref()
+                .map_or((1, 1), |document| document.dimensions());
             ui.horizontal(|ui| {
+                // Reserved while the first preview is computed, so nothing moves.
+                let grid = ThumbnailGrid::new(w, h, PREVIEW_SIDE);
+                let size = egui::vec2(grid.width as f32, grid.height as f32);
+                let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
                 if let Some(tex) = &self.preview {
-                    let size = tex.size_vec2();
-                    let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
                     let painter = ui.painter_at(rect);
                     paint_thumbnail(&painter, checker, tex.id(), rect, 0, None, 16.0);
                 }
                 ui.vertical(|ui| {
                     ui.label(super::i18n::format("dimensions", &[&w, &h]));
-                    if self.is_project() {
+                    if self.is_project()
+                        && let Some(document) = &document
+                    {
                         ui.label(super::i18n::format(
                             "layer-count",
                             &[&document.layer_count()],
                         ));
                     }
-                    if self.error.is_none() {
+                    if let Some(encoded) = &self.encoded {
                         ui.label(super::i18n::format(
                             "estimated-size",
-                            &[&format_bytes(self.encoded.len())],
+                            &[&format_bytes(encoded.len())],
                         ));
+                    } else if self.error.is_none() {
+                        ui.weak(tr("estimating-size"));
                     }
                 });
             });
@@ -263,7 +383,9 @@ impl SaveOptionsDialog {
         });
 
         if changed {
-            self.refresh(document, ctx);
+            let now = ctx.input(|input| input.time);
+            self.format_changed(now);
+            ctx.request_repaint_after(Duration::from_secs_f64(ESTIMATE_DELAY));
         }
         let (save, cancel) = response.inner;
         if save {
@@ -276,7 +398,15 @@ impl SaveOptionsDialog {
     }
 
     pub fn write_to_disk(&self) -> io::Result<()> {
-        atomic_write_bytes(&self.path, &self.encoded, true)
+        if let Some(encoded) = &self.encoded {
+            return atomic_write_bytes(&self.path, encoded, true);
+        }
+        // Saved before the estimate finished: encode now.
+        let document = self
+            .snapshot
+            .as_ref()
+            .ok_or_else(|| io::Error::from(io::ErrorKind::OutOfMemory))?;
+        atomic_write_bytes(&self.path, &self.format.encode(document)?, true)
     }
 }
 

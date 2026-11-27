@@ -148,6 +148,7 @@
   "error.region-too-large": "区域过大。",
   "error.total-layer-limit": "这些层超过总像素限度.",
   "estimated-size": "预计大小：{0}",
+  "estimating-size": "正在估算大小…",
   "exit": "退出",
   "expand-history": "展开历史记录",
   "export-options": "输出选项的 PNG",
