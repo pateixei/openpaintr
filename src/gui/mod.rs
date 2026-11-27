@@ -42,7 +42,7 @@ use eframe::egui::{
 use openpaintr::{Document, Pixel, is_valid_layer_name};
 use rfd::FileDialog;
 
-use app_settings::{AaMode, GlobalSettings};
+use app_settings::{AaMode, GlobalSettings, TextStyle};
 use colors::{ColorPalette, PaletteAction, paint_color_swatch};
 use dialogs::{
     LayerDialogAction, LayerPropertiesDialog, RecentFiles, SaveDialogAction, SaveFormat,
@@ -980,6 +980,22 @@ impl App {
                             {
                                 if self.settings.antialiasing != mode {
                                     self.settings.antialiasing = mode;
+                                    self.save_settings();
+                                    self.tab_mut().editor.mark_full_refresh();
+                                }
+                                ui.close();
+                                ui.ctx().request_repaint();
+                            }
+                        }
+                    });
+                    ui.menu_button(tr("text-style"), |ui| {
+                        for style in TextStyle::ALL {
+                            if ui
+                                .selectable_label(self.settings.text_style == style, style.label())
+                                .clicked()
+                            {
+                                if self.settings.text_style != style {
+                                    self.settings.text_style = style;
                                     self.save_settings();
                                     self.tab_mut().editor.mark_full_refresh();
                                 }
@@ -2059,7 +2075,7 @@ impl App {
             _ => {}
         }
         let size = self.tab().editor.document.dimensions();
-        let aa_mode = self.settings.antialiasing;
+        let rendering = self.settings;
         let label = session.commit_label();
         let preview = {
             let tab = &mut self.tabs[self.active_tab];
@@ -2070,7 +2086,7 @@ impl App {
                 .document
                 .layer_pixels(layer)
                 .expect("active layer");
-            session.render_layer_preview(&mut self.font_catalog, src, size, selection, aa_mode)
+            session.render_layer_preview(&mut self.font_catalog, src, size, selection, rendering)
         };
         if let Some(after) = preview {
             let result = self.tab_mut().editor.commit_layer_preview(after, label);
@@ -2167,7 +2183,7 @@ impl App {
 
     fn refresh_image(&mut self, ctx: &egui::Context) {
         let font_catalog = &mut self.font_catalog;
-        let aa_mode = self.settings.antialiasing;
+        let rendering = self.settings;
         let tab = &mut self.tabs[self.active_tab];
         let dirty = tab.editor.take_dirty();
         if !dirty.full && dirty.rect.is_none() {
@@ -2229,7 +2245,7 @@ impl App {
                     }
                 }
                 Some(session) => session
-                    .render_layer_preview(font_catalog, src, (width, height), sel, aa_mode)
+                    .render_layer_preview(font_catalog, src, (width, height), sel, rendering)
                     .unwrap_or_else(|| src.to_vec()),
                 None => src.to_vec(),
             };

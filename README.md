@@ -44,6 +44,10 @@ The **Imagem** (Image) menu crops to a selection, resizes images or the canvas, 
 
 Open **Configurações → Atalhos de teclado e mouse** (Settings → Keyboard and Mouse Shortcuts). Select **Paint.NET** (the default) or **Adobe**, or duplicate a profile to customize keyboard and mouse bindings. Enter combinations such as `Ctrl+Shift+B` or `Ctrl+Wheel`, separate alternatives with `;`, and leave a field empty to remove its binding. Select **Salvar perfis** (Save Profiles) to apply changes. Profiles and the active profile are stored in `shortcuts.json` in the [configuration directory](#user-files). If it can't be written, the application reports the save error. [JSON Schema](docs/shortcuts.schema.json)
 
+### Text rendering
+
+Text follows the antialiasing mode chosen under **Settings → Antialiasing**. **Settings → Text rendering** selects one of two styles. **Sharp** (the default) draws heavier edges, rounds baselines to pixel rows up to 48 px, and uses the font's bold file when it exists (DejaVu and Liberation, among others). **Smooth** draws lighter edges at the exact position and simulates bold. Fonts without a separate bold file, such as the built-in ones, have simulated bold in both styles.
+
 ### Interface language
 
 Choose a language under **Settings → Language**. The change takes effect immediately and is saved in `language.json` in the [configuration directory](#user-files). The first launch uses a supported system language or falls back to English. The bundled catalogs cover English, French, Spanish, German, Brazilian Portuguese, Italian, Russian, Arabic, Simplified Chinese, and Japanese. Arabic labels read right to left within the existing editor layout. System file-picker controls use the desktop's language.

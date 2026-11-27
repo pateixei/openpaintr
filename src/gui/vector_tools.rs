@@ -428,6 +428,35 @@ impl<T: Copy + Default + PartialEq> CoverageMask<T> {
         all
     }
 
+    /// Averages every `factor` x `factor` block of a finer mask, after
+    /// converting each value to coverage.
+    pub fn downsample(&self, factor: u32, convert: impl Fn(T) -> u8) -> CoverageMask<u8> {
+        let shrink = |range: &Range<u32>| {
+            if range.is_empty() {
+                0..0
+            } else {
+                range.start / factor..range.end.div_ceil(factor)
+            }
+        };
+        let columns = shrink(&self.columns);
+        let rows = shrink(&self.rows);
+        let mut sums = vec![0_u32; columns.len() * rows.len()];
+        for ((x, y), value) in self.pixels() {
+            let column = (x / factor - columns.start) as usize;
+            let row = (y / factor - rows.start) as usize;
+            sums[row * columns.len() + column] += u32::from(convert(value));
+        }
+        let samples = factor * factor;
+        CoverageMask {
+            data: sums
+                .into_iter()
+                .map(|sum| ((sum + samples / 2) / samples) as u8)
+                .collect(),
+            columns,
+            rows,
+        }
+    }
+
     pub fn map<U>(self, convert: impl Fn(T) -> U) -> CoverageMask<U> {
         CoverageMask {
             columns: self.columns,

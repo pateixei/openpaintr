@@ -2,7 +2,7 @@ use eframe::egui::{self, Color32, CursorIcon, Painter, Pos2, Rect, Stroke, Vec2,
 use openpaintr::Pixel;
 
 use super::{
-    app_settings::AaMode,
+    app_settings::GlobalSettings,
     gradient_tool::GradientSession,
     paint_dashed_line,
     selection::{Point, Selection},
@@ -266,13 +266,16 @@ impl ActiveSession {
         src: &[Pixel],
         size: Point,
         selection: Option<&Selection>,
-        aa_mode: AaMode,
+        settings: GlobalSettings,
     ) -> Option<Vec<Pixel>> {
+        let aa_mode = settings.antialiasing;
         match self {
             Self::Gradient(g) => Some(g.render_preview(src, size, selection)),
             Self::LineCurve(lc) => Some(lc.render_preview(src, size, selection, aa_mode)),
             Self::Shape(s) => Some(s.render_preview(src, size, selection, aa_mode)),
-            Self::Text(t) => Some(t.render_preview(fonts, src, size, selection, aa_mode)),
+            Self::Text(t) => {
+                Some(t.render_preview(fonts, src, size, selection, aa_mode, settings.text_style))
+            }
             Self::Transform(_) | Self::CanvasResize(_) => None,
         }
     }

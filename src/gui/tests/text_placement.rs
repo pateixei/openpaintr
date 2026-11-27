@@ -96,7 +96,13 @@ fn cases() -> Vec<(String, f32, String, TextParams)> {
     cases
 }
 
-fn render(catalog: &mut FontCatalog, size_px: f32, text: &str, mut params: TextParams) -> Ink {
+fn render(
+    catalog: &mut FontCatalog,
+    size_px: f32,
+    text: &str,
+    mut params: TextParams,
+    style: TextStyle,
+) -> Ink {
     params.size_px = size_px;
     let size = ((size_px * 9.0) as u32, (size_px * 4.2) as u32);
     let x = match params.align {
@@ -113,28 +119,26 @@ fn render(catalog: &mut FontCatalog, size_px: f32, text: &str, mut params: TextP
     session.text = text.to_owned();
     let base = vec![Pixel::default(); (size.0 * size.1) as usize];
     ink(
-        &session.render_preview(catalog, &base, size, None, AaMode::Analytical),
+        &session.render_preview(catalog, &base, size, None, AaMode::Analytical, style),
         size.0,
     )
 }
 
 #[test]
 fn text_ink_stays_within_one_pixel() {
+    // The recordings predate Sharp text; none of these cases has a bold file.
+    for style in TextStyle::ALL {
+        check_placement(style);
+    }
+}
+
+fn check_placement(style: TextStyle) {
     let mut catalog = FontCatalog::new();
     let actual: Vec<_> = cases()
         .into_iter()
-        .map(|(name, size, text, params)| (name, render(&mut catalog, size, &text, params)))
+        .map(|(name, size, text, params)| (name, render(&mut catalog, size, &text, params, style)))
         .collect();
-    let table: String = actual
-        .iter()
-        .map(|(name, ink)| {
-            format!(
-                "    (\"{name}\", {:?}, [{:.2}, {:.2}]),\n",
-                ink.bounds, ink.center[0], ink.center[1]
-            )
-        })
-        .collect();
-    assert_eq!(actual.len(), PLACEMENT.len(), "actual:\n{table}");
+    assert_eq!(actual.len(), PLACEMENT.len());
     let moved: Vec<String> = actual
         .iter()
         .zip(PLACEMENT)
@@ -153,11 +157,7 @@ fn text_ink_stays_within_one_pixel() {
             })
         })
         .collect();
-    assert!(
-        moved.is_empty(),
-        "moved:\n{}\nactual:\n{table}",
-        moved.join("\n")
-    );
+    assert!(moved.is_empty(), "{style:?} moved:\n{}", moved.join("\n"));
 }
 
 /// `(case, [left, top, right, bottom], center of mass)`.

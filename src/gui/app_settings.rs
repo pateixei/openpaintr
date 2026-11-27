@@ -33,12 +33,36 @@ impl AaMode {
     }
 }
 
+/// How the Text tool draws glyphs. Both follow the antialiasing mode.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum TextStyle {
+    /// Heavier edges, baselines on pixel rows, and the font's bold file.
+    #[default]
+    Sharp,
+    /// Lighter edges at the exact position, with simulated bold.
+    Smooth,
+}
+
+impl TextStyle {
+    pub const ALL: [Self; 2] = [Self::Sharp, Self::Smooth];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Sharp => tr("text-style-sharp"),
+            Self::Smooth => tr("text-style-smooth"),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GlobalSettings {
     #[serde(default)]
     pub antialiasing: AaMode,
     #[serde(default)]
     pub theme: Theme,
+    #[serde(default)]
+    pub text_style: TextStyle,
 }
 
 impl GlobalSettings {
@@ -80,10 +104,14 @@ mod tests {
         let path = dir.path().join("openpaintr").join("settings.json");
 
         for mode in AaMode::ALL {
-            for theme in [Theme::Light, Theme::Dark] {
+            for (theme, text_style) in [
+                (Theme::Light, TextStyle::Smooth),
+                (Theme::Dark, TextStyle::Sharp),
+            ] {
                 let saved = GlobalSettings {
                     antialiasing: mode,
                     theme,
+                    text_style,
                 };
                 saved.save_at(&path)?;
                 assert_eq!(GlobalSettings::load_at(&path)?, saved);
@@ -98,6 +126,7 @@ mod tests {
             GlobalSettings {
                 antialiasing: AaMode::Ssaa4x4,
                 theme: Theme::Light,
+                text_style: TextStyle::Sharp,
             }
         );
         Ok(())

@@ -13,7 +13,7 @@ use gfx::{RULE_NONZERO, path::Path as GfxPath};
 use openpaintr::Pixel;
 
 use super::{
-    app_settings::AaMode,
+    app_settings::{AaMode, TextStyle},
     glyph_outlines::OutlineFonts,
     i18n, paint_dashed_line,
     selection::{Point, Selection},
@@ -56,6 +56,8 @@ impl TextAlign {
 
 pub struct FontCatalog {
     pub families: Vec<String>,
+    /// Families whose bold file was found.
+    bold_families: Vec<String>,
     fonts: Fonts,
     outlines: OutlineFonts,
 }
@@ -86,42 +88,77 @@ impl FontCatalog {
     pub fn for_locale(locale: i18n::Locale) -> Self {
         let mut defs = i18n::fonts(locale);
         let mut families = vec![DEFAULT_FAMILY.to_owned(), MONOSPACE_FAMILY.to_owned()];
+        // Family name, regular file, and bold file.
         let candidates = [
             (
                 "DejaVu Sans",
                 "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
             ),
             (
                 "DejaVu Serif",
                 "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf",
+                "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf",
             ),
             (
                 "Liberation Sans",
                 "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+                "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
             ),
-            ("Ubuntu", "/usr/share/fonts/truetype/ubuntu/Ubuntu-R.ttf"),
-            ("Arial", "C:\\Windows\\Fonts\\arial.ttf"),
-            ("Times New Roman", "C:\\Windows\\Fonts\\times.ttf"),
-            ("Courier New", "C:\\Windows\\Fonts\\cour.ttf"),
+            (
+                "Ubuntu",
+                "/usr/share/fonts/truetype/ubuntu/Ubuntu-R.ttf",
+                "/usr/share/fonts/truetype/ubuntu/Ubuntu-B.ttf",
+            ),
+            (
+                "Arial",
+                "C:\\Windows\\Fonts\\arial.ttf",
+                "C:\\Windows\\Fonts\\arialbd.ttf",
+            ),
+            (
+                "Times New Roman",
+                "C:\\Windows\\Fonts\\times.ttf",
+                "C:\\Windows\\Fonts\\timesbd.ttf",
+            ),
+            (
+                "Courier New",
+                "C:\\Windows\\Fonts\\cour.ttf",
+                "C:\\Windows\\Fonts\\courbd.ttf",
+            ),
         ];
-        for (name, path_str) in candidates {
-            let path = Path::new(path_str);
-            if path.is_file()
-                && let Ok(bytes) = fs::read(path)
-            {
-                defs.font_data
-                    .insert(name.to_owned(), Arc::new(FontData::from_owned(bytes)));
-                let mut family = vec![name.to_owned()];
-                family.extend(defs.families[&FontFamily::Proportional].iter().cloned());
-                defs.families
-                    .insert(FontFamily::Name(Arc::from(name)), family);
+        let mut add = |key: &str, path: &str| {
+            let path = Path::new(path);
+            if !path.is_file() {
+                return false;
+            }
+            let Ok(bytes) = fs::read(path) else {
+                return false;
+            };
+            defs.font_data
+                .insert(key.to_owned(), Arc::new(FontData::from_owned(bytes)));
+            let mut family = vec![key.to_owned()];
+            family.extend(defs.families[&FontFamily::Proportional].iter().cloned());
+            defs.families
+                .insert(FontFamily::Name(Arc::from(key)), family);
+            true
+        };
+        let mut bold_families = Vec::new();
+        for (name, regular, bold) in candidates {
+            if add(name, regular) {
                 families.push(name.to_owned());
+                // A variable font is often linked under both names, and its
+                // default instance is not bold.
+                let distinct = fs::canonicalize(regular).ok() != fs::canonicalize(bold).ok();
+                if distinct && add(&bold_key(name), bold) {
+                    bold_families.push(name.to_owned());
+                }
             }
         }
         let outlines = OutlineFonts::new(defs.clone());
         let fonts = Fonts::new(4096, Default::default(), defs);
         Self {
             families,
+            bold_families,
             fonts,
             outlines,
         }
@@ -136,8 +173,27 @@ impl FontCatalog {
         }
     }
 
+    /// The family of a font's bold file, if it has one.
+    fn bold_family(&self, name: &str) -> Option<FontFamily> {
+        self.bold_families
+            .iter()
+            .any(|family| family == name)
+            .then(|| FontFamily::Name(Arc::from(bold_key(name))))
+    }
+
+    /// The family to draw `params` with, and whether bold must be simulated.
+    fn face(&self, params: &TextParams, style: TextStyle) -> (FontFamily, bool) {
+        let real_bold = (params.bold && style == TextStyle::Sharp)
+            .then(|| self.bold_family(&params.family))
+            .flatten();
+        match real_bold {
+            Some(family) => (family, false),
+            None => (self.font_family(&params.family), params.bold),
+        }
+    }
+
     /// Positions the glyphs, with one point per canvas pixel.
-    fn layout(&mut self, session: &TextSession) -> Arc<Galley> {
+    fn layout(&mut self, session: &TextSession, family: FontFamily) -> Arc<Galley> {
         self.fonts.begin_pass(4096, Default::default());
         let text = if session.text.is_empty() {
             " ".to_owned()
@@ -147,10 +203,7 @@ impl FontCatalog {
         let color = Color32::WHITE;
         let line_w = (session.params.size_px * 0.075).max(1.0);
         let format = TextFormat {
-            font_id: FontId::new(
-                session.params.size_px,
-                self.font_family(&session.params.family),
-            ),
+            font_id: FontId::new(session.params.size_px, family),
             color,
             italics: session.params.italic,
             underline: if session.params.underline {
@@ -180,6 +233,61 @@ impl FontCatalog {
         self.fonts.with_pixels_per_point(resolution).layout_job(job)
     }
 }
+
+/// The font definition name of a family's bold file.
+fn bold_key(family: &str) -> String {
+    format!("{family} Bold")
+}
+
+/// Smooth text applies its edge curve to coverage this much finer than a pixel.
+const SMOOTH_ANALYTICAL_SCALE: u32 = 4;
+/// Each cell then holds a full 4 x 4 supersample.
+const SMOOTH_SSAA_SCALE: u32 = 2;
+
+/// egui's curve for text, `2c - c^2`, which thickens partially covered edges.
+fn emphasize(coverage: u8) -> u8 {
+    let c = u32::from(coverage);
+    ((2 * 255 * c - c * c + 127) / 255) as u8
+}
+
+/// Coverage of the combined shapes in the given style.
+fn text_coverage(
+    paths: &mut [GfxPath],
+    size: Point,
+    aa_mode: AaMode,
+    style: TextStyle,
+) -> CoverageMask<u8> {
+    // Paths are in canvas pixels times the antialiasing mode's path scale
+    // times this resolution.
+    let resolution = match (style, aa_mode) {
+        (TextStyle::Sharp, _) => 1,
+        (TextStyle::Smooth, AaMode::Analytical) => SMOOTH_ANALYTICAL_SCALE,
+        (TextStyle::Smooth, AaMode::Ssaa4x4) => SMOOTH_SSAA_SCALE,
+    };
+    let fine = (size.0 * resolution, size.1 * resolution);
+    let shape = |path: &mut GfxPath| {
+        let coverage = match aa_mode {
+            AaMode::Analytical => rasterize_path_analytical(path, RULE_NONZERO, fine),
+            AaMode::Ssaa4x4 => rasterize_path_ssaa(path, RULE_NONZERO, fine)
+                .map(super::stroke_raster::mask16_to_u8),
+        };
+        match style {
+            TextStyle::Sharp => coverage,
+            // The curve applies to fine cells, so it barely thickens edges.
+            TextStyle::Smooth => coverage.downsample(resolution, emphasize),
+        }
+    };
+    // Each shape is rasterized on its own and then combined: fonts disagree on
+    // the winding of their contours, so overlaps could cancel out.
+    let combined = CoverageMask::combined(paths.iter_mut().map(shape).collect(), u8::max);
+    match style {
+        TextStyle::Sharp => combined.map(emphasize),
+        TextStyle::Smooth => combined,
+    }
+}
+
+/// Largest font size whose Sharp baselines are rounded to pixel rows.
+const SNAPPED_BASELINE_SIZE: f32 = 48.0;
 
 /// Glyph pixels up to which egui lays text out at a finer resolution.
 const LAYOUT_GLYPH_PIXELS: f32 = 240.0;
@@ -254,36 +362,25 @@ impl TextSession {
         size: Point,
         selection: Option<&Selection>,
         aa_mode: AaMode,
+        style: TextStyle,
     ) -> Vec<Pixel> {
         let mut out = base_layer.to_vec();
         if self.text.trim().is_empty() || size.0 == 0 || size.1 == 0 {
             self.last_bounds = vec2(12.0, self.params.size_px.max(12.0));
             return out;
         }
-        let galley = catalog.layout(self);
+        let (family, simulate_bold) = catalog.face(&self.params, style);
+        let galley = catalog.layout(self, family.clone());
         self.last_bounds = galley.size().max(vec2(12.0, self.params.size_px.max(12.0)));
 
-        let scale = aa_mode.path_scale();
-        let mut paths = self.paths(catalog, &galley, scale);
-        // Each shape is rasterized on its own and then combined: fonts disagree
-        // on the winding of their contours, so overlaps could cancel out.
-        let coverage = match aa_mode {
-            AaMode::Analytical => CoverageMask::combined(
-                paths
-                    .iter_mut()
-                    .map(|path| rasterize_path_analytical(path, RULE_NONZERO, size))
-                    .collect(),
-                u8::max,
-            ),
-            AaMode::Ssaa4x4 => CoverageMask::combined(
-                paths
-                    .iter_mut()
-                    .map(|path| rasterize_path_ssaa(path, RULE_NONZERO, size))
-                    .collect(),
-                |a, b| a | b,
-            )
-            .map(super::stroke_raster::mask16_to_u8),
+        let resolution = match (style, aa_mode) {
+            (TextStyle::Sharp, _) => 1,
+            (TextStyle::Smooth, AaMode::Analytical) => SMOOTH_ANALYTICAL_SCALE,
+            (TextStyle::Smooth, AaMode::Ssaa4x4) => SMOOTH_SSAA_SCALE,
         };
+        let scale = aa_mode.path_scale() * resolution as f32;
+        let mut paths = self.paths(catalog, &galley, &family, simulate_bold, style, scale);
+        let coverage = text_coverage(&mut paths, size, aa_mode, style);
         tolerance::blend_coverage_in_place(
             &mut out,
             size,
@@ -297,20 +394,31 @@ impl TextSession {
 
     /// The outlines of the glyphs and decoration lines of a layout, in canvas
     /// coordinates multiplied by `scale`.
-    fn paths(&self, catalog: &mut FontCatalog, galley: &Galley, scale: f32) -> Vec<GfxPath> {
-        let family = catalog.font_family(&self.params.family);
+    fn paths(
+        &self,
+        catalog: &mut FontCatalog,
+        galley: &Galley,
+        family: &FontFamily,
+        simulate_bold: bool,
+        style: TextStyle,
+        scale: f32,
+    ) -> Vec<GfxPath> {
         let size = self.params.size_px;
         // Bold is simulated by drawing each glyph again, slightly to the right.
-        let bold_dx = self.params.bold.then(|| (size * 0.045).clamp(0.45, 2.2));
+        let bold_dx = simulate_bold.then(|| (size * 0.045).clamp(0.45, 2.2));
         let line_width = (size * 0.075).max(1.0);
         let mut paths = Vec::new();
         for row in &galley.rows {
             let origin = self.anchor + row.pos.to_vec2();
             for glyph in &row.glyphs {
-                let Some(outline) = catalog.outlines.glyph(&family, glyph.chr, size) else {
+                let Some(outline) = catalog.outlines.glyph(family, glyph.chr, size) else {
                     continue;
                 };
-                let pen = origin + glyph.pos.to_vec2() + vec2(0.0, outline.y_offset);
+                let mut pen = origin + glyph.pos.to_vec2() + vec2(0.0, outline.y_offset);
+                // Rounding sharpens small text; on large text it only moves it.
+                if style == TextStyle::Sharp && size <= SNAPPED_BASELINE_SIZE {
+                    pen.y = pen.y.round();
+                }
                 // Italic slants the glyph from its lowest point.
                 let bottom = pen.y + outline.bottom();
                 let slant = if self.params.italic { 0.25 } else { 0.0 };
@@ -443,13 +551,26 @@ mod tests {
             },
         );
         session.text = "Aa".to_owned();
-        let pixels = session.render_preview(&mut catalog, &base, size, None, AaMode::Analytical);
+        let pixels = session.render_preview(
+            &mut catalog,
+            &base,
+            size,
+            None,
+            AaMode::Analytical,
+            TextStyle::Sharp,
+        );
         assert!(pixels.iter().any(|p| p.0[3] > 200));
         assert!(pixels.iter().any(|p| (1..255).contains(&p.0[3])));
     }
 
     /// Text over a transparent layer, in an opaque color.
-    fn coverage(text: &str, size_px: f32, size: Point, aa_mode: AaMode) -> Vec<u8> {
+    fn coverage(
+        text: &str,
+        size_px: f32,
+        size: Point,
+        aa_mode: AaMode,
+        style: TextStyle,
+    ) -> Vec<u8> {
         let params = TextParams {
             size_px,
             ..TextParams::default()
@@ -458,7 +579,7 @@ mod tests {
         session.text = text.to_owned();
         let base = vec![Pixel::default(); (size.0 * size.1) as usize];
         session
-            .render_preview(&mut FontCatalog::new(), &base, size, None, aa_mode)
+            .render_preview(&mut FontCatalog::new(), &base, size, None, aa_mode, style)
             .iter()
             .map(|pixel| pixel.0[3])
             .collect()
@@ -467,15 +588,62 @@ mod tests {
     #[test]
     fn text_edges_follow_the_antialiasing_mode() {
         let size = (200, 70);
-        let analytical = coverage("Ag 45", 48.0, size, AaMode::Analytical);
-        let supersampled = coverage("Ag 45", 48.0, size, AaMode::Ssaa4x4);
-        assert_ne!(analytical, supersampled);
-        // 4 x 4 supersampling has 17 levels of coverage.
+        for style in TextStyle::ALL {
+            let analytical = coverage("Ag 45", 48.0, size, AaMode::Analytical, style);
+            let supersampled = coverage("Ag 45", 48.0, size, AaMode::Ssaa4x4, style);
+            assert_ne!(analytical, supersampled, "{style:?}");
+        }
+        // 4 x 4 supersampling has 17 levels of coverage, which Sharp thickens.
         let levels: Vec<u8> = (0..=16_u32)
             .map(|count| super::super::stroke_raster::mask16_to_u8(((1_u32 << count) - 1) as u16))
+            .map(emphasize)
             .collect();
-        assert!(supersampled.iter().all(|alpha| levels.contains(alpha)));
-        assert!(analytical.iter().any(|alpha| !levels.contains(alpha)));
+        let sharp = coverage("Ag 45", 48.0, size, AaMode::Ssaa4x4, TextStyle::Sharp);
+        assert!(sharp.iter().all(|alpha| levels.contains(alpha)));
+    }
+
+    #[test]
+    fn sharp_text_is_heavier_than_smooth_text() {
+        let size = (300, 40);
+        for aa_mode in AaMode::ALL {
+            let ink = |style| -> u64 {
+                coverage("Hamburgefonts", 13.0, size, aa_mode, style)
+                    .into_iter()
+                    .map(u64::from)
+                    .sum()
+            };
+            assert!(
+                ink(TextStyle::Sharp) > ink(TextStyle::Smooth),
+                "{aa_mode:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn only_sharp_bold_uses_a_bold_file() {
+        let mut catalog = FontCatalog::new();
+        for family in catalog.families.clone() {
+            let params = TextParams {
+                family: family.clone(),
+                bold: true,
+                ..TextParams::default()
+            };
+            let (smooth, simulated) = catalog.face(&params, TextStyle::Smooth);
+            assert_eq!(smooth, catalog.font_family(&family));
+            assert!(simulated);
+            let (sharp, simulated) = catalog.face(&params, TextStyle::Sharp);
+            assert_eq!(simulated, catalog.bold_family(&family).is_none());
+            assert_eq!(sharp != smooth, !simulated, "{family}");
+            // A real bold face is wider, and egui lays it out.
+            if !simulated {
+                let mut session = TextSession::new(Vec2::ZERO, Pixel::default(), params);
+                session.text = "Hamburgefonts".into();
+                let bold = catalog.layout(&session, sharp).size().x;
+                assert!(bold > catalog.layout(&session, smooth).size().x, "{family}");
+            }
+        }
+        // The built-in fonts have none.
+        assert!(catalog.bold_family(DEFAULT_FAMILY).is_none());
     }
 
     #[test]
@@ -487,14 +655,14 @@ mod tests {
             .chain(['W'])
             .collect();
         let size = (24_000, 330);
-        let drawn = coverage(&text, 240.0, size, AaMode::Analytical);
+        let drawn = coverage(&text, 240.0, size, AaMode::Analytical, TextStyle::Sharp);
         let params = TextParams {
             size_px: 240.0,
             ..TextParams::default()
         };
         let mut session = TextSession::new(vec2(5.3, 4.6), Pixel::default(), params);
         session.text = text;
-        let galley = FontCatalog::new().layout(&session);
+        let galley = FontCatalog::new().layout(&session, FontFamily::Proportional);
         let glyphs = &galley.rows[0].glyphs;
         assert_eq!(glyphs.len(), session.text.chars().count());
         // Every glyph has ink within its advance.
@@ -521,8 +689,8 @@ mod tests {
                 };
                 let mut session = TextSession::new(Vec2::ZERO, Pixel::default(), params);
                 session.text = text.to_owned();
-                let galley = catalog.layout(&session);
                 let font = catalog.font_family(&family);
+                let galley = catalog.layout(&session, font.clone());
                 let mut compared = 0;
                 for glyph in galley.rows.iter().flat_map(|row| &row.glyphs) {
                     let Some(outline) = catalog.outlines.glyph(&font, glyph.chr, size_px) else {
