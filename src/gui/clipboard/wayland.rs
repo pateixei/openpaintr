@@ -52,6 +52,10 @@ impl Clipboard {
         // A selection offer is sent to the focused client. Use the same connection as the
         // window, with a separate event queue to avoid dispatching any of winit's events.
         // SAFETY: the eframe event loop owns the display for the lifetime of the app.
+        #[expect(
+            unsafe_code,
+            reason = "wrapping the window's Wayland display requires a foreign pointer"
+        )]
         let backend = unsafe { Backend::from_foreign_display(display.display.as_ptr().cast()) };
         let connection = Connection::from_backend(backend);
         let (globals, queue) = registry_queue_init(&connection).ok()?;
