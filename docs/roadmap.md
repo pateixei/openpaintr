@@ -220,18 +220,18 @@ Switching to Adobe, creating a custom profile, and restoring its binding after a
   | Freeform spiral | preview | `3.89` / `51.14` | `2.60` / `40.64` |
   | Freeform spiral | commit | `10.21` / `142.88` | `5.88` / `89.45` |
 
-  **Outline text (plan item 2.5, November 27, 2026).** Same environment, comparing commit `fa069ba` with `9b5959e`: the middle of three alternating rounds of five timed runs, in milliseconds (typical / large). Text edges now follow the antialiasing mode (Analytical here), so pixels differ.
+  **Outline text (plan item 2.5, November 27, 2026).** Same environment, comparing commit `fa069ba` with both text styles at `e003098`: the middle of two alternating rounds of five timed runs, in milliseconds (typical / large), with Analytical antialiasing. Text edges now follow the antialiasing mode, so pixels differ.
 
-  | Text size | Phase | Before | After |
-  | --- | --- | ---: | ---: |
-  | `24 px` | typing | `2.92` / `39.09` | `2.22` / `38.11` |
-  | `24 px` | commit | `5.52` / `74.96` | `4.18` / `73.04` |
-  | `96 px` | typing | `11.22` / `46.97` | `2.34` / `38.25` |
-  | `96 px` | commit | `19.11` / `88.10` | `4.24` / `74.34` |
-  | `240 px` | typing | `44.17` / `91.31` | `2.52` / `38.07` |
-  | `240 px` | commit | `55.63` / `177.26` | `4.52` / `73.06` |
+  | Text size | Phase | Before | Sharp | Smooth |
+  | --- | --- | ---: | ---: | ---: |
+  | `24 px` | typing | `2.81` / `38.22` | `2.07` / `36.24` | `2.11` / `36.32` |
+  | `24 px` | commit | `5.09` / `73.29` | `3.95` / `70.91` | `4.01` / `70.81` |
+  | `96 px` | typing | `10.87` / `46.40` | `2.20` / `36.50` | `2.58` / `36.94` |
+  | `96 px` | commit | `18.96` / `86.92` | `4.18` / `71.60` | `4.83` / `71.40` |
+  | `240 px` | typing | `43.74` / `89.96` | `2.41` / `36.87` | `4.14` / `39.05` |
+  | `240 px` | commit | `54.53` / `174.07` | `4.43` / `71.89` | `6.10` / `75.35` |
 
-  At `240 px` on the typical document, peak `VmHWM` fell from `117,616 kB` to `44,776 kB`.
+  At `240 px` on the typical document, peak `VmHWM` fell from `117,602 kB` to about `46,500 kB`.
 
 **Acceptance criteria** — Publish the format and metadata support matrix, test file and clipboard integration on Wayland and X11, and record reproducible interactive benchmarks.
 
