@@ -205,7 +205,10 @@ impl Profile {
         for &action in Command::ALL {
             for binding in &self.bindings[action.id()] {
                 let chord = Chord::parse(binding).ok_or_else(|| {
-                    super::i18n::format_logical("invalid-binding", &[&super::i18n::logical_text(action.label_key()), &binding])
+                    super::i18n::format_logical(
+                        "invalid-binding",
+                        &[&super::i18n::logical_text(action.label_key()), &binding],
+                    )
                 })?;
                 let candidates = mapped.entry((chord, action.layers_only())).or_default();
                 if candidates.contains(&action) {
@@ -237,7 +240,11 @@ impl Profile {
                 {
                     return Err(super::i18n::format_logical(
                         "binding-conflict",
-                        &[&chord.label(), &super::i18n::logical_text(other.label_key()), &super::i18n::logical_text(action.label_key())],
+                        &[
+                            &chord.label(),
+                            &super::i18n::logical_text(other.label_key()),
+                            &super::i18n::logical_text(action.label_key()),
+                        ],
                     ));
                 }
                 candidates.push(action);
@@ -477,7 +484,8 @@ impl Shortcuts {
     pub fn held(&self, ctx: &egui::Context, action: Command) -> bool {
         ctx.input(|input| {
             self.bindings.iter().any(|((chord, layers_only), actions)| {
-                !layers_only && actions.contains(&action)
+                !layers_only
+                    && actions.contains(&action)
                     && input.key_down(chord.key)
                     && *chord == Chord::from_input(chord.key, input.modifiers)
             })
@@ -675,7 +683,10 @@ impl Shortcuts {
                         });
                 });
             if let Some(problem) = &dialog.problem {
-                ui.colored_label(ui.visuals().error_fg_color, super::i18n::display(problem).into_owned());
+                ui.colored_label(
+                    ui.visuals().error_fg_color,
+                    super::i18n::display(problem).into_owned(),
+                );
             }
             ui.horizontal(|ui| {
                 (

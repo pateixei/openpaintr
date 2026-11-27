@@ -146,15 +146,18 @@ impl Document {
             ));
         }
         let pixels = self.allocate_pixels()?;
-        self.layers.insert(index, Layer {
-            name: name.into(),
-            visible: true,
-            opacity: 255,
-            blend: img_pdn::PDNB_NORMAL,
-            pixels,
-            pdn_background: 0,
-            pdn_metadata: Vec::new(),
-        });
+        self.layers.insert(
+            index,
+            Layer {
+                name: name.into(),
+                visible: true,
+                opacity: 255,
+                blend: img_pdn::PDNB_NORMAL,
+                pixels,
+                pdn_background: 0,
+                pdn_metadata: Vec::new(),
+            },
+        );
         Ok(())
     }
 
@@ -574,7 +577,11 @@ impl Document {
                 let src_start = (start_y + row_idx) * full_w + start_x;
                 pixels_to_bytes(&layer.pixels[src_start..src_start + rect_w], &mut src_row);
                 let dst_start = row_idx * rect_w * 4;
-                bm_row_inplace(&mut dst[dst_start..dst_start + rect_w * 4], &src_row, mode_op);
+                bm_row_inplace(
+                    &mut dst[dst_start..dst_start + rect_w * 4],
+                    &src_row,
+                    mode_op,
+                );
             }
         }
 
@@ -644,7 +651,12 @@ fn bytes_to_pixels(bytes: &[u8], pixels: &mut [Pixel]) {
     }
 }
 
-fn sample_thumbnail(pixels: &[Pixel], width: u32, height: u32, max_side: u32) -> (u32, u32, Vec<Pixel>) {
+fn sample_thumbnail(
+    pixels: &[Pixel],
+    width: u32,
+    height: u32,
+    max_side: u32,
+) -> (u32, u32, Vec<Pixel>) {
     let max_side = max_side.max(1);
     let (thumb_w, thumb_h) = if width >= height {
         let thumb_w = width.min(max_side).max(1);

@@ -491,10 +491,15 @@ impl App {
                 self.install_geometry(result, selected, operation.label());
             }
             Flatten => {
-                let result = self.tab().editor.document.flattened().and_then(|mut document| {
-                    document.set_layer_name(0, super::i18n::logical_text("merged-image"))?;
-                    Ok(document)
-                });
+                let result = self
+                    .tab()
+                    .editor
+                    .document
+                    .flattened()
+                    .and_then(|mut document| {
+                        document.set_layer_name(0, super::i18n::logical_text("merged-image"))?;
+                        Ok(document)
+                    });
                 self.install_geometry(result, 0, "flatten");
             }
             AddLayer => {

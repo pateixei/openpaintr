@@ -890,9 +890,10 @@ impl App {
 
     fn save_settings(&mut self) {
         self.notice = self.locale.with(|| {
-            self.settings.save().err().map(|error| {
-                (i18n::format("settings-save-error", &[&error]), true)
-            })
+            self.settings
+                .save()
+                .err()
+                .map(|error| (i18n::format("settings-save-error", &[&error]), true))
         });
     }
 
@@ -1019,7 +1020,10 @@ impl App {
                 btn_sz,
                 &i18n::format(
                     "shortcut-with-hint",
-                    &[&i18n::logical_text("new"), &self.shortcuts.hint(Command::New)],
+                    &[
+                        &i18n::logical_text("new"),
+                        &self.shortcuts.hint(Command::New),
+                    ],
                 ),
             )
             .clicked()
@@ -1035,7 +1039,10 @@ impl App {
                 btn_sz,
                 &i18n::format(
                     "shortcut-with-hint",
-                    &[&i18n::logical_text("open"), &self.shortcuts.hint(Command::Open)],
+                    &[
+                        &i18n::logical_text("open"),
+                        &self.shortcuts.hint(Command::Open),
+                    ],
                 ),
             )
             .clicked()
@@ -1051,7 +1058,10 @@ impl App {
                 btn_sz,
                 &i18n::format(
                     "shortcut-with-hint",
-                    &[&i18n::logical_text("save"), &self.shortcuts.hint(Command::Save)],
+                    &[
+                        &i18n::logical_text("save"),
+                        &self.shortcuts.hint(Command::Save),
+                    ],
                 ),
             )
             .clicked()
@@ -1082,7 +1092,10 @@ impl App {
                 btn_sz,
                 &i18n::format(
                     "shortcut-with-hint",
-                    &[&i18n::logical_text("undo"), &self.shortcuts.hint(Command::Undo)],
+                    &[
+                        &i18n::logical_text("undo"),
+                        &self.shortcuts.hint(Command::Undo),
+                    ],
                 ),
             )
             .clicked()
@@ -1098,7 +1111,10 @@ impl App {
                 btn_sz,
                 &i18n::format(
                     "shortcut-with-hint",
-                    &[&i18n::logical_text("redo"), &self.shortcuts.hint(Command::Redo)],
+                    &[
+                        &i18n::logical_text("redo"),
+                        &self.shortcuts.hint(Command::Redo),
+                    ],
                 ),
             )
             .clicked()
@@ -1148,15 +1164,12 @@ impl App {
                     .color(self.settings.theme.text_muted()),
                 );
                 self.session_commit_buttons(ui);
-            } else if let Some((
-                mut shape,
-                mut repeat,
-                mut mode,
-                mut dither,
-                mut blend,
-            )) = self.tab().gradient.as_ref().map(|g| {
-                (g.shape, g.repeat, g.channel_mode, g.dither, g.blend)
-            }) {
+            } else if let Some((mut shape, mut repeat, mut mode, mut dither, mut blend)) = self
+                .tab()
+                .gradient
+                .as_ref()
+                .map(|g| (g.shape, g.repeat, g.channel_mode, g.dither, g.blend))
+            {
                 ui.label(
                     RichText::new(tr("gradient-field"))
                         .strong()
@@ -1188,11 +1201,23 @@ impl App {
                     tab.editor.mark_full_refresh();
                 }
                 self.session_commit_buttons(ui);
-            } else if let Some((mut kind, mut thickness, mut dash, mut start_cap, mut end_cap, mut blend)) =
-                self.tab().line_curve.as_ref().map(|lc| {
-                    (lc.kind, lc.thickness, lc.dash, lc.start_cap, lc.end_cap, lc.blend)
-                })
-            {
+            } else if let Some((
+                mut kind,
+                mut thickness,
+                mut dash,
+                mut start_cap,
+                mut end_cap,
+                mut blend,
+            )) = self.tab().line_curve.as_ref().map(|lc| {
+                (
+                    lc.kind,
+                    lc.thickness,
+                    lc.dash,
+                    lc.start_cap,
+                    lc.end_cap,
+                    lc.blend,
+                )
+            }) {
                 ui.label(
                     RichText::new(tr("line-curve-field"))
                         .strong()
@@ -1235,7 +1260,14 @@ impl App {
                 mut pattern,
                 mut blend,
             )) = self.tab().shape_session.as_ref().map(|s| {
-                (s.kind, s.fill_mode, s.thickness, s.corner_radius, s.pattern, s.blend)
+                (
+                    s.kind,
+                    s.fill_mode,
+                    s.thickness,
+                    s.corner_radius,
+                    s.pattern,
+                    s.blend,
+                )
             }) {
                 ui.label(
                     RichText::new(tr("shape-field"))
@@ -1357,11 +1389,19 @@ impl App {
                 );
                 let mut changed = false;
                 changed |= ui
-                    .add(egui::DragValue::new(&mut preview_size.0).range(1..=limit).suffix(" px"))
+                    .add(
+                        egui::DragValue::new(&mut preview_size.0)
+                            .range(1..=limit)
+                            .suffix(" px"),
+                    )
                     .changed();
                 ui.label("×");
                 changed |= ui
-                    .add(egui::DragValue::new(&mut preview_size.1).range(1..=limit).suffix(" px"))
+                    .add(
+                        egui::DragValue::new(&mut preview_size.1)
+                            .range(1..=limit)
+                            .suffix(" px"),
+                    )
                     .changed();
                 if changed && let Some(cr) = self.tab_mut().canvas_resize.as_mut() {
                     cr.preview_size = preview_size;
@@ -1398,7 +1438,10 @@ impl App {
                                 .size(12.0)
                                 .color(self.settings.theme.text_muted()),
                         );
-                        ui.add(egui::Slider::new(&mut self.diameter, 1..=MAX_BRUSH_DIAMETER).suffix(" px"));
+                        ui.add(
+                            egui::Slider::new(&mut self.diameter, 1..=MAX_BRUSH_DIAMETER)
+                                .suffix(" px"),
+                        );
                         ui.label(
                             RichText::new(tr("hardness-field"))
                                 .size(12.0)
@@ -1456,7 +1499,10 @@ impl App {
                                 .size(12.0)
                                 .color(self.settings.theme.text_muted()),
                         );
-                        ui.add(egui::Slider::new(&mut self.diameter, 1..=MAX_BRUSH_DIAMETER).suffix(" px"));
+                        ui.add(
+                            egui::Slider::new(&mut self.diameter, 1..=MAX_BRUSH_DIAMETER)
+                                .suffix(" px"),
+                        );
                         ui.label(
                             RichText::new(tr("short-hardness-field"))
                                 .size(12.0)
@@ -1469,7 +1515,10 @@ impl App {
                             r,
                             3.0,
                             Color32::from_rgba_unmultiplied(
-                                target.0[0], target.0[1], target.0[2], target.0[3],
+                                target.0[0],
+                                target.0[1],
+                                target.0[2],
+                                target.0[3],
                             ),
                         );
                         ui.painter().rect_stroke(
@@ -1830,7 +1879,11 @@ impl App {
             });
         changed |= *family != prev_f;
         changed |= ui
-            .add(egui::DragValue::new(size_px).range(6.0..=240.0).suffix(" px"))
+            .add(
+                egui::DragValue::new(size_px)
+                    .range(6.0..=240.0)
+                    .suffix(" px"),
+            )
             .changed();
         for (flag, label, tooltip) in [
             (bold, "B", "text-bold"),
@@ -1904,12 +1957,20 @@ impl App {
                                     .tab_thumb
                                     .as_ref()
                                     .map_or((None, Vec2::ZERO), |t| (Some(t.id()), t.size_vec2()));
-                                (i18n::display(&title).into_owned(), tab.editor.has_unsaved_edits(), tid, tsz)
+                                (
+                                    i18n::display(&title).into_owned(),
+                                    tab.editor.has_unsaved_edits(),
+                                    tid,
+                                    tsz,
+                                )
                             };
                             let frame = if active {
                                 egui::Frame::new()
                                     .fill(self.settings.theme.card_fill())
-                                    .stroke(egui::Stroke::new(1.0_f32, self.settings.theme.border_color()))
+                                    .stroke(egui::Stroke::new(
+                                        1.0_f32,
+                                        self.settings.theme.border_color(),
+                                    ))
                                     .corner_radius(egui::CornerRadius {
                                         nw: 6,
                                         ne: 6,
@@ -2047,7 +2108,9 @@ impl App {
         ];
         ui.vertical_centered(|ui| {
             ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
-            if tool_icons::move_button(ui, self.settings.theme, self.tab().transform.is_some()).clicked() {
+            if tool_icons::move_button(ui, self.settings.theme, self.tab().transform.is_some())
+                .clicked()
+            {
                 run_cmd = Some(Command::MovePixels);
             }
             ui.separator();
@@ -2056,7 +2119,8 @@ impl App {
                 .spacing(vec2(4.0, 4.0))
                 .show(ui, |ui| {
                     for (idx, tool) in tools.into_iter().enumerate() {
-                        let resp = tool_icons::button(ui, self.settings.theme, tool, self.tool == tool);
+                        let resp =
+                            tool_icons::button(ui, self.settings.theme, tool, self.tool == tool);
                         let double_action = match tool {
                             Tool::Pan => {
                                 self.shortcuts.mouse.click(&resp, Scope::ToolbarHand, true)
@@ -2386,11 +2450,13 @@ impl App {
                                             name
                                         };
                                         let label_text =
-                                            RichText::new(i18n::display(&display).into_owned()).size(12.5).color(if active {
-                                                theme.pill_active_fg()
-                                            } else {
-                                                theme.text_primary()
-                                            });
+                                            RichText::new(i18n::display(&display).into_owned())
+                                                .size(12.5)
+                                                .color(if active {
+                                                    theme.pill_active_fg()
+                                                } else {
+                                                    theme.text_primary()
+                                                });
                                         let label_resp = ui
                                             .add(
                                                 egui::Button::new(label_text)
@@ -2645,14 +2711,21 @@ impl App {
                             })
                             .inner
                         };
-                        if item(ui, i18n::display(&format!("0. {}", i18n::logical_text("new-image"))).into_owned(), undo_len == 0, false) {
+                        if item(
+                            ui,
+                            i18n::display(&format!("0. {}", i18n::logical_text("new-image")))
+                                .into_owned(),
+                            undo_len == 0,
+                            false,
+                        ) {
                             target_state = Some(0);
                         }
                         for (index, label) in self.tab().editor.history().enumerate() {
                             let state = index + 1;
                             if item(
                                 ui,
-                                i18n::display(&format!("{state}. {}", i18n::logical_text(label))).into_owned(),
+                                i18n::display(&format!("{state}. {}", i18n::logical_text(label)))
+                                    .into_owned(),
                                 undo_len == state,
                                 false,
                             ) {
@@ -2661,7 +2734,13 @@ impl App {
                         }
                         for (offset, label) in self.tab().editor.redo_history().rev().enumerate() {
                             let state = undo_len + offset + 1;
-                            if item(ui, i18n::display(&format!("{state}. {}", i18n::logical_text(label))).into_owned(), false, true) {
+                            if item(
+                                ui,
+                                i18n::display(&format!("{state}. {}", i18n::logical_text(label)))
+                                    .into_owned(),
+                                false,
+                                true,
+                            ) {
                                 target_state = Some(state);
                             }
                         }
@@ -2720,16 +2799,23 @@ impl App {
             .wand_composite
             .then(|| tab.editor.document.composite())
             .transpose()?;
-        Selection::wand(size, seed, self.color_tolerance, self.alpha_match, contiguous, |(x, y)| {
-            if let Some(composite) = &composite {
-                composite[y as usize * size.0 as usize + x as usize]
-            } else {
-                tab.editor
-                    .document
-                    .pixel(tab.editor.selected, x, y)
-                    .unwrap_or_default()
-            }
-        })
+        Selection::wand(
+            size,
+            seed,
+            self.color_tolerance,
+            self.alpha_match,
+            contiguous,
+            |(x, y)| {
+                if let Some(composite) = &composite {
+                    composite[y as usize * size.0 as usize + x as usize]
+                } else {
+                    tab.editor
+                        .document
+                        .pixel(tab.editor.selected, x, y)
+                        .unwrap_or_default()
+                }
+            },
+        )
     }
 
     pub fn has_active_session(&self) -> bool {
@@ -2762,13 +2848,23 @@ impl App {
             tab.session_creation = None;
             let layer = tab.editor.selected;
             let selection = tab.editor.selection.as_ref();
-            let src = tab.editor.document.layer_pixels(layer).expect("camada ativa");
+            let src = tab
+                .editor
+                .document
+                .layer_pixels(layer)
+                .expect("camada ativa");
             if let Some(grad) = tab.gradient.take() {
                 (Some(grad.render_preview(src, size, selection)), "gradient")
             } else if let Some(lc) = tab.line_curve.take() {
-                (Some(lc.render_preview(src, size, selection, aa_mode)), "line-curve")
+                (
+                    Some(lc.render_preview(src, size, selection, aa_mode)),
+                    "line-curve",
+                )
             } else if let Some(shape) = tab.shape_session.take() {
-                (Some(shape.render_preview(src, size, selection, aa_mode)), "shape")
+                (
+                    Some(shape.render_preview(src, size, selection, aa_mode)),
+                    "shape",
+                )
             } else if let Some(mut text) = tab.text_session.take() {
                 let empty = text.text.trim().is_empty();
                 let buf = (!empty)
@@ -2793,7 +2889,12 @@ impl App {
             self.commit_active_session();
             if matches!(
                 self.tool,
-                Tool::Brush | Tool::Pencil | Tool::Eraser | Tool::CloneStamp | Tool::Recolor | Tool::Bucket
+                Tool::Brush
+                    | Tool::Pencil
+                    | Tool::Eraser
+                    | Tool::CloneStamp
+                    | Tool::Recolor
+                    | Tool::Bucket
             ) {
                 self.last_paint_tool = self.tool;
             }
@@ -2819,13 +2920,12 @@ impl App {
 
     fn bucket_fill(&mut self, seed: Point, color: Pixel, contiguous: bool) {
         self.finish_opacity();
-        let (primary, secondary) = if color == self.palette.secondary
-            && self.palette.primary != self.palette.secondary
-        {
-            (self.palette.secondary, self.palette.primary)
-        } else {
-            (color, self.palette.secondary)
-        };
+        let (primary, secondary) =
+            if color == self.palette.secondary && self.palette.primary != self.palette.secondary {
+                (self.palette.secondary, self.palette.primary)
+            } else {
+                (color, self.palette.secondary)
+            };
         let pattern = self.fill_pattern;
         let blend = self.stroke_blend;
         let tolerance = self.color_tolerance;
@@ -2833,15 +2933,7 @@ impl App {
         let composite = self.bucket_composite;
         let aa_mode = self.settings.antialiasing;
         match self.tab_mut().editor.bucket_fill(
-            seed,
-            primary,
-            secondary,
-            pattern,
-            blend,
-            tolerance,
-            alpha_mode,
-            contiguous,
-            composite,
+            seed, primary, secondary, pattern, blend, tolerance, alpha_mode, contiguous, composite,
             aa_mode,
         ) {
             Ok(changed) => self.tab_mut().thumbs_dirty |= changed,
@@ -2943,7 +3035,11 @@ impl App {
                 return tab.editor.document.composite();
             }
             let layer = tab.editor.selected;
-            let src = tab.editor.document.layer_pixels(layer).expect("camada ativa");
+            let src = tab
+                .editor
+                .document
+                .layer_pixels(layer)
+                .expect("camada ativa");
             let sel = tab.editor.selection.as_ref();
             let mut preview = if transform_preview {
                 let transform = tab.transform.as_ref().unwrap();
@@ -3148,7 +3244,8 @@ impl App {
                         tab.zoom = Some(next);
                     }
                     let target_zoom = tab.zoom.unwrap_or(fit);
-                    let target_max = (canvas_space(pixels * target_zoom) - available).max(Vec2::ZERO);
+                    let target_max =
+                        (canvas_space(pixels * target_zoom) - available).max(Vec2::ZERO);
                     let next_offset = (offset - scroll).clamp(Vec2::ZERO, target_max);
                     if magnify != 0.0 || (next_offset - tab.view.offset).length_sq() > 1e-4 {
                         tab.view.scroll_to = Some(next_offset);
@@ -3183,7 +3280,8 @@ impl App {
                     input.pointer.button_released(gesture.button),
                 )
             });
-            if can_pan && (down || released)
+            if can_pan
+                && (down || released)
                 && let Some((previous, current)) = gesture.last_position.zip(position)
                 && current != previous
             {
@@ -3309,8 +3407,7 @@ impl App {
                 if self.tab().canvas_resize.is_some() {
                     let limit = ui.ctx().input(|i| i.max_texture_side).clamp(1, 8192) as u32;
                     let orig = self.tab().canvas_resize.as_ref().unwrap().original;
-                    let mut preview_size =
-                        self.tab().canvas_resize.as_ref().unwrap().preview_size;
+                    let mut preview_size = self.tab().canvas_resize.as_ref().unwrap().preview_size;
                     let mut preview_rect = Rect::from_min_size(
                         rect.min,
                         vec2(preview_size.0 as f32, preview_size.1 as f32) * zoom,
@@ -3333,7 +3430,13 @@ impl App {
                             CanvasResizeDrag::BottomRight
                         }
                     };
-                    if self.tab().canvas_resize.as_ref().unwrap().dragging.is_none()
+                    if self
+                        .tab()
+                        .canvas_resize
+                        .as_ref()
+                        .unwrap()
+                        .dragging
+                        .is_none()
                         && (drag_resp.drag_started()
                             || ui.input(|i| i.pointer.button_pressed(PointerButton::Primary)))
                         && let Some(ptr) = ui
@@ -3361,8 +3464,10 @@ impl App {
                         });
                         if let Some(pos) = ptr {
                             let doc_px = (pos - rect.min) / zoom;
-                            let next_w = (doc_px.x.round() as i64).clamp(1, i64::from(limit)) as u32;
-                            let next_h = (doc_px.y.round() as i64).clamp(1, i64::from(limit)) as u32;
+                            let next_w =
+                                (doc_px.x.round() as i64).clamp(1, i64::from(limit)) as u32;
+                            let next_h =
+                                (doc_px.y.round() as i64).clamp(1, i64::from(limit)) as u32;
                             match kind {
                                 CanvasResizeDrag::RightEdge => preview_size.0 = next_w,
                                 CanvasResizeDrag::BottomEdge => preview_size.1 = next_h,
@@ -3427,7 +3532,10 @@ impl App {
                     if preview_size.0 > width {
                         let right_strip = Rect::from_min_max(
                             pos2(rect.right(), rect.top()),
-                            pos2(preview_rect.right(), preview_rect.bottom().min(rect.bottom())),
+                            pos2(
+                                preview_rect.right(),
+                                preview_rect.bottom().min(rect.bottom()),
+                            ),
                         );
                         paint_checker_strip(right_strip);
                     } else if preview_size.0 < width {
@@ -3481,10 +3589,8 @@ impl App {
                         egui::FontId::proportional(11.5),
                         Color32::WHITE,
                     );
-                    let badge_rect = Rect::from_min_size(
-                        badge_pos,
-                        badge_galley.size() + vec2(10.0, 6.0),
-                    );
+                    let badge_rect =
+                        Rect::from_min_size(badge_pos, badge_galley.size() + vec2(10.0, 6.0));
                     overlay.rect_filled(badge_rect, 4.0, Color32::from_black_alpha(190));
                     overlay.galley(badge_pos + vec2(5.0, 3.0), badge_galley, Color32::WHITE);
 
@@ -3507,7 +3613,8 @@ impl App {
                             )
                         });
                         if let Some(pos) = ptr {
-                            let cur = vec2((pos.x - rect.min.x) / zoom, (pos.y - rect.min.y) / zoom);
+                            let cur =
+                                vec2((pos.x - rect.min.x) / zoom, (pos.y - rect.min.y) / zoom);
                             let tab = self.tab_mut();
                             if let Some(g) = tab.gradient.as_mut() {
                                 g.end = snap_if(anchor, cur, modifiers.shift);
@@ -3651,7 +3758,8 @@ impl App {
                         }
                         if response.hovered() || response.is_pointer_button_down_on() {
                             for btn in BUTTONS {
-                                if input.pointer.button_pressed(btn) || input.pointer.button_down(btn)
+                                if input.pointer.button_pressed(btn)
+                                    || input.pointer.button_down(btn)
                                 {
                                     let is_canvas_pan = self.shortcuts.mouse.resolve(
                                         Scope::Canvas,
@@ -3778,8 +3886,8 @@ impl App {
                                 if let Some(pos) = ptr {
                                     let p0 = ((press_pos - rect.min) / start_zoom)
                                         .clamp(Vec2::ZERO, pixels);
-                                    let p1 = ((pos - rect.min) / start_zoom)
-                                        .clamp(Vec2::ZERO, pixels);
+                                    let p1 =
+                                        ((pos - rect.min) / start_zoom).clamp(Vec2::ZERO, pixels);
                                     let box_w = (p1.x - p0.x).abs().max(2.0);
                                     let box_h = (p1.y - p0.y).abs().max(2.0);
                                     let next = ((usable.x - padding) / box_w)
@@ -3791,7 +3899,8 @@ impl App {
                                     let tab = self.tab_mut();
                                     tab.zoom = Some(next);
                                     tab.view.scroll_to = Some(
-                                        (space - scaled) * 0.5 + center_doc * next - available * 0.5,
+                                        (space - scaled) * 0.5 + center_doc * next
+                                            - available * 0.5,
                                     );
                                     ui.ctx().request_repaint();
                                 }
@@ -3847,8 +3956,10 @@ impl App {
                                         Trigger::Button(btn),
                                         input.modifiers,
                                         |k| input.key_down(k),
-                                    ) && matches!(act, MouseAction::ZoomIn | MouseAction::ZoomOut)
-                                    {
+                                    ) && matches!(
+                                        act,
+                                        MouseAction::ZoomIn | MouseAction::ZoomOut
+                                    ) {
                                         return Some((btn, pos, false));
                                     }
                                 }
@@ -3891,13 +4002,13 @@ impl App {
 
                 if self.tool == Tool::Eyedropper {
                     if let Some(point) = response.interact_pointer_pos().and_then(document_point)
-                        && let Some(action) = self
-                            .shortcuts
-                            .mouse
-                            .click(&response, Scope::Eyedropper, false)
+                        && let Some(action) =
+                            self.shortcuts
+                                .mouse
+                                .click(&response, Scope::Eyedropper, false)
                     {
-                        let sample_comp = self.eyedropper_composite
-                            || action == MouseAction::EyedropperComposite;
+                        let sample_comp =
+                            self.eyedropper_composite || action == MouseAction::EyedropperComposite;
                         let px = if sample_comp {
                             self.tab()
                                 .editor
@@ -4065,10 +4176,8 @@ impl App {
                                         (g.anchor_f.x + delta.x).clamp(0.0, (width - 1) as f32);
                                     g.anchor_f.y =
                                         (g.anchor_f.y + delta.y).clamp(0.0, (height - 1) as f32);
-                                    g.anchor = (
-                                        g.anchor_f.x.round() as u32,
-                                        g.anchor_f.y.round() as u32,
-                                    );
+                                    g.anchor =
+                                        (g.anchor_f.x.round() as u32, g.anchor_f.y.round() as u32);
                                 }
                                 g.last_world = pixel;
                             }
@@ -4244,8 +4353,7 @@ impl App {
                                     Tool::DrawShape,
                                     MouseAction::ShapePrimary | MouseAction::ShapeSecondary,
                                 ) => {
-                                    let (outline, fill) = if action == MouseAction::ShapeSecondary
-                                    {
+                                    let (outline, fill) = if action == MouseAction::ShapeSecondary {
                                         (self.palette.secondary, self.palette.primary)
                                     } else {
                                         (self.palette.primary, self.palette.secondary)
@@ -4307,11 +4415,7 @@ impl App {
                         };
                         let sc = rect.min + src_pt * zoom;
                         let r = (self.diameter as f32 * 0.5 * zoom).max(4.0);
-                        painter.circle_stroke(
-                            sc,
-                            r,
-                            egui::Stroke::new(1.0_f32, Color32::WHITE),
-                        );
+                        painter.circle_stroke(sc, r, egui::Stroke::new(1.0_f32, Color32::WHITE));
                         painter.line_segment(
                             [sc - vec2(5.0, 0.0), sc + vec2(5.0, 0.0)],
                             egui::Stroke::new(1.0_f32, Color32::BLACK),
@@ -4403,7 +4507,8 @@ impl App {
                                             },
                                             self.diameter,
                                         )),
-                                        MouseAction::PencilPrimary | MouseAction::PencilSecondary => {
+                                        MouseAction::PencilPrimary
+                                        | MouseAction::PencilSecondary => {
                                             let primary = if action == MouseAction::PencilSecondary
                                             {
                                                 self.palette.secondary
@@ -4451,8 +4556,9 @@ impl App {
                                                 } else {
                                                     self.palette.primary
                                                 };
-                                            let target =
-                                                self.recolor_target.unwrap_or(self.palette.secondary);
+                                            let target = self
+                                                .recolor_target
+                                                .unwrap_or(self.palette.secondary);
                                             Some((
                                                 StrokeSpec::Recolor {
                                                     target,
@@ -4511,9 +4617,9 @@ impl App {
                                         let aa_mode = self.settings.antialiasing;
                                         let tab = self.tab_mut();
                                         let waiting_for_drag =
-                                            tab.editor.selection.as_ref().is_some_and(|selection| {
-                                                selection.coverage_u8(start_pt) == 0
-                                            });
+                                            tab.editor.selection.as_ref().is_some_and(
+                                                |selection| selection.coverage_u8(start_pt) == 0,
+                                            );
                                         tab.stroke_gesture = Some(StrokeGesture {
                                             button: btn,
                                             waiting_for_drag,
@@ -5249,7 +5355,10 @@ impl App {
             .frame(
                 egui::Frame::new()
                     .fill(self.settings.theme.toolbar_fill())
-                    .stroke(egui::Stroke::new(1.0_f32, self.settings.theme.border_color()))
+                    .stroke(egui::Stroke::new(
+                        1.0_f32,
+                        self.settings.theme.border_color(),
+                    ))
                     .inner_margin(egui::Margin::symmetric(10, 5)),
             )
             .show_separator_line(false)
@@ -5257,7 +5366,10 @@ impl App {
 
         let ribbon_frame = egui::Frame::new()
             .fill(self.settings.theme.toolbar_fill())
-            .stroke(egui::Stroke::new(1.0_f32, self.settings.theme.border_color()))
+            .stroke(egui::Stroke::new(
+                1.0_f32,
+                self.settings.theme.border_color(),
+            ))
             .inner_margin(egui::Margin::symmetric(6, 4));
         let ribbon = egui::TopBottomPanel::top("color_ribbon")
             // Include the stroke in the initial clip height and let the content size the panel.
@@ -5286,7 +5398,10 @@ impl App {
             .frame(
                 egui::Frame::new()
                     .fill(self.settings.theme.status_fill())
-                    .stroke(egui::Stroke::new(1.0_f32, self.settings.theme.border_color()))
+                    .stroke(egui::Stroke::new(
+                        1.0_f32,
+                        self.settings.theme.border_color(),
+                    ))
                     .corner_radius(egui::CornerRadius {
                         nw: 0,
                         ne: 0,
@@ -5508,7 +5623,10 @@ mod tests {
     fn new_document_has_one_opaque_white_background_layer() -> io::Result<()> {
         let document = new_document(32, 24)?;
         assert_eq!(document.layer_count(), 1);
-        assert_eq!(document.layer_name(0), Some(i18n::logical_text("background")));
+        assert_eq!(
+            document.layer_name(0),
+            Some(i18n::logical_text("background"))
+        );
         assert!(
             document
                 .layer_pixels(0)
@@ -5679,13 +5797,20 @@ mod tests {
             Selection::new(Shape::Rectangle, (7, 7), (14, 14)),
             Selection::new(Shape::Ellipse, (7, 7), (14, 14)),
             Selection::lasso(size, &[(7, 7), (14, 7), (14, 14), (7, 14)])?,
-            Selection::wand(size, (7, 7), 0, AlphaMatchMode::Premultiplied, true, |(x, y)| {
-                if (7..=14).contains(&x) && (7..=14).contains(&y) {
-                    color
-                } else {
-                    Pixel::default()
-                }
-            })?,
+            Selection::wand(
+                size,
+                (7, 7),
+                0,
+                AlphaMatchMode::Premultiplied,
+                true,
+                |(x, y)| {
+                    if (7..=14).contains(&x) && (7..=14).contains(&y) {
+                        color
+                    } else {
+                        Pixel::default()
+                    }
+                },
+            )?,
         ];
         for candidate in candidates {
             let point = (10, 15);
@@ -6071,9 +6196,18 @@ mod tests {
         let trans_blue = Pixel([0, 0, 255, 0]);
         let soft_blue = Pixel([40, 80, 200, 255]);
         let near_soft_blue = Pixel([58, 94, 212, 255]);
-        app.tab_mut().editor.document.set_pixel(0, 0, 0, trans_red)?;
-        app.tab_mut().editor.document.set_pixel(0, 1, 0, trans_blue)?;
-        app.tab_mut().editor.document.set_pixel(0, 3, 3, soft_blue)?;
+        app.tab_mut()
+            .editor
+            .document
+            .set_pixel(0, 0, 0, trans_red)?;
+        app.tab_mut()
+            .editor
+            .document
+            .set_pixel(0, 1, 0, trans_blue)?;
+        app.tab_mut()
+            .editor
+            .document
+            .set_pixel(0, 3, 3, soft_blue)?;
         app.tab_mut()
             .editor
             .document
@@ -6129,8 +6263,7 @@ mod tests {
     }
 
     #[test]
-    fn eyedropper_samples_layer_or_composite_and_clone_stamp_copies_with_undo() -> io::Result<()>
-    {
+    fn eyedropper_samples_layer_or_composite_and_clone_stamp_copies_with_undo() -> io::Result<()> {
         let ctx = egui::Context::default();
         let mut app = App::new(&ctx, Document::new(16, 16)?);
         let green = Pixel([30, 180, 70, 255]);
@@ -6148,13 +6281,7 @@ mod tests {
         );
 
         // Clone stamp from layer 1 pixel (2, 2) to (8, 8)
-        let src = app
-            .tab()
-            .editor
-            .document
-            .layer_pixels(1)
-            .unwrap()
-            .to_vec();
+        let src = app.tab().editor.document.layer_pixels(1).unwrap().to_vec();
         let aa_mode = app.settings.antialiasing;
         app.tab_mut().editor.begin_stroke_with(
             StrokeSpec::Clone {
@@ -6429,7 +6556,10 @@ mod tests {
     fn wslg_prefers_x11_and_fullscreen_keeps_the_window_borderless() {
         assert_eq!(linux_backend_choice(None, true, true), Some(true));
         assert_eq!(linux_backend_choice(None, true, false), None);
-        assert_eq!(linux_backend_choice(Some("wayland"), true, true), Some(false));
+        assert_eq!(
+            linux_backend_choice(Some("wayland"), true, true),
+            Some(false)
+        );
         assert_eq!(linux_backend_choice(Some("x11"), false, false), Some(true));
         assert_eq!(linux_backend_choice(None, false, true), None);
 
@@ -6463,13 +6593,17 @@ mod tests {
             Some(false),
         );
         assert!(app.fullscreen);
-        assert!(output.viewport_output[&egui::ViewportId::ROOT]
-            .commands
-            .contains(&egui::ViewportCommand::Fullscreen(true)));
-        assert!(!output.viewport_output[&egui::ViewportId::ROOT]
-            .commands
-            .iter()
-            .any(|command| matches!(command, egui::ViewportCommand::Decorations(_))));
+        assert!(
+            output.viewport_output[&egui::ViewportId::ROOT]
+                .commands
+                .contains(&egui::ViewportCommand::Fullscreen(true))
+        );
+        assert!(
+            !output.viewport_output[&egui::ViewportId::ROOT]
+                .commands
+                .iter()
+                .any(|command| matches!(command, egui::ViewportCommand::Decorations(_)))
+        );
 
         // Intermediate frame before OS ack must keep fullscreen & decorations hidden.
         let _ = run_frame(&mut app, Vec::new(), Some(false));
@@ -6479,10 +6613,12 @@ mod tests {
         let _ = run_frame(&mut app, Vec::new(), Some(true));
         let exit_out = run_frame(&mut app, Vec::new(), Some(false));
         assert!(!app.fullscreen);
-        assert!(!exit_out.viewport_output[&egui::ViewportId::ROOT]
-            .commands
-            .iter()
-            .any(|command| matches!(command, egui::ViewportCommand::Decorations(_))));
+        assert!(
+            !exit_out.viewport_output[&egui::ViewportId::ROOT]
+                .commands
+                .iter()
+                .any(|command| matches!(command, egui::ViewportCommand::Decorations(_)))
+        );
     }
 
     #[test]
@@ -6900,15 +7036,9 @@ mod tests {
             .begin_stroke(Pixel([250, 20, 20, 255]), 1);
         app.tab_mut().editor.draw_to(Some((20, 20)));
         app.tab_mut().editor.finish_stroke();
-        assert_ne!(
-            app.tab().editor.document.pixel(1, 20, 20),
-            px_before_stroke
-        );
+        assert_ne!(app.tab().editor.document.pixel(1, 20, 20), px_before_stroke);
         app.step_history(false);
-        assert_eq!(
-            app.tab().editor.document.pixel(1, 20, 20),
-            px_before_stroke
-        );
+        assert_eq!(app.tab().editor.document.pixel(1, 20, 20), px_before_stroke);
         assert_eq!(
             app.tab().editor.document.layer_properties(1),
             Some((true, 180))
@@ -7062,7 +7192,8 @@ mod tests {
                 for step in 0..10_u32 {
                     let t2 = std::time::Instant::now();
                     app.tab_mut().zoom = Some(1.0 + step as f32 * 0.2);
-                    app.tab_mut().view.scroll_to = Some(vec2(step as f32 * 16.0, step as f32 * 12.0));
+                    app.tab_mut().view.scroll_to =
+                        Some(vec2(step as f32 * 16.0, step as f32 * 12.0));
                     let _ = ctx.run(
                         egui::RawInput {
                             screen_rect: Some(screen),
@@ -7392,9 +7523,9 @@ mod tests {
                 let has_rect = |predicate: &dyn Fn(&egui::epaint::RectShape) -> bool| {
                     output.shapes.iter().any(|clipped| match &clipped.shape {
                         egui::Shape::Rect(rect) => predicate(rect),
-                        egui::Shape::Vec(shapes) => shapes.iter().any(|shape| {
-                            matches!(shape, egui::Shape::Rect(rect) if predicate(rect))
-                        }),
+                        egui::Shape::Vec(shapes) => shapes.iter().any(
+                            |shape| matches!(shape, egui::Shape::Rect(rect) if predicate(rect)),
+                        ),
                         _ => false,
                     })
                 };

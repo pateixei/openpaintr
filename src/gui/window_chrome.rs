@@ -22,7 +22,10 @@ pub fn window_border(ctx: &egui::Context, theme: Theme, fullscreen: bool) {
     if radius == 0 {
         return;
     }
-    let painter = ctx.layer_painter(LayerId::new(Order::Foreground, egui::Id::new("window_border")));
+    let painter = ctx.layer_painter(LayerId::new(
+        Order::Foreground,
+        egui::Id::new("window_border"),
+    ));
     painter.rect_stroke(
         ctx.content_rect(),
         CornerRadius::same(radius),

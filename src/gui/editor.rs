@@ -343,9 +343,13 @@ impl StrokeSpec {
                 alpha_mode,
                 ..
             } => {
-                let Some(recolored) =
-                    tolerance::recolor_pixel(before, *target, *replacement, *tolerance_pct, *alpha_mode)
-                else {
+                let Some(recolored) = tolerance::recolor_pixel(
+                    before,
+                    *target,
+                    *replacement,
+                    *tolerance_pct,
+                    *alpha_mode,
+                ) else {
                     return before;
                 };
                 tolerance::blend_covered(recolored, before, eff, StrokeBlend::Overwrite)
@@ -590,7 +594,8 @@ impl Editor {
 
     pub fn insert_blank_layer(&mut self, index: usize) -> io::Result<()> {
         self.finish_stroke();
-        let name = super::i18n::format_logical("layer-number", &[&(self.document.layer_count() + 1)]);
+        let name =
+            super::i18n::format_logical("layer-number", &[&(self.document.layer_count() + 1)]);
         self.document.insert_blank_layer(index, name)?;
         let prev_selected = self.selected;
         self.selected = index;
@@ -623,9 +628,9 @@ impl Editor {
     pub fn duplicate_layer(&mut self, index: usize) -> io::Result<()> {
         self.finish_stroke();
         let prev_selected = self.selected;
-        let target = self
-            .document
-            .duplicate_layer_with_name(index, |name| super::i18n::format_logical("layer-copy", &[&name]))?;
+        let target = self.document.duplicate_layer_with_name(index, |name| {
+            super::i18n::format_logical("layer-copy", &[&name])
+        })?;
         self.selected = target;
         self.mark_full_refresh();
         self.record(Edit::LayerInserted {
@@ -902,14 +907,11 @@ impl Editor {
                         continue;
                     }
                     let local_bg = source[i];
-                    if let Some(transition) = bucket_edges::detect(
-                        edge,
-                        direction,
-                        size,
-                        local_bg,
-                        aa_mode,
-                        |p| source[index(p)],
-                    ) {
+                    if let Some(transition) =
+                        bucket_edges::detect(edge, direction, size, local_bg, aa_mode, |p| {
+                            source[index(p)]
+                        })
+                    {
                         let edge_fg = paint_at(edge, local_bg, mask);
                         let recolored = transition.over(edge_fg);
                         changed |= recolored != source[edge_index];
@@ -1130,7 +1132,9 @@ impl Editor {
             }
         }
         if new_layer {
-            let index = self.document.add_layer(super::i18n::logical_text("paste-in-progress"))?;
+            let index = self
+                .document
+                .add_layer(super::i18n::logical_text("paste-in-progress"))?;
             self.document.swap_layer_pixels(index, &mut pixels)?;
             let prev_selected = self.selected;
             self.selected = index;
@@ -1483,7 +1487,8 @@ impl Editor {
                 st.insert(pt, entry.0, combined_mask, combined_alpha, entry.3);
             }
             if next != current {
-                doc.set_pixel(st.layer, x, y, next).expect("pixel existente");
+                doc.set_pixel(st.layer, x, y, next)
+                    .expect("pixel existente");
                 dirty.push(pt);
                 *ch = true;
             }
@@ -1742,7 +1747,11 @@ mod tests {
                 .enumerate()
             {
                 assert!(
-                    actual.0.iter().zip(expected.0).all(|(&a, b)| a.abs_diff(b) <= tol),
+                    actual
+                        .0
+                        .iter()
+                        .zip(expected.0)
+                        .all(|(&a, b)| a.abs_diff(b) <= tol),
                     "mode {mode:?} pixel {},{}: actual {actual:?} vs expected {expected:?}",
                     i % 12,
                     i / 12
@@ -1754,7 +1763,11 @@ mod tests {
             let after_redo = editor.document.layer_pixels(0).unwrap();
             for (i, (&actual, &expected)) in after_redo.iter().zip(&expected).enumerate() {
                 assert!(
-                    actual.0.iter().zip(expected.0).all(|(&a, b)| a.abs_diff(b) <= tol),
+                    actual
+                        .0
+                        .iter()
+                        .zip(expected.0)
+                        .all(|(&a, b)| a.abs_diff(b) <= tol),
                     "mode {mode:?} redo pixel {},{}",
                     i % 12,
                     i / 12

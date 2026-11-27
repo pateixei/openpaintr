@@ -13,8 +13,7 @@ use openpaintr::Pixel;
 
 use super::{
     gradient_tool::SessionOutcome,
-    i18n,
-    paint_dashed_line,
+    i18n, paint_dashed_line,
     selection::{Point, Selection},
     tolerance::{self, StrokeBlend},
 };
@@ -75,9 +74,18 @@ impl FontCatalog {
         let mut defs = i18n::fonts(locale);
         let mut families = vec!["Padrão (Sans)".to_owned(), "Monoespaçada".to_owned()];
         let candidates = [
-            ("DejaVu Sans", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
-            ("DejaVu Serif", "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf"),
-            ("Liberation Sans", "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"),
+            (
+                "DejaVu Sans",
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            ),
+            (
+                "DejaVu Serif",
+                "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf",
+            ),
+            (
+                "Liberation Sans",
+                "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+            ),
             ("Ubuntu", "/usr/share/fonts/truetype/ubuntu/Ubuntu-R.ttf"),
             ("Arial", "C:\\Windows\\Fonts\\arial.ttf"),
             ("Times New Roman", "C:\\Windows\\Fonts\\times.ttf"),
@@ -92,7 +100,8 @@ impl FontCatalog {
                     .insert(name.to_owned(), Arc::new(FontData::from_owned(bytes)));
                 let mut family = vec![name.to_owned()];
                 family.extend(defs.families[&FontFamily::Proportional].iter().cloned());
-                defs.families.insert(FontFamily::Name(Arc::from(name)), family);
+                defs.families
+                    .insert(FontFamily::Name(Arc::from(name)), family);
                 families.push(name.to_owned());
             }
         }
@@ -243,7 +252,9 @@ impl TextSession {
             let y1 = (y + 1).min(atlas_h - 1);
             let fx = u - x as f32;
             let fy = v - y as f32;
-            let a_at = |px: i32, py: i32| f32::from(atlas.pixels[py as usize * atlas_w as usize + px as usize].a());
+            let a_at = |px: i32, py: i32| {
+                f32::from(atlas.pixels[py as usize * atlas_w as usize + px as usize].a())
+            };
             let top = a_at(x, y) * (1.0 - fx) + a_at(x1, y) * fx;
             let bot = a_at(x, y1) * (1.0 - fx) + a_at(x1, y1) * fx;
             (top * (1.0 - fy) + bot * fy).round().clamp(0.0, 255.0) as u8
@@ -265,8 +276,8 @@ impl TextSession {
 
                 let min_x = (p0.x.min(p1.x).min(p2.x).floor() as i32).max(0);
                 let min_y = (p0.y.min(p1.y).min(p2.y).floor() as i32).max(0);
-                let max_x = ((p0.x.max(p1.x).max(p2.x) + bold_dx).ceil() as i32)
-                    .min(size.0 as i32 - 1);
+                let max_x =
+                    ((p0.x.max(p1.x).max(p2.x) + bold_dx).ceil() as i32).min(size.0 as i32 - 1);
                 let max_y = (p0.y.max(p1.y).max(p2.y).ceil() as i32).min(size.1 as i32 - 1);
                 if min_x > max_x || min_y > max_y {
                     continue;
@@ -305,7 +316,8 @@ impl TextSession {
                                     a = a.max(eval_sample(x_sub - bold_dx, y_sub));
                                 }
                                 if a > 0 {
-                                    let slot = cov_map.entry((px as u32, py as u32)).or_insert([0; 16]);
+                                    let slot =
+                                        cov_map.entry((px as u32, py as u32)).or_insert([0; 16]);
                                     let idx = (sy * 4 + sx) as usize;
                                     slot[idx] = slot[idx].max(a);
                                 }
@@ -395,22 +407,33 @@ impl TextSession {
             Stroke::new(1.2_f32, Color32::BLACK),
         );
         painter.line_segment(
-            [anchor_screen - vec2(4.0, 0.0), anchor_screen + vec2(4.0, 0.0)],
+            [
+                anchor_screen - vec2(4.0, 0.0),
+                anchor_screen + vec2(4.0, 0.0),
+            ],
             Stroke::new(1.0_f32, Color32::BLACK),
         );
         painter.line_segment(
-            [anchor_screen - vec2(0.0, 4.0), anchor_screen + vec2(0.0, 4.0)],
+            [
+                anchor_screen - vec2(0.0, 4.0),
+                anchor_screen + vec2(0.0, 4.0),
+            ],
             Stroke::new(1.0_f32, Color32::BLACK),
         );
         // Blinking caret hint at top-right / cursor end when editing
         if ((ui.input(|i| i.time) * 2.0) as u64).is_multiple_of(2) {
             let caret_x = match self.align {
-                TextAlign::Left => box_rect.right().min(box_rect.left() + self.last_bounds.x * zoom),
+                TextAlign::Left => box_rect
+                    .right()
+                    .min(box_rect.left() + self.last_bounds.x * zoom),
                 TextAlign::Center => box_rect.center().x + self.last_bounds.x * zoom * 0.5,
                 TextAlign::Right => box_rect.right(),
             };
             painter.line_segment(
-                [pos2(caret_x, box_rect.top()), pos2(caret_x, box_rect.bottom())],
+                [
+                    pos2(caret_x, box_rect.top()),
+                    pos2(caret_x, box_rect.bottom()),
+                ],
                 Stroke::new(1.4_f32, Color32::from_rgb(103, 75, 195)),
             );
         }

@@ -176,11 +176,7 @@ fn old_pdn_3510_matches_reference_png_pixel_for_pixel() -> io::Result<()> {
     assert_eq!(pdn.dimensions(), reference.dimensions());
     let actual = pdn.composite()?;
     let expected = reference.composite()?;
-    let diffs = actual
-        .iter()
-        .zip(&expected)
-        .filter(|(a, b)| a != b)
-        .count();
+    let diffs = actual.iter().zip(&expected).filter(|(a, b)| a != b).count();
     assert_eq!(diffs, 0, "divergência de composição em oldPDN3510.pdn");
     Ok(())
 }
@@ -203,7 +199,11 @@ fn flatten_blend_and_versioned_pdn_fixtures_round_trip_cleanly() -> io::Result<(
         assert_eq!(reopened.dimensions(), doc.dimensions(), "{name}");
         assert_eq!(reopened.layer_count(), doc.layer_count(), "{name}");
         for idx in 0..doc.layer_count() {
-            assert_eq!(reopened.layer_name(idx), doc.layer_name(idx), "{name}#{idx}");
+            assert_eq!(
+                reopened.layer_name(idx),
+                doc.layer_name(idx),
+                "{name}#{idx}"
+            );
             assert_eq!(
                 reopened.layer_properties(idx),
                 doc.layer_properties(idx),
@@ -243,7 +243,11 @@ fn png_export_preserves_alpha_and_depth_options_separately() -> io::Result<()> {
     }
 
     let mut white_bytes = Vec::new();
-    doc.write_png_with_options(&mut white_bytes, PngDepth::Rgb24White, PngCompression::Balanced)?;
+    doc.write_png_with_options(
+        &mut white_bytes,
+        PngDepth::Rgb24White,
+        PngCompression::Balanced,
+    )?;
     let decoded_white = Document::read_png(Cursor::new(white_bytes))?;
     assert_eq!(
         decoded_white.composite()?,
@@ -275,10 +279,7 @@ fn png_export_preserves_alpha_and_depth_options_separately() -> io::Result<()> {
 }
 
 fn channel_diff(a: Pixel, b: Pixel) -> u8 {
-    (0..4)
-        .map(|i| a.0[i].abs_diff(b.0[i]))
-        .max()
-        .unwrap_or(0)
+    (0..4).map(|i| a.0[i].abs_diff(b.0[i])).max().unwrap_or(0)
 }
 
 fn premul_rgb_diff(a: Pixel, b: Pixel) -> u8 {

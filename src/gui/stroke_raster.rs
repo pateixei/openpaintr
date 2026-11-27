@@ -176,7 +176,11 @@ pub fn segment_dabs(
     is_first: bool,
     mut visit: impl FnMut(Point, u8),
 ) {
-    let offset = if diameter.is_multiple_of(2) { -0.5 } else { 0.0 };
+    let offset = if diameter.is_multiple_of(2) {
+        -0.5
+    } else {
+        0.0
+    };
     let step = (f64::from(diameter) * f64::from(spacing_pct.max(1)) / 100.0).max(0.25);
     let ax = f64::from(start.0) + offset;
     let ay = f64::from(start.1) + offset;
@@ -197,7 +201,13 @@ pub fn segment_dabs(
     let uy = dy / dist;
     while *carry <= dist + 1e-6 {
         let t = (*carry).min(dist);
-        dab_ssaa((ax + ux * t, ay + uy * t), diameter, hardness_pct, size, &mut visit);
+        dab_ssaa(
+            (ax + ux * t, ay + uy * t),
+            diameter,
+            hardness_pct,
+            size,
+            &mut visit,
+        );
         *carry += step;
     }
     *carry -= dist;
@@ -310,7 +320,11 @@ pub fn capsule_analytical(
     if size.0 == 0 || size.1 == 0 {
         return;
     }
-    let (start, end) = if start <= end { (start, end) } else { (end, start) };
+    let (start, end) = if start <= end {
+        (start, end)
+    } else {
+        (end, start)
+    };
     let transpose = start.0.abs_diff(end.0) < start.1.abs_diff(end.1);
     let axis = |(x, y)| if transpose { (y, x) } else { (x, y) };
     let start = axis(start);
@@ -486,7 +500,11 @@ pub fn segment_dabs_analytical(
     is_first: bool,
     mut visit: impl FnMut(Point, u8),
 ) {
-    let offset = if diameter.is_multiple_of(2) { -0.5 } else { 0.0 };
+    let offset = if diameter.is_multiple_of(2) {
+        -0.5
+    } else {
+        0.0
+    };
     let step = (f64::from(diameter) * f64::from(spacing_pct.max(1)) / 100.0).max(0.25);
     let ax = f64::from(start.0) + offset;
     let ay = f64::from(start.1) + offset;
@@ -507,7 +525,13 @@ pub fn segment_dabs_analytical(
     let uy = dy / dist;
     while *carry <= dist + 1e-6 {
         let t = (*carry).min(dist);
-        dab_analytical((ax + ux * t, ay + uy * t), diameter, hardness_pct, size, &mut visit);
+        dab_analytical(
+            (ax + ux * t, ay + uy * t),
+            diameter,
+            hardness_pct,
+            size,
+            &mut visit,
+        );
         *carry += step;
     }
     *carry -= dist;

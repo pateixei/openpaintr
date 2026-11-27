@@ -325,17 +325,17 @@ impl Theme {
                             );
                         });
                     });
-                let line = ui.allocate_exact_size(Vec2::new(ui.available_width(), 1.0), egui::Sense::hover()).0;
+                let line = ui
+                    .allocate_exact_size(Vec2::new(ui.available_width(), 1.0), egui::Sense::hover())
+                    .0;
                 ui.painter().line_segment(
                     [line.left_center(), line.right_center()],
                     Stroke::new(1.0_f32, self.border_color()),
                 );
-                Frame::new()
-                    .inner_margin(Margin::same(8))
-                    .show(ui, |ui| {
-                        ui.spacing_mut().item_spacing = Vec2::splat(6.0);
-                        body(ui);
-                    });
+                Frame::new().inner_margin(Margin::same(8)).show(ui, |ui| {
+                    ui.spacing_mut().item_spacing = Vec2::splat(6.0);
+                    body(ui);
+                });
             })
             .response
     }

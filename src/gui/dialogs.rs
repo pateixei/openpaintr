@@ -18,8 +18,11 @@ pub(super) fn modal(ctx: &egui::Context, id: &str) -> egui::Modal {
     let fullscreen = ctx.input(|input| input.viewport().fullscreen.unwrap_or(false));
     let radius = window_chrome::corner_radius(ctx, fullscreen);
     // Keep the shaded area inside the rounded window while retaining the modal's input blocker.
-    ctx.layer_painter(modal.area.layer())
-        .rect_filled(ctx.content_rect(), radius, modal.backdrop_color);
+    ctx.layer_painter(modal.area.layer()).rect_filled(
+        ctx.content_rect(),
+        radius,
+        modal.backdrop_color,
+    );
     modal
         .backdrop_color(Color32::TRANSPARENT)
         .frame(egui::Frame::popup(&ctx.style()).corner_radius(CARD_CORNER_RADIUS))
@@ -71,10 +74,9 @@ pub struct RecentFiles {
 
 impl RecentFiles {
     pub fn from_executable() -> Self {
-        let path = std::env::current_exe().ok().and_then(|exe| {
-            exe.parent()
-                .map(|parent| parent.join(RECENT_FILE))
-        });
+        let path = std::env::current_exe()
+            .ok()
+            .and_then(|exe| exe.parent().map(|parent| parent.join(RECENT_FILE)));
         let entries = path
             .as_deref()
             .and_then(|p| File::open(p).ok())
@@ -106,8 +108,13 @@ impl RecentFiles {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum SaveFormat {
-    Pdn { effort: u32 },
-    Png { depth: PngDepth, compression: PngCompression },
+    Pdn {
+        effort: u32,
+    },
+    Png {
+        depth: PngDepth,
+        compression: PngCompression,
+    },
 }
 
 pub struct SaveOptionsDialog {

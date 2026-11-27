@@ -238,18 +238,21 @@ impl Document {
             effort: effort.clamp(1, 9),
             ..Default::default()
         };
-        let bytes = img_pdn::encode_ex(&source, Some(&options), img_pdn::PDNE_BLENDOP).map_err(|code| match code {
-            ERR_NOMEM => crate::Diagnostic::io(
-                io::ErrorKind::OutOfMemory,
-                "error.pdn-save-memory",
-                "PDN: memória insuficiente ao gravar",
-            ),
-            _ => crate::Diagnostic::io(
-                io::ErrorKind::InvalidInput,
-                "error.pdn-encode",
-                "PDN: não foi possível codificar o documento",
-            ),
-        })?;
+        let bytes =
+            img_pdn::encode_ex(&source, Some(&options), img_pdn::PDNE_BLENDOP).map_err(|code| {
+                match code {
+                    ERR_NOMEM => crate::Diagnostic::io(
+                        io::ErrorKind::OutOfMemory,
+                        "error.pdn-save-memory",
+                        "PDN: memória insuficiente ao gravar",
+                    ),
+                    _ => crate::Diagnostic::io(
+                        io::ErrorKind::InvalidInput,
+                        "error.pdn-encode",
+                        "PDN: não foi possível codificar o documento",
+                    ),
+                }
+            })?;
         if bytes.len() as u64 > MAX_FILE_BYTES {
             return Err(crate::Diagnostic::io(
                 io::ErrorKind::InvalidInput,

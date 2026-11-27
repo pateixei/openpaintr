@@ -493,9 +493,15 @@ impl LineCurveSession {
         };
         dash_stroke(&mut path, &style);
         let cov_map = rasterize_path(&path, RULE_NONZERO, size, aa_mode);
-        apply_coverage_map(&mut out, base_layer, size, selection, &cov_map, self.blend, |_| {
-            self.color
-        });
+        apply_coverage_map(
+            &mut out,
+            base_layer,
+            size,
+            selection,
+            &cov_map,
+            self.blend,
+            |_| self.color,
+        );
         out
     }
 
@@ -649,7 +655,11 @@ impl ShapeSession {
 
     pub fn set_creation_bounds(&mut self, anchor: Vec2, current: Vec2, constrain: bool) {
         if self.kind == ShapeKind::Freeform {
-            if self.freeform_pts.last().is_none_or(|p| (*p - current).length() >= 1.5) {
+            if self
+                .freeform_pts
+                .last()
+                .is_none_or(|p| (*p - current).length() >= 1.5)
+            {
                 self.freeform_pts.push(current);
             }
             return;
@@ -692,7 +702,10 @@ impl ShapeSession {
     ) -> Vec<Pixel> {
         let mut out = base_layer.to_vec();
         let (min, max) = self.bounds;
-        if self.kind != ShapeKind::Freeform && (max.x - min.x).abs() < 0.5 && (max.y - min.y).abs() < 0.5 {
+        if self.kind != ShapeKind::Freeform
+            && (max.x - min.x).abs() < 0.5
+            && (max.y - min.y).abs() < 0.5
+        {
             return out;
         }
         if self.kind == ShapeKind::Freeform && self.freeform_pts.len() < 2 {
@@ -727,9 +740,15 @@ impl ShapeSession {
             } else {
                 self.outline_color
             };
-            apply_coverage_map(&mut out, base_layer, size, selection, &fill_map, self.blend, |pt| {
-                self.pattern.sample(pt.0, pt.1, fg, bg)
-            });
+            apply_coverage_map(
+                &mut out,
+                base_layer,
+                size,
+                selection,
+                &fill_map,
+                self.blend,
+                |pt| self.pattern.sample(pt.0, pt.1, fg, bg),
+            );
         }
         if do_outline {
             let style = DStyle {
@@ -854,13 +873,26 @@ impl ShapeSession {
                         let opp_world =
                             start.forward((f64::from(opp_corner.x), f64::from(opp_corner.y)));
                         let pivot = vec2(opp_world.0 as f32, opp_world.1 as f32);
-                        let rot = egui::emath::Rot2::from_angle(-(start.degrees as f32).to_radians());
+                        let rot =
+                            egui::emath::Rot2::from_angle(-(start.degrees as f32).to_radians());
                         let from = rot * (origin - pivot);
                         let to = rot * (current - pivot);
-                        let rx = if from.x.abs() < 0.01 { 1.0 } else { f64::from(to.x / from.x) };
-                        let ry = if from.y.abs() < 0.01 { 1.0 } else { f64::from(to.y / from.y) };
+                        let rx = if from.x.abs() < 0.01 {
+                            1.0
+                        } else {
+                            f64::from(to.x / from.x)
+                        };
+                        let ry = if from.y.abs() < 0.01 {
+                            1.0
+                        } else {
+                            f64::from(to.y / from.y)
+                        };
                         let (rx, ry) = if ui.ctx().input(|i| i.modifiers.shift) {
-                            let u = if (rx - 1.0).abs() > (ry - 1.0).abs() { rx } else { ry };
+                            let u = if (rx - 1.0).abs() > (ry - 1.0).abs() {
+                                rx
+                            } else {
+                                ry
+                            };
                             (u, u)
                         } else {
                             (rx, ry)
@@ -896,15 +928,26 @@ impl ShapeSession {
             }
             if let Some(ptr) = bg_response.interact_pointer_pos() {
                 let d = to_world(ptr) - origin;
-                self.affine.shift = (start.shift.0 + f64::from(d.x), start.shift.1 + f64::from(d.y));
+                self.affine.shift = (
+                    start.shift.0 + f64::from(d.x),
+                    start.shift.1 + f64::from(d.y),
+                );
                 changed = true;
             }
         }
 
         let painter = ui.painter();
-        paint_dashed_line(painter, &[points[0], points[1], points[2], points[3], points[0]]);
+        paint_dashed_line(
+            painter,
+            &[points[0], points[1], points[2], points[3], points[0]],
+        );
         painter.line_segment([top, rotation], Stroke::new(1.0_f32, Color32::WHITE));
-        painter.circle(rotation, 5.0, Color32::WHITE, Stroke::new(1.0_f32, Color32::BLACK));
+        painter.circle(
+            rotation,
+            5.0,
+            Color32::WHITE,
+            Stroke::new(1.0_f32, Color32::BLACK),
+        );
         for pt in points {
             painter.rect(
                 Rect::from_center_size(pt, Vec2::splat(8.0)),
@@ -970,25 +1013,45 @@ fn build_shape_path(
     };
 
     match kind {
-        ShapeKind::Rectangle => poly(&[(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)], true, &mut path),
+        ShapeKind::Rectangle => poly(
+            &[(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)],
+            true,
+            &mut path,
+        ),
         ShapeKind::RoundedRect => {
             let rx = (corner_radius / w).clamp(0.0, 0.48);
             let ry = (corner_radius / h).clamp(0.0, 0.48);
             if rx <= 0.005 || ry <= 0.005 {
-                poly(&[(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)], true, &mut path);
+                poly(
+                    &[(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)],
+                    true,
+                    &mut path,
+                );
             } else {
                 let k = 0.552_284_8_f32;
                 let (p0x, p0y) = tx(rx, 0.0);
                 path.move_f(p0x, p0y);
                 let l = tx(1.0 - rx, 0.0);
                 path.line_f(l.0, l.1);
-                path.cubic_f(tx(1.0 - rx * (1.0 - k), 0.0), tx(1.0, ry * (1.0 - k)), tx(1.0, ry));
+                path.cubic_f(
+                    tx(1.0 - rx * (1.0 - k), 0.0),
+                    tx(1.0, ry * (1.0 - k)),
+                    tx(1.0, ry),
+                );
                 let l = tx(1.0, 1.0 - ry);
                 path.line_f(l.0, l.1);
-                path.cubic_f(tx(1.0, 1.0 - ry * (1.0 - k)), tx(1.0 - rx * (1.0 - k), 1.0), tx(1.0 - rx, 1.0));
+                path.cubic_f(
+                    tx(1.0, 1.0 - ry * (1.0 - k)),
+                    tx(1.0 - rx * (1.0 - k), 1.0),
+                    tx(1.0 - rx, 1.0),
+                );
                 let l = tx(rx, 1.0);
                 path.line_f(l.0, l.1);
-                path.cubic_f(tx(rx * (1.0 - k), 1.0), tx(0.0, 1.0 - ry * (1.0 - k)), tx(0.0, 1.0 - ry));
+                path.cubic_f(
+                    tx(rx * (1.0 - k), 1.0),
+                    tx(0.0, 1.0 - ry * (1.0 - k)),
+                    tx(0.0, 1.0 - ry),
+                );
                 let l = tx(0.0, ry);
                 path.line_f(l.0, l.1);
                 path.cubic_f(tx(0.0, ry * (1.0 - k)), tx(rx * (1.0 - k), 0.0), (p0x, p0y));
@@ -1005,9 +1068,21 @@ fn build_shape_path(
             path.cubic_f(tx(0.0, 0.5 - k), tx(0.5 - k, 0.0), (p0x, p0y));
             path.close();
         }
-        ShapeKind::Diamond => poly(&[(0.5, 0.0), (1.0, 0.5), (0.5, 1.0), (0.0, 0.5)], true, &mut path),
-        ShapeKind::Trapezoid => poly(&[(0.2, 0.0), (0.8, 0.0), (1.0, 1.0), (0.0, 1.0)], true, &mut path),
-        ShapeKind::Parallelogram => poly(&[(0.25, 0.0), (1.0, 0.0), (0.75, 1.0), (0.0, 1.0)], true, &mut path),
+        ShapeKind::Diamond => poly(
+            &[(0.5, 0.0), (1.0, 0.5), (0.5, 1.0), (0.0, 0.5)],
+            true,
+            &mut path,
+        ),
+        ShapeKind::Trapezoid => poly(
+            &[(0.2, 0.0), (0.8, 0.0), (1.0, 1.0), (0.0, 1.0)],
+            true,
+            &mut path,
+        ),
+        ShapeKind::Parallelogram => poly(
+            &[(0.25, 0.0), (1.0, 0.0), (0.75, 1.0), (0.0, 1.0)],
+            true,
+            &mut path,
+        ),
         ShapeKind::Triangle => poly(&[(0.5, 0.0), (1.0, 1.0), (0.0, 1.0)], true, &mut path),
         ShapeKind::RightTriangle => poly(&[(0.0, 0.0), (1.0, 1.0), (0.0, 1.0)], true, &mut path),
         ShapeKind::Pentagon => regular_polygon(5, &tx, &mut path),
@@ -1015,12 +1090,86 @@ fn build_shape_path(
         ShapeKind::Star4 => star_polygon(4, 0.38, &tx, &mut path),
         ShapeKind::Star5 => star_polygon(5, 0.38, &tx, &mut path),
         ShapeKind::Star6 => star_polygon(6, 0.45, &tx, &mut path),
-        ShapeKind::ArrowRight => poly(&[(0.0, 0.28), (0.58, 0.28), (0.58, 0.05), (1.0, 0.5), (0.58, 0.95), (0.58, 0.72), (0.0, 0.72)], true, &mut path),
-        ShapeKind::ArrowLeft => poly(&[(1.0, 0.28), (0.42, 0.28), (0.42, 0.05), (0.0, 0.5), (0.42, 0.95), (0.42, 0.72), (1.0, 0.72)], true, &mut path),
-        ShapeKind::ArrowUp => poly(&[(0.28, 1.0), (0.28, 0.42), (0.05, 0.42), (0.5, 0.0), (0.95, 0.42), (0.72, 0.42), (0.72, 1.0)], true, &mut path),
-        ShapeKind::ArrowDown => poly(&[(0.28, 0.0), (0.28, 0.58), (0.05, 0.58), (0.5, 1.0), (0.95, 0.58), (0.72, 0.58), (0.72, 0.0)], true, &mut path),
-        ShapeKind::DoubleArrow => poly(&[(0.0, 0.5), (0.28, 0.15), (0.28, 0.34), (0.72, 0.34), (0.72, 0.15), (1.0, 0.5), (0.72, 0.85), (0.72, 0.66), (0.28, 0.66), (0.28, 0.85)], true, &mut path),
-        ShapeKind::Chevron => poly(&[(0.0, 0.1), (0.55, 0.1), (1.0, 0.5), (0.55, 0.9), (0.0, 0.9), (0.45, 0.5)], true, &mut path),
+        ShapeKind::ArrowRight => poly(
+            &[
+                (0.0, 0.28),
+                (0.58, 0.28),
+                (0.58, 0.05),
+                (1.0, 0.5),
+                (0.58, 0.95),
+                (0.58, 0.72),
+                (0.0, 0.72),
+            ],
+            true,
+            &mut path,
+        ),
+        ShapeKind::ArrowLeft => poly(
+            &[
+                (1.0, 0.28),
+                (0.42, 0.28),
+                (0.42, 0.05),
+                (0.0, 0.5),
+                (0.42, 0.95),
+                (0.42, 0.72),
+                (1.0, 0.72),
+            ],
+            true,
+            &mut path,
+        ),
+        ShapeKind::ArrowUp => poly(
+            &[
+                (0.28, 1.0),
+                (0.28, 0.42),
+                (0.05, 0.42),
+                (0.5, 0.0),
+                (0.95, 0.42),
+                (0.72, 0.42),
+                (0.72, 1.0),
+            ],
+            true,
+            &mut path,
+        ),
+        ShapeKind::ArrowDown => poly(
+            &[
+                (0.28, 0.0),
+                (0.28, 0.58),
+                (0.05, 0.58),
+                (0.5, 1.0),
+                (0.95, 0.58),
+                (0.72, 0.58),
+                (0.72, 0.0),
+            ],
+            true,
+            &mut path,
+        ),
+        ShapeKind::DoubleArrow => poly(
+            &[
+                (0.0, 0.5),
+                (0.28, 0.15),
+                (0.28, 0.34),
+                (0.72, 0.34),
+                (0.72, 0.15),
+                (1.0, 0.5),
+                (0.72, 0.85),
+                (0.72, 0.66),
+                (0.28, 0.66),
+                (0.28, 0.85),
+            ],
+            true,
+            &mut path,
+        ),
+        ShapeKind::Chevron => poly(
+            &[
+                (0.0, 0.1),
+                (0.55, 0.1),
+                (1.0, 0.5),
+                (0.55, 0.9),
+                (0.0, 0.9),
+                (0.45, 0.5),
+            ],
+            true,
+            &mut path,
+        ),
         ShapeKind::Heart => {
             let (p0x, p0y) = tx(0.5, 0.92);
             path.move_f(p0x, p0y);
@@ -1030,10 +1179,61 @@ fn build_shape_path(
             path.cubic_f(tx(1.0, 0.22), tx(0.95, 0.62), (p0x, p0y));
             path.close();
         }
-        ShapeKind::Lightning => poly(&[(0.58, 0.0), (0.18, 0.55), (0.46, 0.55), (0.35, 1.0), (0.82, 0.42), (0.52, 0.42)], true, &mut path),
-        ShapeKind::Cross => poly(&[(0.34, 0.0), (0.66, 0.0), (0.66, 0.34), (1.0, 0.34), (1.0, 0.66), (0.66, 0.66), (0.66, 1.0), (0.34, 1.0), (0.34, 0.66), (0.0, 0.66), (0.0, 0.34), (0.34, 0.34)], true, &mut path),
-        ShapeKind::Checkmark => poly(&[(0.08, 0.56), (0.22, 0.42), (0.40, 0.62), (0.78, 0.16), (0.92, 0.30), (0.40, 0.88)], true, &mut path),
-        ShapeKind::CalloutRect => poly(&[(0.0, 0.0), (1.0, 0.0), (1.0, 0.72), (0.48, 0.72), (0.22, 1.0), (0.26, 0.72), (0.0, 0.72)], true, &mut path),
+        ShapeKind::Lightning => poly(
+            &[
+                (0.58, 0.0),
+                (0.18, 0.55),
+                (0.46, 0.55),
+                (0.35, 1.0),
+                (0.82, 0.42),
+                (0.52, 0.42),
+            ],
+            true,
+            &mut path,
+        ),
+        ShapeKind::Cross => poly(
+            &[
+                (0.34, 0.0),
+                (0.66, 0.0),
+                (0.66, 0.34),
+                (1.0, 0.34),
+                (1.0, 0.66),
+                (0.66, 0.66),
+                (0.66, 1.0),
+                (0.34, 1.0),
+                (0.34, 0.66),
+                (0.0, 0.66),
+                (0.0, 0.34),
+                (0.34, 0.34),
+            ],
+            true,
+            &mut path,
+        ),
+        ShapeKind::Checkmark => poly(
+            &[
+                (0.08, 0.56),
+                (0.22, 0.42),
+                (0.40, 0.62),
+                (0.78, 0.16),
+                (0.92, 0.30),
+                (0.40, 0.88),
+            ],
+            true,
+            &mut path,
+        ),
+        ShapeKind::CalloutRect => poly(
+            &[
+                (0.0, 0.0),
+                (1.0, 0.0),
+                (1.0, 0.72),
+                (0.48, 0.72),
+                (0.22, 1.0),
+                (0.26, 0.72),
+                (0.0, 0.72),
+            ],
+            true,
+            &mut path,
+        ),
         ShapeKind::CalloutOval => {
             let k = 0.552_284_8_f32 * 0.5;
             let (p0x, p0y) = tx(0.5, 0.0);
@@ -1075,7 +1275,11 @@ fn star_polygon(
     let total = points * 2;
     for i in 0..total {
         let angle = -std::f32::consts::FRAC_PI_2 + i as f32 * std::f32::consts::TAU / total as f32;
-        let r = if i.is_multiple_of(2) { 0.5 } else { 0.5 * inner_ratio };
+        let r = if i.is_multiple_of(2) {
+            0.5
+        } else {
+            0.5 * inner_ratio
+        };
         let (x, y) = tx(0.5 + r * angle.cos(), 0.5 + r * angle.sin());
         if i == 0 {
             path.move_f(x, y);
