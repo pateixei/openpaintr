@@ -5674,7 +5674,7 @@ mod tests {
                                 Some(rect.fill.a())
                             }
                             egui::Shape::Mesh(mesh) => {
-                                mesh.vertices.chunks_exact(4).find_map(|quad| {
+                                mesh.vertices.as_chunks::<4>().0.iter().find_map(|quad| {
                                     Rect::from_min_max(quad[0].pos, quad[3].pos)
                                         .contains(point)
                                         .then(|| quad[0].color.a())
