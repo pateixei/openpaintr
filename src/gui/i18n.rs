@@ -379,19 +379,66 @@ pub fn error_message(error: &io::Error) -> String {
 mod tests {
     use super::*;
 
+    fn describe_placeholders(message: &str) -> String {
+        let slots: Vec<_> = placeholders(message)
+            .into_iter()
+            .map(|slot| match slot {
+                usize::MAX => "{invalid}".to_owned(),
+                slot => format!("{{{slot}}}"),
+            })
+            .collect();
+        format!("[{}]", slots.join(", "))
+    }
+
     #[test]
     fn bundled_catalogs_have_all_keys_and_matching_parameters() {
-        let catalogs = Catalogs::bundled();
-        let english = &catalogs.0[ENGLISH];
-        assert!(!english.is_empty());
-        for catalog in catalogs.0.values() {
-            assert!(english.keys().eq(catalog.keys()));
+        let catalogs: BTreeMap<&str, Catalog> = BUILTIN
+            .into_iter()
+            .map(|(code, data)| {
+                let catalog = serde_json::from_str(data)
+                    .unwrap_or_else(|error| panic!("{code}.json: invalid catalog: {error}"));
+                (code, catalog)
+            })
+            .collect();
+        assert_eq!(catalogs.len(), BUILTIN.len(), "repeated catalog code");
+        let english = &catalogs[ENGLISH];
+        assert!(!english.is_empty(), "{ENGLISH}.json: no keys");
+
+        let mut problems = Vec::new();
+        for (code, catalog) in &catalogs {
+            let mut report = |key: &str, problem: String| {
+                problems.push(format!("{code}.json: key \"{key}\": {problem}"));
+            };
+            for key in english.keys().filter(|key| !catalog.contains_key(*key)) {
+                report(key, "missing".to_owned());
+            }
             for (key, message) in catalog {
-                assert!(!message.trim().is_empty(), "{key}");
-                assert_eq!(placeholders(message), placeholders(&english[key]), "{key}");
-                assert!(!placeholders(message).contains(&usize::MAX), "{key}");
+                let Some(base) = english.get(key) else {
+                    report(key, format!("not in {ENGLISH}.json"));
+                    continue;
+                };
+                if message.trim().is_empty() {
+                    report(key, "empty value".to_owned());
+                    continue;
+                }
+                let slots = placeholders(message);
+                if slots != placeholders(base) || slots.contains(&usize::MAX) {
+                    report(
+                        key,
+                        format!(
+                            "placeholders {} do not match {} in {ENGLISH}.json",
+                            describe_placeholders(message),
+                            describe_placeholders(base),
+                        ),
+                    );
+                }
             }
         }
+        assert!(
+            problems.is_empty(),
+            "translation catalog problems:\n{}",
+            problems.join("\n")
+        );
     }
 
     #[test]
