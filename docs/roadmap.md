@@ -202,6 +202,15 @@ Switching to Adobe, creating a custom profile, and restoring its binding after a
   | Rotate/Zoom a layer (nearest) | preview | `8.61` / `86.29` | `5.49` / `62.40` |
   | Rotate/Zoom a layer (nearest) | commit | `10.22` / `123.94` | `7.04` / `100.17` |
 
+  **Gradient row buffer (plan item 2.3, November 27, 2026).** Same environment, comparing commit `a09c138` with `780da0c`: the middle of three alternating rounds of five timed runs, in milliseconds (typical / large). Output is byte-identical.
+
+  | Gradient | Phase | Before | After |
+  | --- | --- | ---: | ---: |
+  | Linear | preview | `24.51` / `206.65` | `23.73` / `201.56` |
+  | Linear | commit | `27.90` / `264.06` | `26.96` / `259.69` |
+  | Conical | preview | `31.61` / `264.12` | `31.42` / `262.49` |
+  | Conical | commit | `34.63` / `321.67` | `34.44` / `319.00` |
+
 **Acceptance criteria** — Publish the format and metadata support matrix, test file and clipboard integration on Wayland and X11, and record reproducible interactive benchmarks.
 
 ### Formats shown in the Paint.NET 5.2 Open dialog
