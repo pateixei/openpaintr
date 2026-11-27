@@ -24,6 +24,13 @@ impl AaMode {
             Self::Ssaa4x4 => tr("aa-ssaa-4x4"),
         }
     }
+
+    pub fn path_scale(self) -> f32 {
+        match self {
+            Self::Analytical => 1.0,
+            Self::Ssaa4x4 => 4.0,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -46,49 +53,15 @@ impl GlobalSettings {
     }
 
     pub fn load_at(path: &Path) -> io::Result<Self> {
-        let bytes = std::fs::read(path)?;
-        serde_json::from_slice(&bytes).map_err(io::Error::other)
+        super::storage::read_json(path)
     }
 
     pub fn save_at(&self, path: &Path) -> io::Result<()> {
-        if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
-            std::fs::create_dir_all(parent)?;
-        }
-        let bytes = serde_json::to_vec_pretty(self).map_err(io::Error::other)?;
-        super::dialogs::atomic_write_bytes(path, &bytes, true)
+        super::storage::write_json_atomic(path, self, super::storage::JsonWrite::PRETTY)
     }
 
     fn settings_path() -> io::Result<PathBuf> {
-        if let Some(xdg) = std::env::var_os("XDG_CONFIG_HOME")
-            .map(PathBuf::from)
-            .filter(|path| path.is_absolute())
-        {
-            return Ok(xdg.join("openpaintr").join("settings.json"));
-        }
-
-        #[cfg(windows)]
-        let config_root = std::env::var_os("APPDATA")
-            .map(PathBuf::from)
-            .filter(|path| path.is_absolute())
-            .or_else(|| {
-                std::env::var_os("USERPROFILE")
-                    .map(|path| PathBuf::from(path).join(".config"))
-                    .filter(|path| path.is_absolute())
-            });
-
-        #[cfg(not(windows))]
-        let config_root = std::env::var_os("HOME")
-            .map(|path| PathBuf::from(path).join(".config"))
-            .filter(|path| path.is_absolute());
-
-        if let Some(root) = config_root {
-            return Ok(root.join("openpaintr").join("settings.json"));
-        }
-
-        std::env::current_exe()
-            .ok()
-            .and_then(|exe| exe.parent().map(|dir| dir.join("settings.json")))
-            .ok_or_else(|| io::ErrorKind::NotFound.into())
+        super::storage::config_file("settings.json")
     }
 }
 

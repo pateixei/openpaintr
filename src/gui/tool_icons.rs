@@ -73,6 +73,18 @@ pub fn paint_logo(ui: &mut egui::Ui) {
     );
 }
 
+fn button_fill(theme: Theme, enabled: bool, active: bool, hot: bool, close: bool) -> Color32 {
+    if enabled && active {
+        theme.pill_active_fill()
+    } else if close && enabled && hot {
+        Color32::from_rgb(184, 45, 65)
+    } else if enabled && hot {
+        theme.hover_fill()
+    } else {
+        Color32::TRANSPARENT
+    }
+}
+
 pub fn button(ui: &mut egui::Ui, theme: Theme, tool: Tool, selected: bool) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(vec2(32.0, 32.0), egui::Sense::click());
     response.widget_info(|| {
@@ -83,13 +95,7 @@ pub fn button(ui: &mut egui::Ui, theme: Theme, tool: Tool, selected: bool) -> eg
             tool.label(),
         )
     });
-    let fill = if selected {
-        theme.pill_active_fill()
-    } else if response.hovered() {
-        theme.hover_fill()
-    } else {
-        Color32::TRANSPARENT
-    };
+    let fill = button_fill(theme, ui.is_enabled(), selected, response.hovered(), false);
     let stroke = if selected {
         Stroke::new(1.0_f32, theme.accent().linear_multiply(0.45))
     } else {
@@ -105,7 +111,7 @@ pub fn button(ui: &mut egui::Ui, theme: Theme, tool: Tool, selected: bool) -> eg
     paint_tool_symbol(
         ui.painter(),
         Rect::from_center_size(rect.center(), vec2(24.0, 24.0)),
-        theme == Theme::Dark,
+        theme,
         ui.is_enabled(),
         tool,
     );
@@ -143,13 +149,12 @@ pub fn move_button(ui: &mut egui::Ui, theme: Theme, selected: bool) -> egui::Res
 
 pub fn paint_small_tool(ui: &mut egui::Ui, tool: Tool) {
     let (rect, _) = ui.allocate_exact_size(vec2(18.0, 18.0), egui::Sense::hover());
-    paint_tool_symbol(
-        ui.painter(),
-        rect,
-        ui.visuals().dark_mode,
-        ui.is_enabled(),
-        tool,
-    );
+    let theme = if ui.visuals().dark_mode {
+        Theme::Dark
+    } else {
+        Theme::Light
+    };
+    paint_tool_symbol(ui.painter(), rect, theme, ui.is_enabled(), tool);
 }
 
 pub fn paint_shape_icon(ui: &mut egui::Ui, kind: super::ShapeKind) {
@@ -184,18 +189,9 @@ pub fn icon_button(
         egui::Sense::hover()
     };
     let (rect, response) = ui.allocate_exact_size(size, sense);
-    let close_hovered = matches!(icon, ActionIcon::CloseWindow)
-        && enabled
-        && (response.hovered() || response.has_focus());
-    let fill = if enabled && active {
-        theme.pill_active_fill()
-    } else if close_hovered {
-        Color32::from_rgb(184, 45, 65)
-    } else if enabled && (response.hovered() || response.has_focus()) {
-        theme.hover_fill()
-    } else {
-        Color32::TRANSPARENT
-    };
+    let hot = response.hovered() || response.has_focus();
+    let close = matches!(icon, ActionIcon::CloseWindow);
+    let fill = button_fill(theme, enabled, active, hot, close);
     ui.painter().rect_filled(rect, CornerRadius::same(5), fill);
     if let Some(icon) = icon.atlas() {
         let size = rect.width().min(rect.height()).clamp(10.0, 24.0) - 3.0;
@@ -206,7 +202,7 @@ pub fn icon_button(
             enabled,
         );
     } else {
-        let color = if close_hovered {
+        let color = if close && enabled && hot {
             Color32::WHITE
         } else if !enabled {
             theme.text_muted().gamma_multiply(0.45)
@@ -244,20 +240,15 @@ fn tool_icon(tool: Tool) -> Option<Icon> {
     })
 }
 
-fn paint_tool_symbol(painter: &Painter, rect: Rect, dark: bool, enabled: bool, tool: Tool) {
+fn paint_tool_symbol(painter: &Painter, rect: Rect, theme: Theme, enabled: bool, tool: Tool) {
     if let Some(icon) = tool_icon(tool) {
-        icon.paint(painter, rect, dark, enabled);
+        icon.paint(painter, rect, theme == Theme::Dark, enabled);
         return;
     }
-    let ink = if dark {
-        Color32::from_rgb(230, 232, 240)
-    } else {
-        Color32::from_rgb(44, 46, 58)
-    };
     let ink = if enabled {
-        ink
+        theme.text_primary()
     } else {
-        ink.gamma_multiply(0.45)
+        theme.text_primary().gamma_multiply(0.45)
     };
     let s = rect.width().min(rect.height());
     let c = rect.center();
@@ -270,11 +261,7 @@ fn paint_tool_symbol(painter: &Painter, rect: Rect, dark: bool, enabled: bool, t
             painter.circle_filled(p0 - vec2(s * 0.04, -s * 0.04), (s * 0.06).max(1.0), ink);
         }
         Tool::Recolor => {
-            let accent = if enabled {
-                Color32::from_rgb(122, 92, 224)
-            } else {
-                ink
-            };
+            let accent = if enabled { theme.accent() } else { ink };
             painter.circle_filled(c + vec2(-s * 0.14, s * 0.08), s * 0.18, ink);
             painter.circle_filled(c + vec2(s * 0.14, -s * 0.08), s * 0.18, accent);
         }
@@ -282,12 +269,8 @@ fn paint_tool_symbol(painter: &Painter, rect: Rect, dark: bool, enabled: bool, t
             let r = Rect::from_center_size(c, vec2(s * 0.72, s * 0.62));
             let mut mesh = egui::Mesh::default();
             let i0 = mesh.vertices.len() as u32;
-            let c_left = if dark {
-                Color32::from_rgb(232, 234, 242)
-            } else {
-                Color32::from_rgb(38, 40, 52)
-            };
-            let c_right = Color32::from_rgb(138, 108, 226);
+            let c_left = ink;
+            let c_right = theme.accent();
             mesh.colored_vertex(r.left_top(), c_left);
             mesh.colored_vertex(r.right_top(), c_right);
             mesh.colored_vertex(r.right_bottom(), c_right);
@@ -468,6 +451,6 @@ fn paint_action_icon(painter: &Painter, rect: Rect, color: Color32, icon: Action
             painter.line_segment([c + vec2(-4.5, -4.5), c + vec2(4.5, 4.5)], thin);
             painter.line_segment([c + vec2(4.5, -4.5), c + vec2(-4.5, 4.5)], thin);
         }
-        _ => unreachable!("ícone com textura no atlas"),
+        _ => unreachable!("icon has an atlas texture"),
     }
 }

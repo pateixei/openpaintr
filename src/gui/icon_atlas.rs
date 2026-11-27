@@ -180,7 +180,7 @@ fn texture(ctx: &egui::Context, dark: bool) -> Option<TextureHandle> {
     }
     let atlas = ATLAS.get_or_init(Atlas::decode).as_ref()?;
     let image = if dark { &atlas.dark } else { &atlas.light };
-    let texture = ctx.load_texture("Ícones do OpenPaintR", image.clone(), TextureOptions::LINEAR);
+    let texture = ctx.load_texture("OpenPaintR icons", image.clone(), TextureOptions::LINEAR);
     ctx.data_mut(|data| data.insert_temp(id, texture.clone()));
     Some(texture)
 }

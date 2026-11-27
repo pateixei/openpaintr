@@ -1,11 +1,15 @@
 use super::i18n::text as tr;
-use eframe::egui::{self, Color32, CursorIcon, PointerButton, Rect, Stroke, Vec2, vec2};
+use eframe::egui::{self, CursorIcon, PointerButton, Vec2, vec2};
 
 use super::{
     clipboard::Image,
     geometry::{Affine, Resampling},
-    mouse_shortcuts::{BUTTONS, MouseAction, MouseBindings, Scope, Trigger},
-    paint_dashed_line,
+    mouse_shortcuts::{MouseAction, MouseBindings, Scope},
+    session::{
+        SessionOutcome, handle_response, paint_affine_box, paint_crosshair, resize_cursor,
+        set_grab_cursor,
+    },
+    view::CanvasViewport,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -13,13 +17,6 @@ pub enum TransformTarget {
     Mask,
     Pixels,
     Layer,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TransformOutcome {
-    None,
-    Changed,
-    Commit,
 }
 
 impl TransformTarget {
@@ -95,11 +92,10 @@ impl Transform {
 
     pub fn handles(
         &mut self,
-        rect: Rect,
-        zoom: f32,
+        viewport: CanvasViewport,
         mouse: &MouseBindings,
         ui: &egui::Ui,
-    ) -> TransformOutcome {
+    ) -> SessionOutcome {
         let (min, max) = self.bounds;
         let corners = [min, vec2(max.x, min.y), max, vec2(min.x, max.y)];
         let local_edges = [
@@ -108,12 +104,8 @@ impl Transform {
             (corners[2] + corners[3]) * 0.5,
             (corners[3] + corners[0]) * 0.5,
         ];
-        let project = |affine: Affine, point: Vec2| {
-            let (x, y) = affine.forward((f64::from(point.x), f64::from(point.y)));
-            rect.min + zoom * vec2(x as f32, y as f32)
-        };
-        let points = corners.map(|point| project(self.affine, point));
-        let edges = local_edges.map(|point| project(self.affine, point));
+        let points = corners.map(|point| viewport.project(self.affine, point));
+        let edges = local_edges.map(|point| viewport.project(self.affine, point));
         let box_center = points[0].lerp(points[2], 0.5);
         let top_dir = edges[0] - box_center;
         let rotation = if top_dir.length_sq() > 1e-4 {
@@ -121,12 +113,8 @@ impl Transform {
         } else {
             edges[0] + vec2(0.0, -22.0)
         };
-        let pivot_screen = rect.min
-            + zoom
-                * vec2(
-                    (self.affine.center.0 + self.affine.shift.0) as f32,
-                    (self.affine.center.1 + self.affine.shift.1) as f32,
-                );
+        let (cx, cy) = self.affine.world_center();
+        let pivot_screen = viewport.to_screen(vec2(cx as f32, cy as f32));
 
         let mut changed = false;
 
@@ -153,142 +141,63 @@ impl Transform {
         } else if bg_response.hovered() {
             ui.ctx().set_cursor_icon(CursorIcon::Move);
         }
-        changed |= self.interact_handle(bg_handle, &bg_response, rect, zoom, mouse);
+        changed |= self.interact_handle(bg_handle, &bg_response, viewport, mouse);
 
         // 2. Corner and edge-midpoint scale handles (registered after bg so handles take priority).
-        for (i, pos) in points.into_iter().enumerate() {
-            let handle = Handle::ScaleCorner(i);
-            let response = ui.interact(
-                Rect::from_center_size(pos, Vec2::splat(14.0)),
-                ui.id().with(("transform_corner", i)),
-                egui::Sense::drag(),
-            );
-            if response.hovered() || response.dragged() {
-                let base_deg = match i {
-                    0 | 2 => 45.0,
-                    _ => 135.0,
-                };
-                ui.ctx()
-                    .set_cursor_icon(resize_cursor(self.affine.degrees as f32 + base_deg));
+        // Each group lists its id tag and the cursor angles for even/odd handles.
+        let scale_handles = [
+            (points, "transform_corner", Handle::ScaleCorner as fn(usize) -> Handle, [45.0, 135.0]),
+            (edges, "transform_edge", Handle::ScaleEdge, [90.0, 0.0]),
+        ];
+        for (positions, tag, make_handle, base_degs) in scale_handles {
+            for (i, pos) in positions.into_iter().enumerate() {
+                let response = handle_response(ui, pos, 14.0, (tag, i));
+                if response.hovered() || response.dragged() {
+                    let base_deg = base_degs[i % 2];
+                    ui.ctx()
+                        .set_cursor_icon(resize_cursor(self.affine.degrees as f32 + base_deg));
+                }
+                changed |= self.interact_handle(make_handle(i), &response, viewport, mouse);
             }
-            changed |= self.interact_handle(handle, &response, rect, zoom, mouse);
-        }
-        for (i, pos) in edges.into_iter().enumerate() {
-            let handle = Handle::ScaleEdge(i);
-            let response = ui.interact(
-                Rect::from_center_size(pos, Vec2::splat(14.0)),
-                ui.id().with(("transform_edge", i)),
-                egui::Sense::drag(),
-            );
-            if response.hovered() || response.dragged() {
-                let base_deg = match i {
-                    0 | 2 => 90.0,
-                    _ => 0.0,
-                };
-                ui.ctx()
-                    .set_cursor_icon(resize_cursor(self.affine.degrees as f32 + base_deg));
-            }
-            changed |= self.interact_handle(handle, &response, rect, zoom, mouse);
         }
 
         // 3. Dedicated top rotation handle.
-        let rot_response = ui.interact(
-            Rect::from_center_size(rotation, Vec2::splat(15.0)),
-            ui.id().with("transform_rotate"),
-            egui::Sense::drag(),
-        );
-        if rot_response.dragged() {
-            ui.ctx().set_cursor_icon(CursorIcon::Grabbing);
-        } else if rot_response.hovered() {
-            ui.ctx().set_cursor_icon(CursorIcon::Grab);
-        }
-        changed |= self.interact_handle(Handle::Rotate, &rot_response, rect, zoom, mouse);
+        let rot_response = handle_response(ui, rotation, 15.0, "transform_rotate");
+        set_grab_cursor(ui.ctx(), &rot_response);
+        changed |= self.interact_handle(Handle::Rotate, &rot_response, viewport, mouse);
 
         // 4. Pivot crosshair (only interactive when the transformed box is large enough not to block moving).
         let show_pivot = points[0].distance(points[1]) >= 28.0 && points[1].distance(points[2]) >= 28.0;
         if show_pivot || matches!(self.gesture, Some((Handle::Pivot, ..))) {
-            let pivot_response = ui.interact(
-                Rect::from_center_size(pivot_screen, Vec2::splat(14.0)),
-                ui.id().with("transform_pivot"),
-                egui::Sense::drag(),
-            );
+            let pivot_response = handle_response(ui, pivot_screen, 14.0, "transform_pivot");
             if pivot_response.hovered() || pivot_response.dragged() {
                 ui.ctx().set_cursor_icon(CursorIcon::Crosshair);
             }
-            changed |= self.interact_handle(Handle::Pivot, &pivot_response, rect, zoom, mouse);
+            changed |= self.interact_handle(Handle::Pivot, &pivot_response, viewport, mouse);
         }
 
         // 5. Paint visual overlay.
         let painter = ui.painter();
-        let outline = [points[0], points[1], points[2], points[3], points[0]];
-        paint_dashed_line(painter, &outline);
-        painter.line_segment([edges[0], rotation], (1.0_f32, Color32::WHITE));
-        painter.circle(rotation, 5.0, Color32::WHITE, (1.0_f32, Color32::BLACK));
-        for point in points.into_iter().chain(edges) {
-            painter.rect(
-                Rect::from_center_size(point, Vec2::splat(8.0)),
-                1,
-                Color32::WHITE,
-                (1.0_f32, Color32::BLACK),
-                egui::StrokeKind::Inside,
-            );
-        }
-        painter.circle(
-            pivot_screen,
-            5.5,
-            Color32::from_white_alpha(180),
-            Stroke::new(1.2_f32, Color32::BLACK),
-        );
-        painter.line_segment(
-            [pivot_screen - vec2(5.5, 0.0), pivot_screen + vec2(5.5, 0.0)],
-            Stroke::new(1.0_f32, Color32::BLACK),
-        );
-        painter.line_segment(
-            [pivot_screen - vec2(0.0, 5.5), pivot_screen + vec2(0.0, 5.5)],
-            Stroke::new(1.0_f32, Color32::BLACK),
-        );
+        paint_affine_box(painter, points, &edges, edges[0], rotation);
+        paint_crosshair(painter, pivot_screen, 5.5, 180, 5.5);
 
-        if bg_response.clicked() && self.gesture.is_none() && !changed {
-            TransformOutcome::Commit
-        } else if changed {
-            TransformOutcome::Changed
-        } else {
-            TransformOutcome::None
-        }
+        SessionOutcome::from_interaction(bg_response.clicked(), self.gesture.is_none(), changed)
     }
 
     fn interact_handle(
         &mut self,
         handle: Handle,
         response: &egui::Response,
-        rect: Rect,
-        zoom: f32,
+        viewport: CanvasViewport,
         mouse: &MouseBindings,
     ) -> bool {
-        let convert = |pointer| (pointer - rect.min) / zoom;
         let scope = match handle {
             Handle::Move => Scope::TransformMove,
             Handle::ScaleCorner(_) | Handle::ScaleEdge(_) => Scope::TransformScale,
             Handle::Rotate | Handle::BgRotate => Scope::TransformRotate,
             Handle::Pivot => Scope::TransformMove,
         };
-        let resolve_action = || {
-            response.ctx.input(|input| {
-                for btn in BUTTONS {
-                    if (input.pointer.button_down(btn) || input.pointer.button_pressed(btn))
-                        && let Some(action) = mouse.resolve(
-                            scope,
-                            Trigger::Button(btn),
-                            input.modifiers,
-                            |key| input.key_down(key),
-                        )
-                    {
-                        return Some(action);
-                    }
-                }
-                None
-            })
-        };
+        let resolve_action = || mouse.active_in(&response.ctx, scope).map(|(_, action)| action);
 
         if response.drag_started()
             && let Some(position) = response.interact_pointer_pos()
@@ -308,7 +217,7 @@ impl Transform {
             self.gesture = Some((
                 handle,
                 self.affine,
-                convert(position - response.total_drag_delta().unwrap_or_default()),
+                viewport.drag_origin(response, position),
                 action,
             ));
         }
@@ -325,12 +234,8 @@ impl Transform {
         let Some(position) = response.interact_pointer_pos() else {
             return false;
         };
-        let current = convert(position);
+        let current = viewport.to_world(position);
         let delta = current - origin;
-        let center = vec2(
-            (start.center.0 + start.shift.0) as f32,
-            (start.center.1 + start.shift.1) as f32,
-        );
         match handle {
             Handle::Move => {
                 self.affine.shift = (
@@ -343,15 +248,13 @@ impl Transform {
                 self.move_pivot(current);
             }
             Handle::Rotate | Handle::BgRotate => {
-                let mut deg = f64::from(
-                    ((current - center).angle() - (origin - center).angle()).to_degrees(),
+                let snap = matches!(live_action, MouseAction::RotateSnap)
+                    || response.ctx.input(|input| input.modifiers.shift);
+                self.affine = start.rotate_from_drag(
+                    (f64::from(origin.x), f64::from(origin.y)),
+                    (f64::from(current.x), f64::from(current.y)),
+                    snap,
                 );
-                if matches!(live_action, MouseAction::RotateSnap)
-                    || response.ctx.input(|input| input.modifiers.shift)
-                {
-                    deg = (deg / 15.0).round() * 15.0;
-                }
-                self.affine.degrees = start.degrees + deg;
             }
             Handle::ScaleCorner(corner_idx) => {
                 let (min, max) = self.bounds;
@@ -419,62 +322,16 @@ impl Transform {
                 live_action,
                 MouseAction::ScaleProportional | MouseAction::ScaleBoth
             ) || modifiers.shift);
-
-        let opp_world = start.forward((f64::from(opp_local.x), f64::from(opp_local.y)));
-        let center = vec2(
-            (start.center.0 + start.shift.0) as f32,
-            (start.center.1 + start.shift.1) as f32,
+        self.affine = start.scale_from_anchor(
+            (f64::from(origin.x), f64::from(origin.y)),
+            (f64::from(current.x), f64::from(current.y)),
+            (f64::from(opp_local.x), f64::from(opp_local.y)),
+            scale_x,
+            scale_y,
+            centered,
+            proportional,
+            0.01,
         );
-        let pivot = if centered {
-            center
-        } else {
-            vec2(opp_world.0 as f32, opp_world.1 as f32)
-        };
-
-        let rotate = egui::emath::Rot2::from_angle(-(start.degrees as f32).to_radians());
-        let from = rotate * (origin - pivot);
-        let to = rotate * (current - pivot);
-        let ratio = |from: f32, to: f32| {
-            if from.abs() < 0.01 {
-                1.0
-            } else {
-                f64::from(to / from)
-            }
-        };
-        let mut rx = if scale_x { ratio(from.x, to.x) } else { 1.0 };
-        let mut ry = if scale_y { ratio(from.y, to.y) } else { 1.0 };
-        if proportional {
-            if (rx - 1.0).abs() > (ry - 1.0).abs() {
-                ry = rx;
-            } else {
-                rx = ry;
-            }
-        }
-        let new_scale = (
-            (start.scale.0 * rx).clamp(0.01, 32.0),
-            (start.scale.1 * ry).clamp(0.01, 32.0),
-        );
-        self.affine.scale = new_scale;
-        if centered {
-            self.affine.shift = start.shift;
-        } else {
-            let mut temp = start;
-            temp.scale = new_scale;
-            let temp_opp = temp.forward((f64::from(opp_local.x), f64::from(opp_local.y)));
-            self.affine.shift = (
-                start.shift.0 + (opp_world.0 - temp_opp.0),
-                start.shift.1 + (opp_world.1 - temp_opp.1),
-            );
-        }
-    }
-}
-
-fn resize_cursor(angle_deg: f32) -> CursorIcon {
-    match ((angle_deg / 45.0).round() as i32).rem_euclid(4) {
-        0 => CursorIcon::ResizeHorizontal,
-        1 => CursorIcon::ResizeNwSe,
-        2 => CursorIcon::ResizeVertical,
-        _ => CursorIcon::ResizeNeSw,
     }
 }
 

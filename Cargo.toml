@@ -6,7 +6,7 @@ description = "Editor raster em Rust para Linux"
 
 [features]
 default = ["gui"]
-gui = ["dep:eframe", "dep:winit", "dep:rfd", "dep:tempfile", "dep:arboard", "dep:serde", "dep:serde_json", "dep:arabic_reshaper", "dep:unicode-bidi"]
+gui = ["dep:eframe", "dep:winit", "dep:rfd", "dep:tempfile", "dep:arboard", "dep:serde", "dep:serde_json", "dep:arabic_reshaper", "dep:unicode-bidi", "dep:wayland-client", "dep:image", "dep:url"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"], optional = true }
@@ -25,3 +25,8 @@ jflib-plat = { version = "0.2.1", features = ["std"] }
 jflib-rt = "0.2.1"
 arabic_reshaper = { version = "0.4.2", optional = true }
 unicode-bidi = { version = "0.3.18", optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+wayland-client = { version = "0.31.15", features = ["system"], optional = true }
+image = { version = "0.25.10", default-features = false, features = ["jpeg", "png"], optional = true }
+url = { version = "2.5", optional = true }

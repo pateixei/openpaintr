@@ -20,6 +20,14 @@ impl Edge {
         stroke_raster::apply_u8(self.foreground, background, self.coverage)
     }
 
+    fn matches_observed(&self, background: Pixel, observed: Pixel) -> bool {
+        self.over(background)
+            .0
+            .iter()
+            .zip(observed.0)
+            .all(|(&a, b)| a.abs_diff(b) <= 1)
+    }
+
     pub fn deeper(
         &self,
         observed: Pixel,
@@ -58,18 +66,11 @@ impl Edge {
         if aa_mode == AaMode::Ssaa4x4 {
             let samples = (16.0 * (f32::from(observed.0[channel]) - base) / contrast).round() as u32;
             if (1..16).contains(&samples) {
-                let coverage = ((samples * 255 + 8) / 16) as u8;
                 let edge = Self {
                     foreground,
-                    coverage,
+                    coverage: stroke_raster::samples16_to_u8(samples),
                 };
-                if edge
-                    .over(background)
-                    .0
-                    .iter()
-                    .zip(observed.0)
-                    .all(|(&a, b)| a.abs_diff(b) <= 1)
-                {
+                if edge.matches_observed(background, observed) {
                     return Some(edge);
                 }
             }
@@ -94,12 +95,7 @@ impl Edge {
             foreground,
             coverage: cov as u8,
         };
-        edge.over(background)
-            .0
-            .iter()
-            .zip(observed.0)
-            .all(|(&a, b)| a.abs_diff(b) <= 1)
-            .then_some(edge)
+        edge.matches_observed(background, observed).then_some(edge)
     }
 }
 

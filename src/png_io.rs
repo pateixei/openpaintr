@@ -2,7 +2,9 @@ use std::io::{self, BufRead, Seek, Write};
 
 use png::{BitDepth, ColorType, Compression, Decoder, Encoder, Transformations, Unit};
 
-use crate::{Document, Pixel, pdn_io::PdnMetadata};
+use crate::{
+    Document, Pixel, diagnostic::msg, pdn_io::PdnMetadata, try_vec_filled, try_vec_with_capacity,
+};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum PngDepth {
@@ -15,11 +17,26 @@ pub enum PngDepth {
 impl PngDepth {
     pub const ALL: [Self; 3] = [Self::Rgba32, Self::Rgb24White, Self::Rgb24Black];
 
-    pub fn label(self) -> &'static str {
+    pub fn label_key(self) -> &'static str {
         match self {
-            Self::Rgba32 => "RGBA 32 bits (com transparência)",
-            Self::Rgb24White => "RGB 24 bits (fundo branco)",
-            Self::Rgb24Black => "RGB 24 bits (fundo preto)",
+            Self::Rgba32 => "png-rgba32",
+            Self::Rgb24White => "png-rgb-white",
+            Self::Rgb24Black => "png-rgb-black",
+        }
+    }
+
+    pub fn background(self) -> Option<Pixel> {
+        match self {
+            Self::Rgba32 => None,
+            Self::Rgb24White => Some(Pixel([255, 255, 255, 255])),
+            Self::Rgb24Black => Some(Pixel([0, 0, 0, 255])),
+        }
+    }
+
+    pub fn flatten_pixel(self, pixel: Pixel) -> Pixel {
+        match self.background() {
+            Some(background) if pixel.0[3] < 255 => pixel.over(background, 255),
+            _ => pixel,
         }
     }
 }
@@ -36,12 +53,12 @@ pub enum PngCompression {
 impl PngCompression {
     pub const ALL: [Self; 4] = [Self::None, Self::Fast, Self::Balanced, Self::High];
 
-    pub fn label(self) -> &'static str {
+    pub fn label_key(self) -> &'static str {
         match self {
-            Self::None => "Nenhuma",
-            Self::Fast => "Rápida",
-            Self::Balanced => "Equilibrada",
-            Self::High => "Alta",
+            Self::None => "compression-none",
+            Self::Fast => "compression-fast",
+            Self::Balanced => "compression-balanced",
+            Self::High => "compression-high",
         }
     }
 
@@ -55,57 +72,65 @@ impl PngCompression {
     }
 }
 
+pub struct DecodedPng {
+    pub width: u32,
+    pub height: u32,
+    pub pixels: Vec<Pixel>,
+    pub dpi: Option<(f64, f64)>,
+}
+
+pub fn decode_png_rgba(input: impl BufRead + Seek) -> io::Result<DecodedPng> {
+    let mut decoder = Decoder::new(input);
+    decoder.set_transformations(Transformations::normalize_to_color8());
+    let mut reader = decoder.read_info()?;
+    if reader.info().animation_control.is_some() {
+        return Err(crate::Diagnostic::io(io::ErrorKind::Unsupported, msg::ANIMATED_PNG));
+    }
+
+    let size = reader.output_buffer_size().ok_or_else(|| {
+        crate::Diagnostic::io(io::ErrorKind::InvalidData, msg::INVALID_PNG_SIZE)
+    })?;
+    let mut bytes = try_vec_filled(size, 0u8)?;
+    let frame = reader.next_frame(&mut bytes)?;
+    reader.finish()?;
+
+    let pixel_count = usize::try_from(u64::from(frame.width) * u64::from(frame.height))
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    if frame.width == 0 || frame.height == 0 {
+        return Err(crate::Diagnostic::io(io::ErrorKind::InvalidData, msg::INVALID_PNG_SIZE));
+    }
+    let mut pixels = try_vec_with_capacity(pixel_count)?;
+    let channels = frame.color_type.samples();
+    for sample in bytes[..frame.buffer_size()].chunks_exact(channels) {
+        pixels.push(Pixel(match sample {
+            [gray] => [*gray, *gray, *gray, 255],
+            [gray, alpha] => [*gray, *gray, *gray, *alpha],
+            [red, green, blue] => [*red, *green, *blue, 255],
+            [red, green, blue, alpha] => [*red, *green, *blue, *alpha],
+            _ => unreachable!("invalid PNG color type"),
+        }));
+    }
+    let dpi = reader
+        .info()
+        .pixel_dims
+        .filter(|density| density.unit == Unit::Meter)
+        .map(|density| (f64::from(density.xppu) * 0.0254, f64::from(density.yppu) * 0.0254));
+    Ok(DecodedPng {
+        width: frame.width,
+        height: frame.height,
+        pixels,
+        dpi,
+    })
+}
+
 impl Document {
     pub fn read_png(input: impl BufRead + Seek) -> io::Result<Self> {
-        let mut decoder = Decoder::new(input);
-        decoder.set_transformations(Transformations::normalize_to_color8());
-        let mut reader = decoder.read_info()?;
-        if reader.info().animation_control.is_some() {
-            return Err(crate::Diagnostic::io(
-                io::ErrorKind::Unsupported,
-                "error.animated-png",
-                "PNG animado ainda não é suportado",
-            ));
+        let mut decoded = decode_png_rgba(input)?;
+        let mut document = Self::new(decoded.width, decoded.height)?;
+        if let Some((dpi_x, dpi_y)) = decoded.dpi {
+            document.pdn_metadata = PdnMetadata::with_dpi(dpi_x, dpi_y);
         }
-
-        let size = reader.output_buffer_size().ok_or_else(|| {
-            crate::Diagnostic::io(
-                io::ErrorKind::InvalidData,
-                "error.invalid-png-size",
-                "dimensões de PNG inválidas",
-            )
-        })?;
-        let mut bytes = Vec::new();
-        bytes.try_reserve_exact(size).map_err(io::Error::other)?;
-        bytes.resize(size, 0);
-        let frame = reader.next_frame(&mut bytes)?;
-        reader.finish()?;
-
-        let mut document = Self::new(frame.width, frame.height)?;
-        if let Some(density) = reader
-            .info()
-            .pixel_dims
-            .filter(|density| density.unit == Unit::Meter)
-        {
-            document.pdn_metadata = PdnMetadata::with_dpi(
-                f64::from(density.xppu) * 0.0254,
-                f64::from(density.yppu) * 0.0254,
-            );
-        }
-        let channels = frame.color_type.samples();
-        for (pixel, sample) in document.layers[0]
-            .pixels
-            .iter_mut()
-            .zip(bytes[..frame.buffer_size()].chunks_exact(channels))
-        {
-            *pixel = Pixel(match sample {
-                [gray] => [*gray, *gray, *gray, 255],
-                [gray, alpha] => [*gray, *gray, *gray, *alpha],
-                [red, green, blue] => [*red, *green, *blue, 255],
-                [red, green, blue, alpha] => [*red, *green, *blue, *alpha],
-                _ => unreachable!("tipo de cor PNG inválido"),
-            });
-        }
+        document.swap_layer_pixels(0, &mut decoded.pixels)?;
         Ok(document)
     }
 
@@ -131,24 +156,15 @@ impl Document {
         let mut writer = encoder.write_header()?;
         let mut stream = writer.stream_writer()?;
         let stride = self.width as usize * if depth == PngDepth::Rgba32 { 4 } else { 3 };
-        let mut row = Vec::new();
-        row.try_reserve_exact(stride).map_err(io::Error::other)?;
-        let bg = match depth {
-            PngDepth::Rgb24White => Some(Pixel([255, 255, 255, 255])),
-            PngDepth::Rgb24Black => Some(Pixel([0, 0, 0, 255])),
-            PngDepth::Rgba32 => None,
-        };
+        let mut row = try_vec_with_capacity(stride)?;
+        let bg = depth.background();
         for pixels in pixels.chunks_exact(self.width as usize) {
             row.clear();
             match bg {
                 None => row.extend(pixels.iter().flat_map(|pixel| pixel.0)),
-                Some(background) => {
+                Some(_) => {
                     for &pixel in pixels {
-                        let Pixel([r, g, b, _]) = if pixel.0[3] == 255 {
-                            pixel
-                        } else {
-                            pixel.over(background, 255)
-                        };
+                        let Pixel([r, g, b, _]) = depth.flatten_pixel(pixel);
                         row.extend_from_slice(&[r, g, b]);
                     }
                 }

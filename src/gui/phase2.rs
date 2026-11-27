@@ -2,16 +2,19 @@ use super::i18n::text as tr;
 use std::io;
 
 use eframe::egui::{self, Vec2, vec2};
-use openpaintr::{Document, Pixel};
+use openpaintr::Document;
 
 use super::{
-    Action, App, Tool,
+    Action, App, MAX_BRUSH_DIAMETER, Tool,
     dialogs::modal,
+    editor::Editor,
     geometry::{self, Affine, Orthogonal, Resampling},
     selection::{Point, Selection, Shape},
+    session::ActiveSession,
     shortcuts::Command,
     transform::{Transform, TransformTarget},
-    view::Unit,
+    view::{MAX_ZOOM, MIN_ZOOM, Unit, ZOOM_IN_FACTOR, ZOOM_OUT_FACTOR},
+    widgets::{dimension_inputs, enum_combo, max_canvas_side, max_texture_side},
 };
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -30,13 +33,7 @@ pub struct SizeDialog {
 }
 
 pub(super) fn resampling_selector(ui: &mut egui::Ui, method: &mut Resampling) {
-    egui::ComboBox::from_id_salt("reamostragem")
-        .selected_text(method.label())
-        .show_ui(ui, |ui| {
-            for option in Resampling::ALL {
-                ui.selectable_value(method, option, option.label());
-            }
-        });
+    enum_combo(ui, "reamostragem", None, method, &Resampling::ALL, Resampling::label);
 }
 
 pub fn menu_check_item(ui: &mut egui::Ui, checked: bool, label: &str, hint: &str) -> bool {
@@ -164,7 +161,7 @@ impl App {
     }
 
     pub fn step_zoom(&mut self, factor: f32) {
-        let next = (self.tab().display_zoom * factor).clamp(0.01, 32.0);
+        let next = (self.tab().display_zoom * factor).clamp(MIN_ZOOM, MAX_ZOOM);
         self.tab_mut().zoom = Some(next);
     }
 
@@ -179,8 +176,8 @@ impl App {
         else {
             return;
         };
-        let size = (max.0 - min.0 + 1, max.1 - min.1 + 1);
-        let limit = ctx.input(|input| input.max_texture_side);
+        let size = super::selection::bounds_size((min, max));
+        let limit = max_texture_side(ctx);
         if size.0.max(size.1) as usize > limit {
             self.report(Err(io::Error::other(tr("selection-too-large"))), "");
             return;
@@ -190,21 +187,7 @@ impl App {
             let tab = self.tab();
             let selection = tab.editor.selection.as_ref().unwrap();
             tab.editor.document.remap(size.0, size.1, |source, x, y| {
-                let point = (min.0 + x, min.1 + y);
-                let cov = selection.coverage_u8(point);
-                if cov == 0 {
-                    Pixel::default()
-                } else {
-                    let mut px =
-                        geometry::pixel(source, dimensions, i64::from(point.0), i64::from(point.1));
-                    if cov < 255 {
-                        px.0[3] = ((u32::from(px.0[3]) * u32::from(cov) + 127) / 255) as u8;
-                        if px.0[3] == 0 {
-                            px = Pixel::default();
-                        }
-                    }
-                    px
-                }
+                selection.mask_pixel(source, dimensions, (min.0 + x, min.1 + y))
             })
         };
         self.install_geometry(result, selected, "crop-selection");
@@ -276,16 +259,14 @@ impl App {
             let result = self
                 .clipboard
                 .get()
-                .and_then(|image| self.tab_mut().editor.paste_image(image, true));
+                .and_then(|image| self.tab_mut().editor.paste_into_new_layer(image));
             self.finish_geometry(result);
             return;
         }
         match self.clipboard.get() {
             Ok(mut image) => {
                 let size = self.tab().editor.document.dimensions();
-                if image.origin.0 >= size.0 || image.origin.1 >= size.1 {
-                    image.origin = (0, 0);
-                }
+                image.origin = image.clamped_origin(size);
                 let end = (
                     (image.origin.0 + image.size.0.saturating_sub(1)).min(size.0 - 1),
                     (image.origin.1 + image.size.1.saturating_sub(1)).min(size.1 - 1),
@@ -300,7 +281,11 @@ impl App {
                     Some(Selection::new(Shape::Rectangle, image.origin, end)),
                     "paste",
                 );
-                tab.transform = Some(Transform::with_floating(affine, (min, max), image));
+                tab.session = Some(ActiveSession::Transform(Transform::with_floating(
+                    affine,
+                    (min, max),
+                    image,
+                )));
                 tab.editor.mark_full_refresh();
             }
             Err(error) => self.report(Err(error), ""),
@@ -326,17 +311,18 @@ impl App {
         self.finish_geometry(result);
     }
 
-    pub fn commit_active_transform(&mut self) {
-        if let Some(transform) = self.tab_mut().transform.take() {
-            self.commit_transform(transform);
-        }
+    fn run_layer_op(&mut self, op: impl FnOnce(&mut Editor) -> io::Result<()>) {
+        self.finish_opacity();
+        self.commit_active_session();
+        let result = op(&mut self.tab_mut().editor);
+        self.finish_geometry(result);
     }
 
     pub fn paste_new_document(&mut self, ctx: &egui::Context) {
         let result = (|| {
             let image = self.clipboard.get()?;
             let (width, height) = image.size;
-            let limit = ctx.input(|input| input.max_texture_side).min(8192);
+            let limit = max_canvas_side(ctx) as usize;
             if width.max(height) as usize > limit {
                 return Err(io::Error::other(tr("clipboard-image-too-large")));
             }
@@ -407,7 +393,12 @@ impl App {
                     BrushSmallerFast => -5,
                     _ => 5,
                 };
-                self.diameter = self.diameter.saturating_add_signed(delta).clamp(1, 96);
+                if !self.adjust_stroke_size(delta) {
+                    self.diameter = self
+                        .diameter
+                        .saturating_add_signed(delta)
+                        .clamp(1, MAX_BRUSH_DIAMETER);
+                }
             }
             New => self.perform(ctx, Action::New),
             Open => self.perform(ctx, Action::Open),
@@ -437,8 +428,8 @@ impl App {
             }
             MovePixels | FreeTransform => self.start_transform(TransformTarget::Layer),
             MoveMask => self.start_transform(TransformTarget::Mask),
-            ZoomIn => self.step_zoom(1.25),
-            ZoomOut => self.step_zoom(0.8),
+            ZoomIn => self.step_zoom(ZOOM_IN_FACTOR),
+            ZoomOut => self.step_zoom(ZOOM_OUT_FACTOR),
             Fit => {
                 let tab = self.tab_mut();
                 tab.zoom = None;
@@ -497,95 +488,53 @@ impl App {
                 });
                 self.install_geometry(result, 0, "flatten");
             }
-            AddLayer => {
-                self.finish_opacity();
-                let result = self.tab_mut().editor.add_layer();
-                self.finish_geometry(result);
-            }
-            InsertLayerInPanel => {
-                self.finish_opacity();
-                self.commit_active_session();
-                let index = self.tab().editor.selected + 1;
-                let result = self.tab_mut().editor.insert_blank_layer(index);
-                self.finish_geometry(result);
-            }
+            AddLayer => self.run_layer_op(Editor::add_layer),
+            InsertLayerInPanel => self.run_layer_op(|ed| ed.insert_blank_layer(ed.selected + 1)),
             DeleteLayer | DeleteLayerInPanel => {
-                self.finish_opacity();
-                if command == DeleteLayerInPanel {
-                    if self.tab().editor.document.layer_count() == 1 {
-                        return;
-                    }
-                    self.commit_active_session();
+                if command == DeleteLayerInPanel && self.tab().editor.document.layer_count() == 1 {
+                    return;
                 }
-                let selected = self.tab().editor.selected;
-                let result = self.tab_mut().editor.delete_layer(selected);
-                self.finish_geometry(result);
+                self.run_layer_op(|ed| ed.delete_layer(ed.selected));
             }
-            DuplicateLayer => {
-                self.finish_opacity();
-                let selected = self.tab().editor.selected;
-                let result = self.tab_mut().editor.duplicate_layer(selected);
-                self.finish_geometry(result);
-            }
-            MergeLayerDown => {
-                self.finish_opacity();
-                let selected = self.tab().editor.selected;
-                let result = self.tab_mut().editor.merge_layer_down(selected);
-                self.finish_geometry(result);
-            }
+            DuplicateLayer => self.run_layer_op(|ed| ed.duplicate_layer(ed.selected)),
+            MergeLayerDown => self.run_layer_op(|ed| ed.merge_layer_down(ed.selected)),
             ImportLayer => self.import_layer_from_file(ctx),
             LayerProperties => self.open_layer_properties(self.tab().editor.selected),
             MoveLayerTop | MoveLayerUp | MoveLayerDown | MoveLayerBottom => {
-                self.finish_opacity();
-                let count = self.tab().editor.document.layer_count();
-                let selected = self.tab().editor.selected;
-                let (to, label) = match command {
-                    MoveLayerTop => (count - 1, "layer-to-top"),
-                    MoveLayerUp => ((selected + 1).min(count - 1), "layer-up"),
-                    MoveLayerDown => (selected.saturating_sub(1), "layer-down"),
-                    _ => (0, "layer-to-bottom"),
-                };
-                let result = self.tab_mut().editor.move_layer(selected, to, label);
-                self.finish_geometry(result);
+                self.run_layer_op(|ed| {
+                    let count = ed.document.layer_count();
+                    let selected = ed.selected;
+                    let (to, label) = match command {
+                        MoveLayerTop => (count - 1, "layer-to-top"),
+                        MoveLayerUp => ((selected + 1).min(count - 1), "layer-up"),
+                        MoveLayerDown => (selected.saturating_sub(1), "layer-down"),
+                        _ => (0, "layer-to-bottom"),
+                    };
+                    ed.move_layer(selected, to, label)
+                });
             }
-            GoTopLayer => {
+            GoTopLayer | GoUpLayer | GoDownLayer | GoBottomLayer => {
                 self.finish_opacity();
-                self.tab_mut().editor.select_first_layer();
-            }
-            GoUpLayer => {
-                self.finish_opacity();
-                self.tab_mut().editor.select_prev_layer();
-            }
-            GoDownLayer => {
-                self.finish_opacity();
-                self.tab_mut().editor.select_next_layer();
-            }
-            GoBottomLayer => {
-                self.finish_opacity();
-                self.tab_mut().editor.select_last_layer();
+                let ed = &mut self.tab_mut().editor;
+                match command {
+                    GoTopLayer => ed.select_first_layer(),
+                    GoUpLayer => ed.select_prev_layer(),
+                    GoDownLayer => ed.select_next_layer(),
+                    _ => ed.select_last_layer(),
+                }
             }
             ToggleLayer => {
-                self.finish_opacity();
+                self.commit_active_session();
                 let layer = self.tab().editor.selected;
-                let before = self.tab().editor.document.layer_properties(layer).unwrap();
-                let result = self
-                    .tab_mut()
-                    .editor
-                    .set_properties(layer, (!before.0, before.1));
-                if result.is_ok() {
-                    self.tab_mut().editor.record_properties(layer, before);
-                }
-                self.finish_geometry(result);
+                self.toggle_layer_visibility(layer);
             }
             FlipLayerX | FlipLayerY | RotateLayerHalf => {
-                self.finish_opacity();
                 let operation = match command {
                     FlipLayerX => Orthogonal::FlipX,
                     FlipLayerY => Orthogonal::FlipY,
                     _ => Orthogonal::HalfTurn,
                 };
-                let result = self.tab_mut().editor.orthogonal_layer(operation);
-                self.finish_geometry(result);
+                self.run_layer_op(|ed| ed.orthogonal_layer(operation));
             }
             RotateZoom => self.start_transform(TransformTarget::Layer),
             SwapColors => self.palette.swap(),
@@ -618,12 +567,16 @@ impl App {
         let max = vec2(max.0 as f32 + 1.0, max.1 as f32 + 1.0);
         let center = (min + max) * 0.5;
         affine.center = (f64::from(center.x), f64::from(center.y));
-        self.tab_mut().transform = Some(Transform::new(target, affine, (min, max)));
+        self.tab_mut().session = Some(ActiveSession::Transform(Transform::new(
+            target,
+            affine,
+            (min, max),
+        )));
     }
 
     pub fn geometry_dialogs(&mut self, ctx: &egui::Context) {
         if let Some(mut dialog) = self.size_dialog.take() {
-            let limit = ctx.input(|input| input.max_texture_side).min(8192) as u32;
+            let limit = max_canvas_side(ctx);
             let response = modal(ctx, "dimensoes").show(ctx, |ui| {
                 ui.heading(if dialog.kind == SizeKind::Resize {
                     tr("resize")
@@ -631,22 +584,13 @@ impl App {
                     tr("canvas-size")
                 });
                 ui.horizontal(|ui| {
-                    ui.label(tr("width"));
-                    let w = ui
-                        .add(
-                            egui::DragValue::new(&mut dialog.dimensions.0)
-                                .range(1..=limit)
-                                .suffix(" px"),
-                        )
-                        .changed();
-                    ui.label(tr("height"));
-                    let h = ui
-                        .add(
-                            egui::DragValue::new(&mut dialog.dimensions.1)
-                                .range(1..=limit)
-                                .suffix(" px"),
-                        )
-                        .changed();
+                    let (w, h) = dimension_inputs(
+                        ui,
+                        &mut dialog.dimensions.0,
+                        &mut dialog.dimensions.1,
+                        limit,
+                        true,
+                    );
                     if dialog.kind == SizeKind::Resize && dialog.proportional {
                         if w {
                             dialog.dimensions =
@@ -736,6 +680,8 @@ pub fn anchor_offset(original: Point, size: Point, anchor: (i64, i64)) -> (i64, 
 
 #[cfg(test)]
 mod tests {
+    use openpaintr::Pixel;
+
     use super::*;
 
     #[test]

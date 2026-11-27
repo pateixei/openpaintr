@@ -3,7 +3,7 @@ use std::io;
 
 use openpaintr::{Document, Pixel};
 
-use super::selection::Point;
+use super::{selection::Point, stroke_raster::SSAA_OFFSETS_UNIT};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Resampling {
@@ -73,12 +73,90 @@ pub struct Affine {
 
 impl Affine {
     pub fn centered(size: Point) -> Self {
+        Self::centered_on((f64::from(size.0) * 0.5, f64::from(size.1) * 0.5))
+    }
+
+    pub fn centered_on(center: (f64, f64)) -> Self {
         Self {
-            center: (f64::from(size.0) * 0.5, f64::from(size.1) * 0.5),
+            center,
             shift: (0.0, 0.0),
             scale: (1.0, 1.0),
             degrees: 0.0,
         }
+    }
+
+    pub fn world_center(self) -> (f64, f64) {
+        (self.center.0 + self.shift.0, self.center.1 + self.shift.1)
+    }
+
+    pub fn rotate_from_drag(
+        self,
+        origin: (f64, f64),
+        current: (f64, f64),
+        snap_15: bool,
+    ) -> Self {
+        let center = self.world_center();
+        let a0 = (origin.1 - center.1).atan2(origin.0 - center.0);
+        let a1 = (current.1 - center.1).atan2(current.0 - center.0);
+        let mut deg = (a1 - a0).to_degrees();
+        if snap_15 {
+            deg = (deg / 15.0).round() * 15.0;
+        }
+        Self {
+            degrees: self.degrees + deg,
+            ..self
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn scale_from_anchor(
+        self,
+        origin: (f64, f64),
+        current: (f64, f64),
+        opp_local: (f64, f64),
+        scale_x: bool,
+        scale_y: bool,
+        centered: bool,
+        proportional: bool,
+        min_scale: f64,
+    ) -> Self {
+        let opp_world = self.forward(opp_local);
+        let pivot = if centered {
+            self.world_center()
+        } else {
+            opp_world
+        };
+        let (sin, cos) = (-self.degrees.to_radians()).sin_cos();
+        let rot = |pt: (f64, f64)| {
+            let dx = pt.0 - pivot.0;
+            let dy = pt.1 - pivot.1;
+            (dx * cos - dy * sin, dx * sin + dy * cos)
+        };
+        let from = rot(origin);
+        let to = rot(current);
+        let ratio = |f: f64, t: f64| if f.abs() < 0.01 { 1.0 } else { t / f };
+        let mut rx = if scale_x { ratio(from.0, to.0) } else { 1.0 };
+        let mut ry = if scale_y { ratio(from.1, to.1) } else { 1.0 };
+        if proportional {
+            if (rx - 1.0).abs() > (ry - 1.0).abs() {
+                ry = rx;
+            } else {
+                rx = ry;
+            }
+        }
+        let scale = (
+            (self.scale.0 * rx).clamp(min_scale, 32.0),
+            (self.scale.1 * ry).clamp(min_scale, 32.0),
+        );
+        let mut out = Self { scale, ..self };
+        if !centered {
+            let temp_opp = out.forward(opp_local);
+            out.shift = (
+                self.shift.0 + (opp_world.0 - temp_opp.0),
+                self.shift.1 + (opp_world.1 - temp_opp.1),
+            );
+        }
+        out
     }
 
     pub fn inverse(self, (x, y): (f64, f64)) -> (f64, f64) {
@@ -106,11 +184,15 @@ impl Affine {
     }
 }
 
-pub fn pixel(source: &[Pixel], size: Point, x: i64, y: i64) -> Pixel {
+pub fn pixel_checked(source: &[Pixel], size: Point, x: i64, y: i64) -> Option<Pixel> {
     if x < 0 || y < 0 || x >= i64::from(size.0) || y >= i64::from(size.1) {
-        return Pixel::default();
+        return None;
     }
-    source[y as usize * size.0 as usize + x as usize]
+    Some(source[y as usize * size.0 as usize + x as usize])
+}
+
+pub fn pixel(source: &[Pixel], size: Point, x: i64, y: i64) -> Pixel {
+    pixel_checked(source, size, x, y).unwrap_or_default()
 }
 
 pub fn resample(
@@ -130,8 +212,8 @@ pub fn resample(
             let mut samples = [(Pixel::default(), 1.0 / 16.0); 16];
             for (index, sample) in samples.iter_mut().enumerate() {
                 sample.0 = nearest((
-                    x + (index % 4) as f64 * 0.25 + 0.125,
-                    y + (index / 4) as f64 * 0.25 + 0.125,
+                    x + SSAA_OFFSETS_UNIT[index % 4],
+                    y + SSAA_OFFSETS_UNIT[index / 4],
                 ));
             }
             weighted(samples)

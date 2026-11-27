@@ -1,7 +1,10 @@
 use super::i18n::text as tr;
-use openpaintr::Pixel;
+use openpaintr::{Pixel, mul_u8};
 
-use super::stroke_raster;
+use super::{
+    selection::{Point, Selection},
+    stroke_raster,
+};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum AlphaMatchMode {
@@ -92,23 +95,6 @@ impl FillPattern {
     }
 }
 
-#[inline]
-fn premul(Pixel([r, g, b, a]): Pixel) -> [u8; 4] {
-    let alpha = u32::from(a);
-    if alpha == 0 {
-        return [0, 0, 0, 0];
-    }
-    if alpha == 255 {
-        return [r, g, b, 255];
-    }
-    [
-        ((u32::from(r) * alpha + 127) / 255) as u8,
-        ((u32::from(g) * alpha + 127) / 255) as u8,
-        ((u32::from(b) * alpha + 127) / 255) as u8,
-        a,
-    ]
-}
-
 pub fn color_matches(
     reference: Pixel,
     candidate: Pixel,
@@ -123,7 +109,7 @@ pub fn color_matches(
             AlphaMatchMode::Straight => reference == candidate,
             AlphaMatchMode::Premultiplied => {
                 (reference.0[3] == 0 && candidate.0[3] == 0)
-                    || premul(reference) == premul(candidate)
+                    || reference.premul_channels() == candidate.premul_channels()
             }
         };
     }
@@ -131,11 +117,11 @@ pub fn color_matches(
     let thr = tol * tol * 4;
     let a = match alpha_mode {
         AlphaMatchMode::Straight => reference.0,
-        AlphaMatchMode::Premultiplied => premul(reference),
+        AlphaMatchMode::Premultiplied => reference.premul_channels(),
     };
     let b = match alpha_mode {
         AlphaMatchMode::Straight => candidate.0,
-        AlphaMatchMode::Premultiplied => premul(candidate),
+        AlphaMatchMode::Premultiplied => candidate.premul_channels(),
     };
     let sum: u32 = a
         .into_iter()
@@ -158,19 +144,38 @@ pub fn recolor_pixel(
     if px.0[3] == 0 || !color_matches(target, px, tolerance_pct, alpha_mode) {
         return None;
     }
-    let out = [
+    let alpha = mul_u8(px.0[3], replacement.0[3]);
+    if alpha == 0 {
+        return Some(Pixel::default());
+    }
+    Some(Pixel([
         (i32::from(px.0[0]) + i32::from(replacement.0[0]) - i32::from(target.0[0])).clamp(0, 255)
             as u8,
         (i32::from(px.0[1]) + i32::from(replacement.0[1]) - i32::from(target.0[1])).clamp(0, 255)
             as u8,
         (i32::from(px.0[2]) + i32::from(replacement.0[2]) - i32::from(target.0[2])).clamp(0, 255)
             as u8,
-        ((u32::from(px.0[3]) * u32::from(replacement.0[3]) + 127) / 255) as u8,
-    ];
-    if out[3] == 0 {
-        Some(Pixel::default())
-    } else {
-        Some(Pixel(out))
+        alpha,
+    ]))
+}
+
+pub(super) fn blend_coverage_in_place(
+    pixels: &mut [Pixel],
+    size: Point,
+    selection: Option<&Selection>,
+    covs: impl IntoIterator<Item = (Point, u8)>,
+    blend: StrokeBlend,
+    mut color_at: impl FnMut(Point) -> Pixel,
+) {
+    let w = size.0 as usize;
+    for (pt @ (x, y), cov) in covs {
+        let sel_cov = selection.map_or(255, |sel| sel.coverage_u8(pt));
+        let eff = mul_u8(cov, sel_cov);
+        if eff == 0 {
+            continue;
+        }
+        let idx = y as usize * w + x as usize;
+        pixels[idx] = blend_covered(color_at(pt), pixels[idx], eff, blend);
     }
 }
 

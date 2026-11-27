@@ -27,23 +27,21 @@ impl Theme {
             Self::Light => egui::Visuals::light(),
             Self::Dark => egui::Visuals::dark(),
         };
-        let (panel, field, active, hover, border) = match self {
-            Self::Light => (
-                rgb(245, 246, 252),
-                rgb(233, 235, 247),
-                rgb(221, 217, 248),
-                rgb(226, 228, 244),
-                rgb(218, 220, 238),
-            ),
-            Self::Dark => (
-                rgb(23, 25, 36),
-                rgb(40, 43, 60),
-                rgb(68, 62, 114),
-                rgb(52, 55, 76),
-                rgb(56, 60, 84),
-            ),
-        };
+        let (panel, field, active, hover, border) = (
+            self.workspace(),
+            match self {
+                Self::Light => rgb(233, 235, 247),
+                Self::Dark => rgb(40, 43, 60),
+            },
+            self.pill_active_fill(),
+            match self {
+                Self::Light => rgb(226, 228, 244),
+                Self::Dark => rgb(52, 55, 76),
+            },
+            self.border_color(),
+        );
         let fg = self.text_primary();
+        let active_fg = self.pill_active_fg();
         let accent = self.accent();
 
         visuals.panel_fill = panel;
@@ -63,43 +61,28 @@ impl Theme {
         visuals.selection.bg_fill = active;
         visuals.selection.stroke = Stroke::new(1.0_f32, accent);
 
-        visuals.widgets.noninteractive.bg_fill = panel;
-        visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0_f32, border);
-        visuals.widgets.noninteractive.fg_stroke = Stroke::new(1.0_f32, fg);
+        set_widget_state(
+            &mut visuals.widgets.noninteractive,
+            panel,
+            Stroke::new(1.0_f32, border),
+            Some(fg),
+            None,
+        );
+        for (state, bg, stroke, text_fg) in [
+            (&mut visuals.widgets.inactive, field, Stroke::NONE, fg),
+            (&mut visuals.widgets.hovered, hover, Stroke::NONE, fg),
+            (
+                &mut visuals.widgets.active,
+                active,
+                Stroke::new(1.0_f32, accent),
+                active_fg,
+            ),
+            (&mut visuals.widgets.open, active, Stroke::NONE, active_fg),
+        ] {
+            set_widget_state(state, bg, stroke, Some(text_fg), Some(5));
+        }
 
-        visuals.widgets.inactive.bg_fill = field;
-        visuals.widgets.inactive.weak_bg_fill = field;
-        visuals.widgets.inactive.bg_stroke = Stroke::NONE;
-        visuals.widgets.inactive.fg_stroke = Stroke::new(1.0_f32, fg);
-        visuals.widgets.inactive.corner_radius = CornerRadius::same(5);
-
-        visuals.widgets.hovered.bg_fill = hover;
-        visuals.widgets.hovered.weak_bg_fill = hover;
-        visuals.widgets.hovered.bg_stroke = Stroke::NONE;
-        visuals.widgets.hovered.fg_stroke = Stroke::new(1.0_f32, fg);
-        visuals.widgets.hovered.corner_radius = CornerRadius::same(5);
-
-        visuals.widgets.active.bg_fill = active;
-        visuals.widgets.active.weak_bg_fill = active;
-        visuals.widgets.active.bg_stroke = Stroke::new(1.0_f32, accent);
-        visuals.widgets.active.fg_stroke = Stroke::new(1.0_f32, self.pill_active_fg());
-        visuals.widgets.active.corner_radius = CornerRadius::same(5);
-
-        visuals.widgets.open.bg_fill = active;
-        visuals.widgets.open.weak_bg_fill = active;
-        visuals.widgets.open.bg_stroke = Stroke::NONE;
-        visuals.widgets.open.fg_stroke = Stroke::new(1.0_f32, self.pill_active_fg());
-        visuals.widgets.open.corner_radius = CornerRadius::same(5);
-
-        visuals.popup_shadow = Shadow {
-            offset: [0, 3],
-            blur: 8,
-            spread: 0,
-            color: Color32::from_black_alpha(match self {
-                Self::Light => 28,
-                Self::Dark => 90,
-            }),
-        };
+        visuals.popup_shadow = self.shadow(3, 8, [28, 90]);
 
         style.visuals = visuals;
         ctx.set_style(style);
@@ -119,21 +102,7 @@ impl Theme {
         };
         style.spacing.item_spacing = Vec2::new(2.0, 0.0);
         style.spacing.button_padding = Vec2::new(8.0, 3.0);
-        style.visuals.widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
-        style.visuals.widgets.inactive.bg_fill = Color32::TRANSPARENT;
-        style.visuals.widgets.inactive.bg_stroke = Stroke::NONE;
-        style.visuals.widgets.hovered.weak_bg_fill = hover;
-        style.visuals.widgets.hovered.bg_fill = hover;
-        style.visuals.widgets.hovered.bg_stroke = Stroke::NONE;
-        style.visuals.widgets.hovered.corner_radius = CornerRadius::same(4);
-        style.visuals.widgets.active.weak_bg_fill = open;
-        style.visuals.widgets.active.bg_fill = open;
-        style.visuals.widgets.active.bg_stroke = Stroke::NONE;
-        style.visuals.widgets.active.corner_radius = CornerRadius::same(4);
-        style.visuals.widgets.open.weak_bg_fill = open;
-        style.visuals.widgets.open.bg_fill = open;
-        style.visuals.widgets.open.bg_stroke = Stroke::NONE;
-        style.visuals.widgets.open.corner_radius = CornerRadius::same(4);
+        style_menu_widgets(&mut style.visuals.widgets, hover, open, 4);
     }
 
     pub fn menu_popup_style(style: &mut egui::Style) {
@@ -159,21 +128,7 @@ impl Theme {
         style.visuals.window_corner_radius = CornerRadius::same(2);
         style.visuals.window_fill = bg;
         style.visuals.window_stroke = Stroke::new(1.0_f32, border);
-        style.visuals.widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
-        style.visuals.widgets.inactive.bg_fill = Color32::TRANSPARENT;
-        style.visuals.widgets.inactive.bg_stroke = Stroke::NONE;
-        style.visuals.widgets.hovered.weak_bg_fill = hover;
-        style.visuals.widgets.hovered.bg_fill = hover;
-        style.visuals.widgets.hovered.bg_stroke = Stroke::NONE;
-        style.visuals.widgets.hovered.corner_radius = CornerRadius::same(2);
-        style.visuals.widgets.active.weak_bg_fill = hover;
-        style.visuals.widgets.active.bg_fill = hover;
-        style.visuals.widgets.active.bg_stroke = Stroke::NONE;
-        style.visuals.widgets.active.corner_radius = CornerRadius::same(2);
-        style.visuals.widgets.open.weak_bg_fill = hover;
-        style.visuals.widgets.open.bg_fill = hover;
-        style.visuals.widgets.open.bg_stroke = Stroke::NONE;
-        style.visuals.widgets.open.corner_radius = CornerRadius::same(2);
+        style_menu_widgets(&mut style.visuals.widgets, hover, hover, 2);
     }
 
     pub fn workspace(self) -> Color32 {
@@ -187,6 +142,19 @@ impl Theme {
         match self {
             Self::Light => rgb(235, 236, 248),
             Self::Dark => rgb(28, 30, 44),
+        }
+    }
+
+    /// Downward drop shadow; `alpha` holds the black alpha for [light, dark].
+    fn shadow(self, offset_y: i8, blur: u8, alpha: [u8; 2]) -> Shadow {
+        Shadow {
+            offset: [0, offset_y],
+            blur,
+            spread: 0,
+            color: Color32::from_black_alpha(match self {
+                Self::Light => alpha[0],
+                Self::Dark => alpha[1],
+            }),
         }
     }
 
@@ -274,6 +242,28 @@ impl Theme {
         }
     }
 
+    pub fn muted_label(self, text: impl Into<String>) -> egui::RichText {
+        egui::RichText::new(text).size(12.0).color(self.text_muted())
+    }
+
+    pub fn section_label(self, text: impl Into<String>) -> egui::RichText {
+        egui::RichText::new(text)
+            .strong()
+            .size(12.5)
+            .color(self.text_primary())
+    }
+
+    pub fn pill_frame(self, active: bool, corner_radius: u8, margin: Margin) -> Frame {
+        Frame::new()
+            .fill(if active {
+                self.pill_active_fill()
+            } else {
+                Color32::TRANSPARENT
+            })
+            .corner_radius(corner_radius)
+            .inner_margin(margin)
+    }
+
     pub fn styled_card(
         self,
         ui: &mut egui::Ui,
@@ -288,15 +278,7 @@ impl Theme {
             .fill(self.card_fill())
             .stroke(Stroke::new(1.0_f32, self.border_color()))
             .corner_radius(radius)
-            .shadow(Shadow {
-                offset: [0, 1],
-                blur: 4,
-                spread: 0,
-                color: Color32::from_black_alpha(match self {
-                    Self::Light => 10,
-                    Self::Dark => 45,
-                }),
-            })
+            .shadow(self.shadow(1, 4, [10, 45]))
             .show(ui, |ui| {
                 ui.set_min_width(inner_width);
                 ui.set_max_width(inner_width);
@@ -339,6 +321,36 @@ impl Theme {
             })
             .response
     }
+}
+
+fn set_widget_state(
+    visuals: &mut egui::style::WidgetVisuals,
+    bg: Color32,
+    bg_stroke: Stroke,
+    fg: Option<Color32>,
+    corner_radius: Option<u8>,
+) {
+    visuals.bg_fill = bg;
+    visuals.weak_bg_fill = bg;
+    visuals.bg_stroke = bg_stroke;
+    if let Some(fg) = fg {
+        visuals.fg_stroke = Stroke::new(1.0_f32, fg);
+    }
+    if let Some(radius) = corner_radius {
+        visuals.corner_radius = CornerRadius::same(radius);
+    }
+}
+
+fn style_menu_widgets(
+    widgets: &mut egui::style::Widgets,
+    hover: Color32,
+    active_open: Color32,
+    radius: u8,
+) {
+    set_widget_state(&mut widgets.inactive, Color32::TRANSPARENT, Stroke::NONE, None, None);
+    set_widget_state(&mut widgets.hovered, hover, Stroke::NONE, None, Some(radius));
+    set_widget_state(&mut widgets.active, active_open, Stroke::NONE, None, Some(radius));
+    set_widget_state(&mut widgets.open, active_open, Stroke::NONE, None, Some(radius));
 }
 
 const fn rgb(r: u8, g: u8, b: u8) -> Color32 {

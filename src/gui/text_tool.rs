@@ -2,7 +2,7 @@ use super::i18n::text as tr;
 use std::{collections::BTreeMap, fs, path::Path, sync::Arc};
 
 use eframe::egui::{
-    self, Align, Color32, CursorIcon, Rect, Stroke, Vec2,
+    self, Align, Color32, Rect, Stroke, Vec2,
     epaint::{
         FontFamily, FontId,
         text::{FontData, Fonts, Galley, LayoutJob, LayoutSection, TextFormat},
@@ -12,11 +12,15 @@ use eframe::egui::{
 use openpaintr::Pixel;
 
 use super::{
-    gradient_tool::SessionOutcome,
     i18n,
     paint_dashed_line,
     selection::{Point, Selection},
+    session::{
+        HandleDrag, SessionOutcome, handle_response, paint_crosshair, rectangle_outline,
+        set_grab_cursor, track_handle_drag,
+    },
     tolerance::{self, StrokeBlend},
+    view::CanvasViewport,
 };
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -52,10 +56,14 @@ pub struct FontCatalog {
     fonts: Fonts,
 }
 
+/// Built-in family IDs; shown through `family_label` translations.
+pub const DEFAULT_FAMILY: &str = "Default (Sans)";
+pub const MONOSPACE_FAMILY: &str = "Monospace";
+
 pub fn family_label(family: &str) -> &str {
     match family {
-        "Padrão (Sans)" => tr("default-sans"),
-        "Monoespaçada" => tr("monospace"),
+        DEFAULT_FAMILY => tr("default-sans"),
+        MONOSPACE_FAMILY => tr("monospace"),
         name => name,
     }
 }
@@ -73,7 +81,7 @@ impl FontCatalog {
 
     pub fn for_locale(locale: i18n::Locale) -> Self {
         let mut defs = i18n::fonts(locale);
-        let mut families = vec!["Padrão (Sans)".to_owned(), "Monoespaçada".to_owned()];
+        let mut families = vec![DEFAULT_FAMILY.to_owned(), MONOSPACE_FAMILY.to_owned()];
         let candidates = [
             ("DejaVu Sans", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
             ("DejaVu Serif", "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf"),
@@ -102,8 +110,8 @@ impl FontCatalog {
 
     fn font_family(&self, name: &str) -> FontFamily {
         match name {
-            "" | "Padrão (Sans)" => FontFamily::Proportional,
-            "Monoespaçada" => FontFamily::Monospace,
+            "" | DEFAULT_FAMILY => FontFamily::Proportional,
+            MONOSPACE_FAMILY => FontFamily::Monospace,
             other if self.families.iter().any(|f| f == other) => FontFamily::Name(Arc::from(other)),
             _ => FontFamily::Proportional,
         }
@@ -117,17 +125,17 @@ impl FontCatalog {
             i18n::display(&session.text).into_owned()
         };
         let color = Color32::WHITE;
-        let line_w = (session.size_px * 0.075).max(1.0);
+        let line_w = (session.params.size_px * 0.075).max(1.0);
         let format = TextFormat {
-            font_id: FontId::new(session.size_px, self.font_family(&session.family)),
+            font_id: FontId::new(session.params.size_px, self.font_family(&session.params.family)),
             color,
-            italics: session.italic,
-            underline: if session.underline {
+            italics: session.params.italic,
+            underline: if session.params.underline {
                 Stroke::new(line_w, color)
             } else {
                 Stroke::NONE
             },
-            strikethrough: if session.strikethrough {
+            strikethrough: if session.params.strikethrough {
                 Stroke::new(line_w, color)
             } else {
                 Stroke::NONE
@@ -141,7 +149,7 @@ impl FontCatalog {
                 byte_range: 0..text.len(),
                 format,
             }],
-            halign: session.align.egui(),
+            halign: session.params.align.egui(),
             break_on_newline: true,
             ..Default::default()
         };
@@ -154,10 +162,8 @@ impl FontCatalog {
     }
 }
 
-#[derive(Clone)]
-pub struct TextSession {
-    pub anchor: Vec2,
-    pub text: String,
+#[derive(Clone, Debug, PartialEq)]
+pub struct TextParams {
     pub family: String,
     pub size_px: f32,
     pub bold: bool,
@@ -165,39 +171,44 @@ pub struct TextSession {
     pub underline: bool,
     pub strikethrough: bool,
     pub align: TextAlign,
-    pub color: Pixel,
     pub blend: StrokeBlend,
+}
+
+impl Default for TextParams {
+    fn default() -> Self {
+        Self {
+            family: DEFAULT_FAMILY.to_owned(),
+            size_px: 28.0,
+            bold: false,
+            italic: false,
+            underline: false,
+            strikethrough: false,
+            align: TextAlign::Left,
+            blend: StrokeBlend::Normal,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct TextSession {
+    pub anchor: Vec2,
+    pub text: String,
+    pub color: Pixel,
+    pub params: TextParams,
     pub last_bounds: Vec2,
-    dragging_anchor: Option<(Vec2, Vec2)>,
+    dragging_anchor: Option<HandleDrag<(), Vec2>>,
 }
 
 impl TextSession {
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        anchor: Vec2,
-        family: String,
-        size_px: f32,
-        bold: bool,
-        italic: bool,
-        underline: bool,
-        strikethrough: bool,
-        align: TextAlign,
-        color: Pixel,
-        blend: StrokeBlend,
-    ) -> Self {
+    pub fn new(anchor: Vec2, color: Pixel, mut params: TextParams) -> Self {
+        params.size_px = params.size_px.clamp(6.0, 240.0);
+        let min_h = params.size_px.max(12.0);
         Self {
             anchor,
             text: String::new(),
-            family,
-            size_px: size_px.clamp(6.0, 240.0),
-            bold,
-            italic,
-            underline,
-            strikethrough,
-            align,
             color,
-            blend,
-            last_bounds: vec2(24.0, size_px.max(12.0)),
+            params,
+            last_bounds: vec2(24.0, min_h),
             dragging_anchor: None,
         }
     }
@@ -214,20 +225,20 @@ impl TextSession {
         selection: Option<&Selection>,
     ) -> Vec<Pixel> {
         let mut out = base_layer.to_vec();
-        if self.text.is_empty() || size.0 == 0 || size.1 == 0 {
-            self.last_bounds = vec2(12.0, self.size_px.max(12.0));
+        if self.text.trim().is_empty() || size.0 == 0 || size.1 == 0 {
+            self.last_bounds = vec2(12.0, self.params.size_px.max(12.0));
             return out;
         }
         let (galley, atlas) = catalog.layout_4x(self);
-        self.last_bounds = galley.size().max(vec2(12.0, self.size_px.max(12.0)));
+        self.last_bounds = galley.size().max(vec2(12.0, self.params.size_px.max(12.0)));
         if atlas.width() == 0 || atlas.height() == 0 {
             return out;
         }
 
         // Accumulate 4x4 subpixel alpha coverage in a sparse row-major pixel map.
         let mut cov_map: BTreeMap<Point, [u8; 16]> = BTreeMap::new();
-        let bold_dx = if self.bold {
-            (self.size_px * 0.045).clamp(0.45, 2.2)
+        let bold_dx = if self.params.bold {
+            (self.params.size_px * 0.045).clamp(0.45, 2.2)
         } else {
             0.0
         };
@@ -296,17 +307,17 @@ impl TextSession {
 
                 for py in min_y..=max_y {
                     for px in min_x..=max_x {
-                        for sy in 0..4 {
-                            let y_sub = py as f32 + (sy as f32 + 0.5) / 4.0;
-                            for sx in 0..4 {
-                                let x_sub = px as f32 + (sx as f32 + 0.5) / 4.0;
+                        for (sy, &oy) in super::stroke_raster::SSAA_OFFSETS_UNIT.iter().enumerate() {
+                            let y_sub = py as f32 + oy as f32;
+                            for (sx, &ox) in super::stroke_raster::SSAA_OFFSETS_UNIT.iter().enumerate() {
+                                let x_sub = px as f32 + ox as f32;
                                 let mut a = eval_sample(x_sub, y_sub);
                                 if bold_dx > 0.0 {
                                     a = a.max(eval_sample(x_sub - bold_dx, y_sub));
                                 }
                                 if a > 0 {
                                     let slot = cov_map.entry((px as u32, py as u32)).or_insert([0; 16]);
-                                    let idx = (sy * 4 + sx) as usize;
+                                    let idx = sy * 4 + sx;
                                     slot[idx] = slot[idx].max(a);
                                 }
                             }
@@ -316,112 +327,67 @@ impl TextSession {
             }
         }
 
-        let w = size.0 as usize;
-        for (pt @ (x, y), subs) in cov_map {
-            let sel_cov = selection.map_or(255, |sel| sel.coverage_u8(pt));
-            if sel_cov == 0 {
-                continue;
-            }
-            let sum: u32 = subs.into_iter().map(u32::from).sum();
-            let ssaa_alpha = ((sum + 8) / 16).min(255) as u8;
-            let eff = ((u32::from(ssaa_alpha) * u32::from(sel_cov) + 127) / 255) as u8;
-            if eff == 0 {
-                continue;
-            }
-            let idx = y as usize * w + x as usize;
-            out[idx] = tolerance::blend_covered(self.color, base_layer[idx], eff, self.blend);
-        }
+        tolerance::blend_coverage_in_place(
+            &mut out,
+            size,
+            selection,
+            cov_map.into_iter().map(|(pt, subs)| {
+                let sum: u32 = subs.into_iter().map(u32::from).sum();
+                (pt, super::stroke_raster::avg16_u8(sum))
+            }),
+            self.params.blend,
+            |_| self.color,
+        );
         out
     }
 
-    pub fn handles(&mut self, rect: Rect, zoom: f32, ui: &egui::Ui) -> SessionOutcome {
-        let to_screen = |pt: Vec2| rect.min + pt * zoom;
-        let to_world = |pos: egui::Pos2| (pos - rect.min) / zoom;
-        let anchor_screen = to_screen(self.anchor);
+    pub fn handles(&mut self, viewport: CanvasViewport, ui: &egui::Ui) -> SessionOutcome {
+        let anchor_screen = viewport.to_screen(self.anchor);
 
-        let left_offset = match self.align {
+        let left_offset = match self.params.align {
             TextAlign::Left => 0.0,
             TextAlign::Center => -self.last_bounds.x * 0.5,
             TextAlign::Right => -self.last_bounds.x,
         };
         let box_min = self.anchor + vec2(left_offset, 0.0);
-        let box_rect = Rect::from_min_size(to_screen(box_min), self.last_bounds * zoom);
+        let box_rect = Rect::from_min_size(viewport.to_screen(box_min), self.last_bounds * viewport.zoom);
 
         let bg_response = ui.interact(
             ui.clip_rect(),
             ui.id().with("text_bg"),
             egui::Sense::click(),
         );
-        let anchor_resp = ui.interact(
-            Rect::from_center_size(anchor_screen, Vec2::splat(16.0)),
-            ui.id().with("text_anchor"),
-            egui::Sense::drag(),
-        );
+        let anchor_resp = handle_response(ui, anchor_screen, 16.0, "text_anchor");
         let mut changed = false;
-        if anchor_resp.dragged() {
-            ui.ctx().set_cursor_icon(CursorIcon::Grabbing);
-        } else if anchor_resp.hovered() {
-            ui.ctx().set_cursor_icon(CursorIcon::Grab);
-        }
-        if anchor_resp.drag_started()
-            && let Some(ptr) = anchor_resp.interact_pointer_pos()
+        set_grab_cursor(ui.ctx(), &anchor_resp);
+        let anchor = self.anchor;
+        if let Some((drag, current)) =
+            track_handle_drag(&mut self.dragging_anchor, (), &anchor_resp, viewport, false, || anchor)
         {
-            let origin = to_world(ptr - anchor_resp.total_drag_delta().unwrap_or_default());
-            self.dragging_anchor = Some((self.anchor, origin));
-        }
-        if let Some((start_anchor, origin)) = self.dragging_anchor {
-            if anchor_resp.drag_stopped() {
-                self.dragging_anchor = None;
-            }
-            if let Some(ptr) = anchor_resp.interact_pointer_pos() {
-                self.anchor = start_anchor + (to_world(ptr) - origin);
-                changed = true;
-            }
+            self.anchor = drag.start + (current - drag.origin);
+            changed = true;
         }
 
         let painter = ui.painter();
-        let outline = [
-            box_rect.left_top(),
-            box_rect.right_top(),
-            box_rect.right_bottom(),
-            box_rect.left_bottom(),
-            box_rect.left_top(),
-        ];
-        paint_dashed_line(painter, &outline);
-        painter.circle(
-            anchor_screen,
-            5.5,
-            Color32::from_white_alpha(210),
-            Stroke::new(1.2_f32, Color32::BLACK),
-        );
-        painter.line_segment(
-            [anchor_screen - vec2(4.0, 0.0), anchor_screen + vec2(4.0, 0.0)],
-            Stroke::new(1.0_f32, Color32::BLACK),
-        );
-        painter.line_segment(
-            [anchor_screen - vec2(0.0, 4.0), anchor_screen + vec2(0.0, 4.0)],
-            Stroke::new(1.0_f32, Color32::BLACK),
-        );
+        let accent = ui.visuals().selection.stroke.color;
+        paint_dashed_line(painter, &rectangle_outline(box_rect));
+        paint_crosshair(painter, anchor_screen, 5.5, 210, 4.0);
         // Blinking caret hint at top-right / cursor end when editing
         if ((ui.input(|i| i.time) * 2.0) as u64).is_multiple_of(2) {
-            let caret_x = match self.align {
-                TextAlign::Left => box_rect.right().min(box_rect.left() + self.last_bounds.x * zoom),
-                TextAlign::Center => box_rect.center().x + self.last_bounds.x * zoom * 0.5,
+            let caret_x = match self.params.align {
+                TextAlign::Left => {
+                    box_rect.right().min(box_rect.left() + self.last_bounds.x * viewport.zoom)
+                }
+                TextAlign::Center => box_rect.center().x + self.last_bounds.x * viewport.zoom * 0.5,
                 TextAlign::Right => box_rect.right(),
             };
             painter.line_segment(
                 [pos2(caret_x, box_rect.top()), pos2(caret_x, box_rect.bottom())],
-                Stroke::new(1.4_f32, Color32::from_rgb(103, 75, 195)),
+                Stroke::new(1.4_f32, accent),
             );
         }
 
-        if bg_response.clicked() && self.dragging_anchor.is_none() && !changed {
-            SessionOutcome::Commit
-        } else if changed {
-            SessionOutcome::Changed
-        } else {
-            SessionOutcome::None
-        }
+        SessionOutcome::from_interaction(bg_response.clicked(), self.dragging_anchor.is_none(), changed)
     }
 }
 
@@ -441,15 +407,14 @@ mod tests {
         let base = vec![Pixel::default(); (size.0 * size.1) as usize];
         let mut session = TextSession::new(
             vec2(4.0, 4.0),
-            "Padrão (Sans)".to_owned(),
-            20.0,
-            true,
-            true,
-            true,
-            false,
-            TextAlign::Left,
             Pixel([25, 45, 210, 255]),
-            StrokeBlend::Normal,
+            TextParams {
+                size_px: 20.0,
+                bold: true,
+                italic: true,
+                underline: true,
+                ..TextParams::default()
+            },
         );
         session.text = "Aa".to_owned();
         let pixels = session.render_preview(&mut catalog, &base, size, None);

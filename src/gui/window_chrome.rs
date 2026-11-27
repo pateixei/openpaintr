@@ -9,8 +9,12 @@ use super::{
     tool_icons::{ActionIcon, icon_button},
 };
 
+fn is_maximized(ctx: &egui::Context) -> bool {
+    ctx.input(|input| input.viewport().maximized.unwrap_or(false))
+}
+
 pub fn corner_radius(ctx: &egui::Context, fullscreen: bool) -> u8 {
-    if fullscreen || ctx.input(|input| input.viewport().maximized.unwrap_or(false)) {
+    if fullscreen || is_maximized(ctx) {
         0
     } else {
         CARD_CORNER_RADIUS
@@ -62,7 +66,7 @@ fn caption_button(
 }
 
 pub fn controls(ui: &mut egui::Ui, theme: &mut Theme, fullscreen: bool) -> bool {
-    let maximized = ui.input(|input| input.viewport().maximized.unwrap_or(false));
+    let maximized = is_maximized(ui.ctx());
     let close = caption_button(
         ui,
         *theme,
@@ -118,7 +122,7 @@ pub fn drag_space(ui: &mut egui::Ui, fullscreen: bool) {
     }
     let (_, response) = ui.allocate_exact_size(vec2(width, 26.0), Sense::click_and_drag());
     if response.double_clicked_by(PointerButton::Primary) {
-        let maximized = ui.input(|input| input.viewport().maximized.unwrap_or(false));
+        let maximized = is_maximized(ui.ctx());
         ui.ctx()
             .send_viewport_cmd(ViewportCommand::Maximized(!maximized));
     } else if response.drag_started_by(PointerButton::Primary) {
@@ -127,7 +131,7 @@ pub fn drag_space(ui: &mut egui::Ui, fullscreen: bool) {
 }
 
 pub fn resize_edges(ctx: &egui::Context, fullscreen: bool) {
-    if fullscreen || ctx.input(|input| input.viewport().maximized.unwrap_or(false)) {
+    if fullscreen || is_maximized(ctx) {
         return;
     }
 

@@ -36,10 +36,8 @@ static CATALOGS: LazyLock<Catalogs> = LazyLock::new(|| {
     if let Ok(cwd) = std::env::current_dir() {
         catalogs.scan(&cwd.join("translations"));
     }
-    if let Ok(executable) = std::env::current_exe()
-        && let Some(directory) = executable.parent()
-    {
-        catalogs.scan(&directory.join("translations"));
+    if let Ok(path) = super::storage::exe_adjacent("translations") {
+        catalogs.scan(&path);
     }
     catalogs
 });
@@ -212,12 +210,7 @@ impl Locale {
     }
 
     fn settings_path() -> io::Result<PathBuf> {
-        std::env::var_os("XDG_CONFIG_HOME")
-            .map(PathBuf::from)
-            .filter(|path| path.is_absolute())
-            .or_else(|| std::env::var_os("HOME").map(|path| PathBuf::from(path).join(".config")))
-            .map(|path| path.join("openpaintr").join("language.json"))
-            .ok_or_else(|| io::ErrorKind::NotFound.into())
+        super::storage::config_file("language.json")
     }
 
     pub fn save(self) -> io::Result<()> {
@@ -225,13 +218,11 @@ impl Locale {
     }
 
     fn load_at(path: &Path) -> io::Result<String> {
-        let bytes = std::fs::read(path)?;
-        serde_json::from_slice(&bytes).map_err(io::Error::other)
+        super::storage::read_json(path)
     }
 
     fn save_at(self, path: &Path) -> io::Result<()> {
-        std::fs::create_dir_all(path.parent().expect("settings file has a directory"))?;
-        super::dialogs::atomic_write_bytes(path, &serde_json::to_vec(self.0)?, true)
+        super::storage::write_json_atomic(path, &self.0, super::storage::JsonWrite::COMPACT)
     }
 
     // Render helpers use the active frame's locale, not a shared app preference.
@@ -370,23 +361,8 @@ pub fn blend_name(index: u8) -> &'static str {
 }
 
 pub fn blend_name_logical(index: u8) -> &'static str {
-    const KEYS: [&str; 14] = [
-        "blend.normal",
-        "blend.multiply",
-        "blend.additive",
-        "blend.color-burn",
-        "blend.color-dodge",
-        "blend.reflect",
-        "blend.glow",
-        "blend.overlay",
-        "blend.difference",
-        "blend.negation",
-        "blend.lighten",
-        "blend.darken",
-        "blend.screen",
-        "blend.xor",
-    ];
-    logical_text(KEYS.get(usize::from(index)).copied().unwrap_or(KEYS[0]))
+    let keys = &openpaintr::BLEND_MODE_KEYS;
+    logical_text(keys.get(usize::from(index)).copied().unwrap_or(keys[0]))
 }
 
 pub fn error_message(error: &io::Error) -> String {

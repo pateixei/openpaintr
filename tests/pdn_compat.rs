@@ -12,6 +12,41 @@ fn fixture(name: &str) -> std::path::PathBuf {
         .join(name)
 }
 
+fn diff_stats(actual: &[Pixel], expected: &[Pixel]) -> (usize, u8) {
+    actual
+        .iter()
+        .zip(expected)
+        .filter(|(a, e)| a != e)
+        .fold((0_usize, 0_u8), |(count, max_diff), (&a, &e)| {
+            (count + 1, max_diff.max(channel_diff(a, e)))
+        })
+}
+
+fn assert_layers_equal(actual: &Document, expected: &Document, check_pixels: bool, label: &str) {
+    assert_eq!(actual.dimensions(), expected.dimensions(), "{label}");
+    assert_eq!(actual.layer_count(), expected.layer_count(), "{label}");
+    for idx in 0..expected.layer_count() {
+        assert_eq!(actual.layer_name(idx), expected.layer_name(idx), "{label}#{idx}");
+        assert_eq!(
+            actual.layer_properties(idx),
+            expected.layer_properties(idx),
+            "{label}#{idx}"
+        );
+        assert_eq!(
+            actual.layer_blend_mode(idx),
+            expected.layer_blend_mode(idx),
+            "{label}#{idx}"
+        );
+        if check_pixels {
+            assert_eq!(
+                actual.layer_pixels(idx),
+                expected.layer_pixels(idx),
+                "{label}#{idx}"
+            );
+        }
+    }
+}
+
 fn build_pdn52_blend_mosaic() -> io::Result<Document> {
     let cols = BLEND_MODES.len() as u32;
     let col_w = 20_u32;
@@ -176,12 +211,8 @@ fn old_pdn_3510_matches_reference_png_pixel_for_pixel() -> io::Result<()> {
     assert_eq!(pdn.dimensions(), reference.dimensions());
     let actual = pdn.composite()?;
     let expected = reference.composite()?;
-    let diffs = actual
-        .iter()
-        .zip(&expected)
-        .filter(|(a, b)| a != b)
-        .count();
-    assert_eq!(diffs, 0, "divergência de composição em oldPDN3510.pdn");
+    let (diffs, _) = diff_stats(&actual, &expected);
+    assert_eq!(diffs, 0, "compositing mismatch in oldPDN3510.pdn");
     Ok(())
 }
 
@@ -200,21 +231,7 @@ fn flatten_blend_and_versioned_pdn_fixtures_round_trip_cleanly() -> io::Result<(
         let mut encoded = Vec::new();
         doc.write_pdn(&mut encoded)?;
         let reopened = Document::read_pdn(encoded.as_slice())?;
-        assert_eq!(reopened.dimensions(), doc.dimensions(), "{name}");
-        assert_eq!(reopened.layer_count(), doc.layer_count(), "{name}");
-        for idx in 0..doc.layer_count() {
-            assert_eq!(reopened.layer_name(idx), doc.layer_name(idx), "{name}#{idx}");
-            assert_eq!(
-                reopened.layer_properties(idx),
-                doc.layer_properties(idx),
-                "{name}#{idx}"
-            );
-            assert_eq!(
-                reopened.layer_blend_mode(idx),
-                doc.layer_blend_mode(idx),
-                "{name}#{idx}"
-            );
-        }
+        assert_layers_equal(&reopened, &doc, false, name);
         assert_eq!(reopened.composite()?, orig_comp, "{name}");
     }
     Ok(())
@@ -242,35 +259,22 @@ fn png_export_preserves_alpha_and_depth_options_separately() -> io::Result<()> {
         assert_eq!(decoded.composite()?, expected_rgba, "{compression:?}");
     }
 
-    let mut white_bytes = Vec::new();
-    doc.write_png_with_options(&mut white_bytes, PngDepth::Rgb24White, PngCompression::Balanced)?;
-    let decoded_white = Document::read_png(Cursor::new(white_bytes))?;
-    assert_eq!(
-        decoded_white.composite()?,
-        expected_rgba
-            .iter()
-            .map(|px| if px.0[3] == 255 {
-                *px
-            } else {
-                px.over(Pixel([255, 255, 255, 255]), 255)
-            })
-            .collect::<Vec<_>>()
-    );
-
-    let mut black_bytes = Vec::new();
-    doc.write_png_with_options(&mut black_bytes, PngDepth::Rgb24Black, PngCompression::High)?;
-    let decoded_black = Document::read_png(Cursor::new(black_bytes))?;
-    assert_eq!(
-        decoded_black.composite()?,
-        expected_rgba
-            .iter()
-            .map(|px| if px.0[3] == 255 {
-                *px
-            } else {
-                px.over(Pixel([0, 0, 0, 255]), 255)
-            })
-            .collect::<Vec<_>>()
-    );
+    for (depth, compression) in [
+        (PngDepth::Rgb24White, PngCompression::Balanced),
+        (PngDepth::Rgb24Black, PngCompression::High),
+    ] {
+        let mut bytes = Vec::new();
+        doc.write_png_with_options(&mut bytes, depth, compression)?;
+        let decoded = Document::read_png(Cursor::new(bytes))?;
+        assert_eq!(
+            decoded.composite()?,
+            expected_rgba
+                .iter()
+                .map(|&px| depth.flatten_pixel(px))
+                .collect::<Vec<_>>(),
+            "{depth:?}"
+        );
+    }
     Ok(())
 }
 
@@ -383,14 +387,7 @@ fn pdn52_flatten_blend_test_matches_paintnet_52_reference() -> io::Result<()> {
 
     let actual = pdn.composite()?;
     let expected = reference.composite()?;
-    let mut diff_px = 0_usize;
-    let mut max_lsb = 0_u8;
-    for (&a, &e) in actual.iter().zip(&expected) {
-        if a != e {
-            diff_px += 1;
-            max_lsb = max_lsb.max(channel_diff(a, e));
-        }
-    }
+    let (diff_px, max_lsb) = diff_stats(&actual, &expected);
     println!(
         "FlattenBlendTest vs Paint.NET 5.2: diff_px={diff_px}/{}, max_lsb_diff={max_lsb}",
         actual.len()
@@ -411,32 +408,13 @@ fn pdn52_resaved_roundtrip_preserves_layers_metadata_and_pixels() -> io::Result<
     ))?))?;
 
     assert_eq!(resaved.dimensions(), (96, 64));
-    assert_eq!(resaved.dimensions(), orig.dimensions());
     let (dx, dy) = resaved.resolution_dpi();
     let (ox, oy) = orig.resolution_dpi();
     println!("PDN 5.2 roundtrip DPI: orig=({ox:.2}, {oy:.2}), resaved=({dx:.2}, {dy:.2})");
     assert!((dx - ox).abs() < 0.5 && (dy - oy).abs() < 0.5);
 
     assert_eq!(resaved.layer_count(), 4);
-    assert_eq!(resaved.layer_count(), orig.layer_count());
-    for idx in 0..orig.layer_count() {
-        assert_eq!(resaved.layer_name(idx), orig.layer_name(idx), "layer {idx}");
-        assert_eq!(
-            resaved.layer_properties(idx),
-            orig.layer_properties(idx),
-            "layer {idx}"
-        );
-        assert_eq!(
-            resaved.layer_blend_mode(idx),
-            orig.layer_blend_mode(idx),
-            "layer {idx}"
-        );
-        assert_eq!(
-            resaved.layer_pixels(idx),
-            orig.layer_pixels(idx),
-            "layer {idx}"
-        );
-    }
+    assert_layers_equal(&resaved, &orig, true, "layer");
 
     let orig_comp = orig.composite()?;
     let resaved_comp = resaved.composite()?;
@@ -444,14 +422,7 @@ fn pdn52_resaved_roundtrip_preserves_layers_metadata_and_pixels() -> io::Result<
 
     let ref_comp = ref_png.composite()?;
     assert_eq!(orig_comp.len(), ref_comp.len());
-    let mut diff_px = 0_usize;
-    let mut max_lsb = 0_u8;
-    for (&a, &e) in orig_comp.iter().zip(&ref_comp) {
-        if a != e {
-            diff_px += 1;
-            max_lsb = max_lsb.max(channel_diff(a, e));
-        }
-    }
+    let (diff_px, max_lsb) = diff_stats(&orig_comp, &ref_comp);
     println!(
         "Roundtrip composite vs Paint.NET 5.2 PNG: diff_px={diff_px}/{}, max_lsb_diff={max_lsb}",
         orig_comp.len()
