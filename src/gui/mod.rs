@@ -5,6 +5,7 @@ mod colors;
 mod dialogs;
 mod editor;
 mod feather;
+mod flash;
 mod geometry;
 mod gradient_tool;
 mod i18n;
@@ -145,7 +146,8 @@ pub fn run() -> io::Result<()> {
             app.locale.with(|| {
                 app.shortcuts = Shortcuts::from_executable();
                 if let Some(error) = &app.shortcuts.storage_error {
-                    app.notice = Some((i18n::format("shortcuts-error", &[error]), true));
+                    let message = i18n::format("shortcuts-error", &[error]);
+                    app.show_error(message);
                 }
                 app.recent = RecentFiles::from_executable();
             });
@@ -383,6 +385,7 @@ struct App {
     settings: GlobalSettings,
     checker: TextureHandle,
     notice: Option<(String, bool)>,
+    error_flash: Option<flash::Flash>,
     pending_close: Option<PendingClose>,
     new_size: Option<(u32, u32)>,
     allow_close: bool,
@@ -453,6 +456,7 @@ impl App {
             settings,
             checker,
             notice: None,
+            error_flash: None,
             pending_close: None,
             new_size: None,
             allow_close: false,
@@ -804,11 +808,18 @@ impl App {
     }
 
     fn report(&mut self, result: io::Result<()>, success: &str) {
-        self.notice = match result {
-            Ok(()) if success.is_empty() => None,
-            Ok(()) => Some((success.into(), false)),
-            Err(error) => Some((i18n::error_message(&error), true)),
-        };
+        match result {
+            Ok(()) if success.is_empty() => self.notice = None,
+            Ok(()) => self.notice = Some((success.into(), false)),
+            Err(error) => self.show_error(i18n::error_message(&error)),
+        }
+    }
+
+    /// Alerts the user: shows an error in the status bar and flashes it. Every
+    /// error goes through here.
+    fn show_error(&mut self, message: String) {
+        self.notice = Some((message, true));
+        self.error_flash = Some(flash::Flash::default());
     }
 
     fn step_history(&mut self, redo: bool) {
@@ -867,12 +878,16 @@ impl App {
     }
 
     fn save_settings(&mut self) {
-        self.notice = self.locale.with(|| {
+        self.notice = None;
+        let error = self.locale.with(|| {
             self.settings
                 .save()
                 .err()
-                .map(|error| (i18n::format("settings-save-error", &[&error]), true))
+                .map(|error| i18n::format("settings-save-error", &[&error]))
         });
+        if let Some(message) = error {
+            self.show_error(message);
+        }
     }
 
     fn menu_bar(&mut self, ui: &mut egui::Ui) {
@@ -940,11 +955,16 @@ impl App {
                                     self.font_catalog = FontCatalog::for_locale(locale);
                                 }
                                 self.locale = locale;
-                                self.notice = locale.with(|| {
-                                    locale.save().err().map(|error| {
-                                        (i18n::format("language-save-error", &[&error]), true)
-                                    })
+                                self.notice = None;
+                                let error = locale.with(|| {
+                                    locale
+                                        .save()
+                                        .err()
+                                        .map(|error| i18n::format("language-save-error", &[&error]))
                                 });
+                                if let Some(message) = error {
+                                    self.show_error(message);
+                                }
                                 ui.close();
                                 ui.ctx().request_repaint();
                             }
@@ -4408,16 +4428,32 @@ impl App {
                 use tool_icons::{ActionIcon, icon_button};
                 ui.horizontal(|ui| {
                     if let Some((notice, error)) = &self.notice {
-                        let color = if *error {
-                            self.settings.theme.error()
+                        let theme = self.settings.theme;
+                        let mut color = if *error {
+                            theme.error()
                         } else {
-                            self.settings.theme.accent()
+                            theme.accent()
                         };
-                        ui.add(
-                            egui::Label::new(RichText::new(notice).size(12.0).color(color))
-                                .truncate(),
-                        )
-                        .on_hover_text(notice);
+                        let mut fill = Color32::TRANSPARENT;
+                        if *error && let Some(flash) = &mut self.error_flash {
+                            match flash.inverted(ui.ctx()) {
+                                Some(true) => (color, fill) = (theme.status_fill(), color),
+                                Some(false) => {}
+                                None => self.error_flash = None,
+                            }
+                        }
+                        // The frame is always present so that the text never moves.
+                        egui::Frame::new()
+                            .fill(fill)
+                            .corner_radius(3)
+                            .inner_margin(egui::Margin::symmetric(4, 0))
+                            .show(ui, |ui| {
+                                ui.add(
+                                    egui::Label::new(RichText::new(notice).size(12.0).color(color))
+                                        .truncate(),
+                                )
+                                .on_hover_text(notice);
+                            });
                     } else {
                         ui.label(self.settings.theme.muted_label(tr("ready")));
                     }
@@ -4725,6 +4761,54 @@ mod tests {
                 .min_by(f32::total_cmp)
                 .expect("workspace background");
             assert_eq!(ribbon_bottom, workspace_top);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn errors_flash_twice_in_the_status_bar() -> io::Result<()> {
+        let mut driver = TestDriver::new(Document::new(64, 48)?);
+        driver.step();
+        driver.app.report(Ok(()), "Saved");
+        assert!(driver.app.error_flash.is_none());
+
+        // The text color and whether the error color fills its background.
+        let error = driver.app.settings.theme.error();
+        let look = |output: egui::FullOutput| {
+            let text = output
+                .shapes
+                .iter()
+                .find_map(|clipped| match &clipped.shape {
+                    egui::Shape::Text(text) if text.galley.text() == "Broken" => {
+                        Some(text.galley.job.sections[0].format.color)
+                    }
+                    _ => None,
+                });
+            let filled = output.shapes.iter().any(
+                |clipped| matches!(&clipped.shape, egui::Shape::Rect(rect) if rect.fill == error),
+            );
+            (text.expect("message"), filled)
+        };
+        let inverted = (driver.app.settings.theme.status_fill(), true);
+        let normal = (error, false);
+
+        for _ in 0..2 {
+            driver.app.report(Err(io::Error::other("Broken")), "");
+            assert_eq!(look(driver.step()), inverted);
+            // A file dialog can hold the next frame back for a long time.
+            let start = driver.time + 60.0;
+            for (after, expected) in [
+                (0.0, inverted),
+                (0.2, normal),
+                (0.35, inverted),
+                (0.5, normal),
+                (5.0, normal),
+            ] {
+                driver.time = start + after;
+                assert_eq!(look(driver.step()), expected, "after {after} s");
+            }
+            assert!(driver.app.error_flash.is_none());
+            driver.time += 1.0;
         }
         Ok(())
     }
