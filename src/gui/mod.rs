@@ -144,12 +144,13 @@ pub fn run() -> io::Result<()> {
             creation.egui_ctx.set_fonts(i18n::fonts(locale));
             app.font_catalog = FontCatalog::for_locale(locale);
             app.locale.with(|| {
-                app.shortcuts = Shortcuts::from_executable();
+                app.shortcuts = Shortcuts::from_user_files();
                 if let Some(error) = &app.shortcuts.storage_error {
                     let message = i18n::format("shortcuts-error", &[error]);
                     app.show_error(message);
                 }
-                app.recent = RecentFiles::from_executable();
+                app.recent = RecentFiles::from_user_files();
+                app.palette = ColorPalette::from_user_files(DEFAULT_PRIMARY, DEFAULT_SECONDARY);
             });
             Ok(Box::new(app))
         }),
@@ -1496,7 +1497,7 @@ impl App {
                 if let Some(mut path) = FileDialog::new()
                     .set_title(tr("save-file"))
                     .add_filter(tr("paint-net-palette"), &["txt"])
-                    .set_file_name("paleta.txt")
+                    .set_file_name(i18n::logical_text("palette-export-name"))
                     .save_file()
                 {
                     if path.extension().is_none() {
@@ -4135,6 +4136,12 @@ impl App {
     }
 
     fn localized_frame(&mut self, ctx: &egui::Context) {
+        if let Some(error) = self.palette.take_save_error() {
+            self.show_error(i18n::format("palette-save-error", &[&error]));
+        }
+        if let Some(error) = self.recent.take_save_error() {
+            self.show_error(i18n::format("recent-save-error", &[&error]));
+        }
         let os_fullscreen = ctx.input(|input| input.viewport().fullscreen);
         if os_fullscreen != self.observed_fullscreen {
             self.observed_fullscreen = os_fullscreen;

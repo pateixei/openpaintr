@@ -6,7 +6,10 @@ use openpaintr::{Document, PngCompression, PngDepth, is_valid_layer_name};
 
 use super::{
     editor::LayerMeta,
-    storage::{JsonWrite, atomic_write_bytes, exe_adjacent, read_json, write_json_atomic},
+    storage::{
+        JSON_LIMIT, JsonWrite, UserFile, atomic_write_bytes, exe_adjacent, migrate, read_json,
+        state_file, write_json_atomic,
+    },
     theme::CARD_CORNER_RADIUS,
     widgets::{
         blend_mode_combo, enum_combo_box, opacity_slider, paint_thumbnail, pixels_to_color_image,
@@ -14,7 +17,9 @@ use super::{
     window_chrome,
 };
 
-const RECENT_FILE: &str = "recentes.json";
+const RECENT_FILE: &str = "recent.json";
+/// The name used beside the executable by earlier versions.
+const LEGACY_RECENT_FILE: &str = "recentes.json";
 const MAX_RECENT: usize = 10;
 
 pub(super) fn modal(ctx: &egui::Context, id: &str) -> egui::Modal {
@@ -51,35 +56,48 @@ pub fn make_thumbnail_texture(
 pub struct RecentFiles {
     path: Option<PathBuf>,
     pub entries: Vec<PathBuf>,
+    save_error: Option<io::Error>,
 }
 
 impl RecentFiles {
-    pub fn from_executable() -> Self {
-        let path = exe_adjacent(RECENT_FILE).ok();
-        let entries = path
-            .as_deref()
-            .and_then(|p| read_json::<Vec<PathBuf>>(p).ok())
-            .unwrap_or_default();
-        Self { path, entries }
+    pub fn from_user_files() -> Self {
+        state_file(RECENT_FILE).map_or_else(
+            |_| Self::default(),
+            |path| Self::load(migrate(path, exe_adjacent(LEGACY_RECENT_FILE), JSON_LIMIT)),
+        )
+    }
+
+    fn load(file: UserFile) -> Self {
+        Self {
+            entries: read_json::<Vec<PathBuf>>(&file.read_from).unwrap_or_default(),
+            path: Some(file.path),
+            save_error: file.migration_error,
+        }
+    }
+
+    /// The latest failure to save or migrate the list, once.
+    pub fn take_save_error(&mut self) -> Option<io::Error> {
+        self.save_error.take()
     }
 
     pub fn push(&mut self, path: PathBuf) {
         self.entries.retain(|existing| existing != &path);
         self.entries.insert(0, path);
         self.entries.truncate(MAX_RECENT);
-        let _ = self.save();
+        self.save();
     }
 
     pub fn clear(&mut self) {
         self.entries.clear();
-        let _ = self.save();
+        self.save();
     }
 
-    fn save(&self) -> io::Result<()> {
-        let Some(path) = &self.path else {
-            return Ok(());
-        };
-        write_json_atomic(path, &self.entries, JsonWrite::PRETTY)
+    fn save(&mut self) {
+        if let Some(path) = &self.path
+            && let Err(error) = write_json_atomic(path, &self.entries, JsonWrite::PRETTY)
+        {
+            self.save_error = Some(error);
+        }
     }
 }
 
@@ -361,5 +379,30 @@ fn format_bytes(bytes: usize) -> String {
         format!("{:.1} KiB", bytes as f64 / 1024.0)
     } else {
         format!("{:.2} MiB", bytes as f64 / (1024.0 * 1024.0))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn recent_files_migrate_and_report_failed_saves() -> io::Result<()> {
+        let temp = tempfile::tempdir()?;
+        let legacy = temp.path().join(LEGACY_RECENT_FILE);
+        std::fs::write(&legacy, r#"["/tmp/old.pdn"]"#)?;
+        let new = temp.path().join("state").join(RECENT_FILE);
+        let mut recent = RecentFiles::load(migrate(new.clone(), Some(legacy), JSON_LIMIT));
+        assert_eq!(recent.entries, [PathBuf::from("/tmp/old.pdn")]);
+        assert!(new.is_file() && recent.take_save_error().is_none());
+
+        // A file where the directory should be makes every save fail.
+        let blocker = temp.path().join("blocker");
+        std::fs::write(&blocker, "")?;
+        let mut recent = RecentFiles::load(migrate(blocker.join(RECENT_FILE), None, JSON_LIMIT));
+        recent.push("/tmp/new.pdn".into());
+        assert!(recent.take_save_error().is_some());
+        assert!(recent.take_save_error().is_none());
+        Ok(())
     }
 }

@@ -11,10 +11,12 @@ use serde::{Deserialize, Serialize};
 use super::{
     dialogs::modal,
     mouse_shortcuts::{self, MouseBindings},
-    storage::JsonWrite,
+    storage::{JsonWrite, UserFile},
 };
 
-const FILE_NAME: &str = "atalhos.json";
+const FILE_NAME: &str = "shortcuts.json";
+/// The name used beside the executable by earlier versions.
+const LEGACY_FILE_NAME: &str = "atalhos.json";
 const VERSION: u32 = 1;
 const PAINT_NET: &str = "Paint.NET";
 const ADOBE: &str = "Adobe";
@@ -29,7 +31,7 @@ pub(super) trait BindableAction: Copy + 'static {
 }
 
 /// Declares a binding registry enum: each entry has a stable ID (as used in
-/// `atalhos.json`), a translation key and the Paint.NET / Adobe defaults.
+/// `shortcuts.json`), a translation key and the Paint.NET / Adobe defaults.
 macro_rules! bindable_actions {
     (
         $(#[$meta:meta])*
@@ -83,7 +85,7 @@ macro_rules! bindable_actions {
 }
 pub(super) use bindable_actions;
 
-// New commands get a stable ID and entries here and in docs/atalhos.schema.json.
+// New commands get a stable ID and entries here and in docs/shortcuts.schema.json.
 // Empty defaults identify actions without a corresponding reference shortcut.
 macro_rules! actions {
     ($($action:ident : $id:literal, $label:literal, [$($paint:literal),*], [$($adobe:literal),*];)*) => {
@@ -591,19 +593,27 @@ impl Default for Shortcuts {
 }
 
 impl Shortcuts {
-    pub fn from_executable() -> Self {
-        match super::storage::exe_adjacent(FILE_NAME) {
-            Ok(path) => Self::load(path),
+    pub fn from_user_files() -> Self {
+        match super::storage::config_file(FILE_NAME) {
+            Ok(path) => Self::load(super::storage::migrate(
+                path,
+                super::storage::exe_adjacent(LEGACY_FILE_NAME),
+                super::storage::JSON_LIMIT,
+            )),
             Err(_) => Self {
-                storage_error: Some(tr("executable-dir-unavailable").to_owned()),
+                storage_error: Some(tr("settings-dir-unavailable").to_owned()),
                 ..Self::default()
             },
         }
     }
 
-    fn load(path: PathBuf) -> Self {
-        let mut shortcuts = Self::default();
-        match Profiles::read(&path) {
+    fn load(file: UserFile) -> Self {
+        let mut shortcuts = Self {
+            storage_error: file.migration_error.map(|error| error.to_string()),
+            ..Self::default()
+        };
+        let path = file.path;
+        match Profiles::read(&file.read_from) {
             Ok(config) => {
                 let (bindings, mouse) = config.profiles[&config.active]
                     .compile()
@@ -612,7 +622,7 @@ impl Shortcuts {
                 shortcuts.mouse = mouse;
                 shortcuts.config = config;
             }
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            Err(error) if error.kind() == io::ErrorKind::NotFound && file.read_from == path => {
                 if let Err(error) = shortcuts.config.write(&path, false) {
                     shortcuts.storage_error = Some(error.to_string());
                 }
@@ -884,7 +894,7 @@ impl Shortcuts {
         let path = self
             .path
             .as_ref()
-            .ok_or_else(|| tr("executable-dir-unavailable").to_owned())?;
+            .ok_or_else(|| tr("settings-dir-unavailable").to_owned())?;
         // A corrupt or newer file is kept for recovery rather than overwritten.
         let replace = match fs::metadata(path) {
             Ok(_) => {
@@ -956,10 +966,39 @@ mod tests {
         actions
     }
 
+    fn user_file(path: PathBuf) -> UserFile {
+        super::super::storage::migrate(path, None, super::super::storage::JSON_LIMIT)
+    }
+
+    #[test]
+    fn migrates_customizations_from_the_old_shortcut_file() -> io::Result<()> {
+        use super::super::storage::{JSON_LIMIT, migrate};
+
+        let temp = tempfile::tempdir()?;
+        let legacy = temp.path().join(LEGACY_FILE_NAME);
+        let mut config = Profiles::default();
+        let mut custom = config.profiles[PAINT_NET].clone();
+        custom
+            .bindings
+            .insert(Command::Brush.id().into(), vec!["Ctrl+Alt+Shift+Y".into()]);
+        config.profiles.insert("Mine".into(), custom);
+        config.active = "Mine".into();
+        config.write(&legacy, false)?;
+        let before = std::fs::read(&legacy)?;
+
+        let new = temp.path().join("config").join(FILE_NAME);
+        let shortcuts = Shortcuts::load(migrate(new.clone(), Some(legacy.clone()), JSON_LIMIT));
+        assert_eq!(shortcuts.storage_error, None);
+        assert_eq!(shortcuts.hint(Command::Brush), "Ctrl+Alt+Shift+Y");
+        assert_eq!(std::fs::read(&new)?, before);
+        assert_eq!(std::fs::read(&legacy)?, before);
+        Ok(())
+    }
+
     #[test]
     fn stock_profiles_match_selection_cycles_and_do_not_conflict() -> Result<(), String> {
         let directory = tempfile::tempdir().map_err(|error| error.to_string())?;
-        let mut shortcuts = Shortcuts::load(directory.path().join(FILE_NAME));
+        let mut shortcuts = Shortcuts::load(user_file(directory.path().join(FILE_NAME)));
         let ctx = egui::Context::default();
         assert_eq!(
             send(&mut shortcuts, &ctx, "S", true, 0.0),
@@ -1009,7 +1048,7 @@ mod tests {
     fn new_profile_and_active_binding_survive_restart_and_schema_evolution() -> Result<(), String> {
         let directory = tempfile::tempdir().map_err(|error| error.to_string())?;
         let path = directory.path().join(FILE_NAME);
-        let mut shortcuts = Shortcuts::load(path.clone());
+        let mut shortcuts = Shortcuts::load(user_file(path.clone()));
         let mut draft = shortcuts.config.clone();
         let mut custom = draft.profiles[PAINT_NET].clone();
         custom
@@ -1029,7 +1068,7 @@ mod tests {
         draft.profiles.insert("Meu perfil".into(), custom);
         draft.active = "Meu perfil".into();
         shortcuts.save_draft(draft)?;
-        let mut restarted = Shortcuts::load(path);
+        let mut restarted = Shortcuts::load(user_file(path));
         assert_eq!(restarted.config.active, "Meu perfil");
         assert_eq!(restarted.hint(Command::Brush), "F10");
         assert!(restarted.hint(Command::Zoom).is_empty());
@@ -1044,7 +1083,7 @@ mod tests {
     fn conflicting_edits_leave_last_saved_file_intact() -> io::Result<()> {
         let directory = tempfile::tempdir()?;
         let path = directory.path().join(FILE_NAME);
-        let mut shortcuts = Shortcuts::load(path.clone());
+        let mut shortcuts = Shortcuts::load(user_file(path.clone()));
         let before = fs::read(&path)?;
         let mut draft = shortcuts.config.clone();
         draft
@@ -1066,7 +1105,7 @@ mod tests {
     #[test]
     fn schema_lists_every_registered_action() -> Result<(), serde_json::Error> {
         let schema: serde_json::Value =
-            serde_json::from_str(include_str!("../../docs/atalhos.schema.json"))?;
+            serde_json::from_str(include_str!("../../docs/shortcuts.schema.json"))?;
         let properties = schema["$defs"]["profile"]["properties"]["bindings"]["properties"]
             .as_object()
             .unwrap();

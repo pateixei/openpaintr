@@ -90,7 +90,7 @@ my-effect.rpdn-plugin
 | `api_version` | `string` | Yes | Expected plugin ABI version (`"1.0"`). |
 | `kind` | `string` | Yes | Use `"effect"` in phase 4. The values `"adjustment"` and `"filetype"` are reserved for phase 5. |
 | `menu.category` | `string` | Yes | Submenu under **Effects**, such as `"Blurs"`, `"Artistic"`, or `"Noise"`. |
-| `menu.shortcut_action` | `string` | No | Stable identifier registered in `atalhos.schema.json` when the effect has a default shortcut. |
+| `menu.shortcut_action` | `string` | No | Stable identifier registered in `shortcuts.schema.json` when the effect has a default shortcut. |
 | `capabilities.pixel_format` | `string` | Yes | `"rgba8unorm"` or `"rgba32float"`, with explicit premultiplied or straight linear alpha. |
 | `capabilities.max_halo_px` | `u32` | Yes | Maximum neighborhood radius in pixels around each tile. |
 | `entrypoints.wasm` | `string` | Yes | Relative path to the `.wasm` file inside the ZIP archive. |

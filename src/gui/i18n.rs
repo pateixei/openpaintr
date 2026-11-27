@@ -34,8 +34,11 @@ struct Catalogs(BTreeMap<String, Catalog>);
 
 static CATALOGS: LazyLock<Catalogs> = LazyLock::new(|| {
     let mut catalogs = Catalogs::bundled();
-    let beside_executable = super::storage::exe_adjacent("translations").ok();
-    for directory in search_directories(|name| std::env::var_os(name), beside_executable) {
+    let env = |name: &str| std::env::var_os(name);
+    let exe_dir = super::storage::exe_dir();
+    let data_dir = super::storage::data_dir(env, exe_dir.as_deref());
+    let beside_executable = exe_dir.map(|dir| dir.join("translations"));
+    for directory in search_directories(env, beside_executable, data_dir) {
         catalogs.scan(&directory);
     }
     catalogs
@@ -46,11 +49,12 @@ const CATALOG_LIMIT: u64 = 1024 * 1024;
 
 /// Directories that may override or add catalogs, later ones winning: system
 /// data directories, `translations/` beside the executable, then the user's
-/// data directory. The working directory is never searched, so relative paths
-/// in the environment are ignored.
+/// data directory, which `data_dir` replaces when set. The working directory is
+/// never searched, so relative paths in the environment are ignored.
 fn search_directories(
     env: impl Fn(&str) -> Option<OsString>,
     beside_executable: Option<PathBuf>,
+    data_dir: Option<PathBuf>,
 ) -> Vec<PathBuf> {
     let absolute = |path: PathBuf| path.is_absolute().then_some(path);
     let translations = |base: PathBuf| base.join("openpaintr").join("translations");
@@ -66,6 +70,10 @@ fn search_directories(
 
     directories.extend(beside_executable);
 
+    if let Some(data) = data_dir {
+        directories.push(data.join("translations"));
+        return directories;
+    }
     let user = env("XDG_DATA_HOME")
         .map(PathBuf::from)
         .and_then(absolute)
@@ -575,6 +583,7 @@ mod tests {
             search_directories(
                 environment(&[("HOME", "/home/user")]),
                 Some("/opt/app/translations".into()),
+                None,
             ),
             paths(&[
                 "/usr/share/openpaintr/translations",
@@ -591,6 +600,7 @@ mod tests {
                     ("HOME", "/home/user"),
                 ]),
                 None,
+                None,
             ),
             paths(&[
                 "/second/openpaintr/translations",
@@ -606,8 +616,20 @@ mod tests {
                 ("HOME", "."),
             ]),
             None,
+            None,
         );
         assert!(relative.iter().all(|path| path.starts_with("/usr")));
+        // A data directory replaces the user's one.
+        let portable = search_directories(
+            environment(&[("HOME", "/home/user")]),
+            None,
+            Some("/media/app/data".into()),
+        );
+        assert_eq!(
+            portable.last(),
+            Some(&PathBuf::from("/media/app/data/translations"))
+        );
+        assert!(!portable.iter().any(|path| path.starts_with("/home")));
     }
 
     #[test]
@@ -620,6 +642,7 @@ mod tests {
         let directories = search_directories(
             environment(&[("XDG_DATA_DIRS", &system), ("XDG_DATA_HOME", &user)]),
             Some(beside),
+            None,
         );
         // Each directory defines its own key and every key of the ones before it.
         let keys = ["file", "new", "open", "save"];

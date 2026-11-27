@@ -10,7 +10,7 @@ Run the editor on Linux with Wayland or X11 and OpenGL.
 cargo run --locked
 ```
 
-Use **Claro** (Light) or **Escuro** (Dark) in the menu bar to switch themes. The horizontal **Color Ribbon** sits below the contextual toolbar. Click the custom, black, or white swatch to select the primary color, then adjust its opacity on the slider beside the hue spectrum. Each swatch keeps its own opacity as you switch colors. Right-click a swatch in the Paint.NET profile or Alt-click it in the Adobe profile to assign it to the secondary color. The chevron opens the floating **Cores** (Colors) panel with an HSVA wheel, brightness and opacity controls, and expandable RGB, HSV, hex, and alpha inputs. It also offers 32 editable swatches, presets, and Paint.NET-compatible palette import and export in `AARRGGBB` text format. The active palette is stored in `paleta.txt`.
+Use **Claro** (Light) or **Escuro** (Dark) in the menu bar to switch themes. The horizontal **Color Ribbon** sits below the contextual toolbar. Click the custom, black, or white swatch to select the primary color, then adjust its opacity on the slider beside the hue spectrum. Each swatch keeps its own opacity as you switch colors. Right-click a swatch in the Paint.NET profile or Alt-click it in the Adobe profile to assign it to the secondary color. The chevron opens the floating **Cores** (Colors) panel with an HSVA wheel, brightness and opacity controls, and expandable RGB, HSV, hex, and alpha inputs. It also offers 32 editable swatches, presets, and Paint.NET-compatible palette import and export in `AARRGGBB` text format. The active palette is stored in `palette.txt` in the [configuration directory](#user-files).
 
 Tools are on the left, document tabs and the canvas are in the center, and the **Camadas** (Layers) and **Histórico** (History) panels are on the right. The bottom bar shows image dimensions, coordinates, and zoom. Use **Novo** (New) or the `+` button to create an image, or **Abrir** (Open) to open a Paint.NET document (`.pdn`) or import a PNG. **Arquivo → Abrir recentes** (File → Open Recent) lists recent files. Drag tabs to reorder them or switch with `Ctrl+Tab` and `Ctrl+Shift+Tab`.
 
@@ -42,19 +42,30 @@ The **Imagem** (Image) menu crops to a selection, resizes images or the canvas, 
 
 ### Shortcut profiles
 
-Open **Configurações → Atalhos de teclado e mouse** (Settings → Keyboard and Mouse Shortcuts). Select **Paint.NET** (the default) or **Adobe**, or duplicate a profile to customize keyboard and mouse bindings. Enter combinations such as `Ctrl+Shift+B` or `Ctrl+Wheel`, separate alternatives with `;`, and leave a field empty to remove its binding. Select **Salvar perfis** (Save Profiles) to apply changes. Profiles and the active profile are stored in `atalhos.json` next to the executable. If the directory is read-only, the application reports the save error. [JSON Schema](docs/atalhos.schema.json)
+Open **Configurações → Atalhos de teclado e mouse** (Settings → Keyboard and Mouse Shortcuts). Select **Paint.NET** (the default) or **Adobe**, or duplicate a profile to customize keyboard and mouse bindings. Enter combinations such as `Ctrl+Shift+B` or `Ctrl+Wheel`, separate alternatives with `;`, and leave a field empty to remove its binding. Select **Salvar perfis** (Save Profiles) to apply changes. Profiles and the active profile are stored in `shortcuts.json` in the [configuration directory](#user-files). If it can't be written, the application reports the save error. [JSON Schema](docs/shortcuts.schema.json)
 
 ### Interface language
 
-Choose a language under **Settings → Language**. The change takes effect immediately and is saved in `$XDG_CONFIG_HOME/openpaintr/language.json` (defaults to `~/.config/openpaintr/language.json`). The first launch uses a supported system language or falls back to English. The bundled catalogs cover English, French, Spanish, German, Brazilian Portuguese, Italian, Russian, Arabic, Simplified Chinese, and Japanese. Arabic labels read right to left within the existing editor layout. System file-picker controls use the desktop's language.
+Choose a language under **Settings → Language**. The change takes effect immediately and is saved in `language.json` in the [configuration directory](#user-files). The first launch uses a supported system language or falls back to English. The bundled catalogs cover English, French, Spanish, German, Brazilian Portuguese, Italian, Russian, Arabic, Simplified Chinese, and Japanese. Arabic labels read right to left within the existing editor layout. System file-picker controls use the desktop's language.
 
 At startup, OpenPaintR adds to or overrides its bundled catalogs from these locations, each one taking precedence over the previous ones:
 
 1. `openpaintr/translations/` in each directory of `$XDG_DATA_DIRS` (defaults to `/usr/local/share` and `/usr/share`; the first listed directory wins);
 2. `translations/` beside the executable;
-3. `$XDG_DATA_HOME/openpaintr/translations/` (defaults to `~/.local/share/openpaintr/translations/`).
+3. `$XDG_DATA_HOME/openpaintr/translations/` (defaults to `~/.local/share/openpaintr/translations/`). In portable mode, or with `OPENPAINTR_DATA_DIR`, `translations/` in the data directory replaces this one.
 
 The working directory is not searched. Only regular files of up to 1 MiB are loaded. To add a language, save a flat JSON object under a lowercase locale filename such as `nl-nl.json` and restart. Use `language-name` to set its name in the language menu. Use [`en-us.json`](translations/en-us.json) as the key reference and keep numbered placeholders such as `{0}` intact. Missing messages in an additional language fall back to English.
+
+### User files
+
+| Files | Location |
+| --- | --- |
+| `settings.json`, `language.json`, `shortcuts.json`, `palette.txt` | `$XDG_CONFIG_HOME/openpaintr/` (defaults to `~/.config/openpaintr/`) |
+| `recent.json` | `$XDG_STATE_HOME/openpaintr/` (defaults to `~/.local/state/openpaintr/`) |
+
+**Portable mode.** When a file named `portable` exists beside the executable, all of these files and your translations are kept in a `data/` directory beside it. If that directory can't be written, saving reports an error; nothing is written elsewhere. For development and tests, set `OPENPAINTR_DATA_DIR` to an absolute path to use that directory in any mode.
+
+**Upgrading.** Earlier versions kept `atalhos.json`, `paleta.txt`, and `recentes.json` beside the executable. When the corresponding new file doesn't exist yet, OpenPaintR copies the old one to its new name and location, and leaves the old file untouched.
 
 ### Window controls
 

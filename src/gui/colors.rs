@@ -5,6 +5,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use super::storage::UserFile;
 use eframe::egui::{
     self, Color32, CornerRadius, Mesh, Pos2, Rect, RichText, Sense, Stroke, StrokeKind, Vec2,
     ecolor::Hsva, pos2, vec2,
@@ -18,7 +19,9 @@ use super::{
     widgets::{paint_checker, pixel_to_color32},
 };
 
-const PALETTE_FILE: &str = "paleta.txt";
+const PALETTE_FILE: &str = "palette.txt";
+/// The name used beside the executable by earlier versions.
+const LEGACY_PALETTE_FILE: &str = "paleta.txt";
 
 const DEFAULT_SWATCHES: [[u8; 4]; 32] = [
     [0, 0, 0, 255],
@@ -166,6 +169,8 @@ pub struct ColorPalette {
     hex_draft: String,
     hex_last: [u8; 4],
     palette_path: Option<PathBuf>,
+    /// Kept as text: the palette is `Clone`.
+    save_error: Option<String>,
 }
 
 /// Largest palette file that is read.
@@ -177,17 +182,32 @@ fn read_palette_text(path: &Path) -> io::Result<String> {
 }
 
 impl ColorPalette {
+    /// The default palette, not saved anywhere.
     pub fn new(primary: [u8; 3], secondary: [u8; 3]) -> Self {
-        let palette_path = super::storage::exe_adjacent(PALETTE_FILE).ok();
-        Self::with_palette_file(primary, secondary, palette_path)
+        Self::with_palette_file(primary, secondary, None)
     }
 
-    fn with_palette_file(
-        primary: [u8; 3],
-        secondary: [u8; 3],
-        mut palette_path: Option<PathBuf>,
-    ) -> Self {
-        let loaded = match palette_path.as_deref().map(read_palette_text) {
+    /// The user's saved palette, which later changes update.
+    pub fn from_user_files(primary: [u8; 3], secondary: [u8; 3]) -> Self {
+        let file = super::storage::config_file(PALETTE_FILE).ok().map(|path| {
+            super::storage::migrate(
+                path,
+                super::storage::exe_adjacent(LEGACY_PALETTE_FILE),
+                PALETTE_LIMIT,
+            )
+        });
+        Self::with_palette_file(primary, secondary, file)
+    }
+
+    fn with_palette_file(primary: [u8; 3], secondary: [u8; 3], file: Option<UserFile>) -> Self {
+        let (mut palette_path, read_from, save_error) = file.map_or((None, None, None), |file| {
+            (
+                Some(file.path),
+                Some(file.read_from),
+                file.migration_error.map(|error| error.to_string()),
+            )
+        });
+        let loaded = match read_from.as_deref().map(read_palette_text) {
             Some(Ok(text)) => Some(Self::parse_palette_txt(&text)).filter(|s| !s.is_empty()),
             // Never overwrite a file that exists but could not be read.
             Some(Err(error)) if error.kind() != io::ErrorKind::NotFound => {
@@ -211,6 +231,7 @@ impl ColorPalette {
             hex_draft: format_hex(p_rgba),
             hex_last: p_rgba,
             palette_path,
+            save_error,
         }
     }
 
@@ -371,10 +392,17 @@ impl ColorPalette {
         Ok(())
     }
 
-    fn autosave(&self) {
-        if let Some(path) = &self.palette_path {
-            let _ = self.save_to(path);
+    fn autosave(&mut self) {
+        if let Some(path) = &self.palette_path
+            && let Err(error) = self.save_to(path)
+        {
+            self.save_error = Some(error.to_string());
         }
+    }
+
+    /// The latest failure to save or migrate the palette, once.
+    pub fn take_save_error(&mut self) -> Option<String> {
+        self.save_error.take()
     }
 }
 
@@ -1029,7 +1057,14 @@ mod tests {
         let oversized = "FF112233\n".repeat(PALETTE_LIMIT as usize / 9 + 1);
         std::fs::write(&path, &oversized)?;
 
-        let mut palette = ColorPalette::with_palette_file([0; 3], [0; 3], Some(path.clone()));
+        let file = |path: &Path| {
+            Some(super::super::storage::migrate(
+                path.into(),
+                None,
+                PALETTE_LIMIT,
+            ))
+        };
+        let mut palette = ColorPalette::with_palette_file([0; 3], [0; 3], file(&path));
         assert_eq!(palette.swatches, DEFAULT_SWATCHES);
         palette.autosave();
         assert_eq!(std::fs::read_to_string(&path)?, oversized);
@@ -1038,9 +1073,27 @@ mod tests {
 
         // A missing file is still created on the first change.
         let missing = temp.path().join("new.txt");
-        let palette = ColorPalette::with_palette_file([0; 3], [0; 3], Some(missing.clone()));
+        let mut palette = ColorPalette::with_palette_file([0; 3], [0; 3], file(&missing));
         palette.autosave();
         assert!(missing.is_file());
+
+        // An old palette file is migrated.
+        let legacy = temp.path().join(LEGACY_PALETTE_FILE);
+        std::fs::write(&legacy, "FF010203\n")?;
+        let new = temp.path().join("config").join(PALETTE_FILE);
+        let migrated = super::super::storage::migrate(new.clone(), Some(legacy), PALETTE_LIMIT);
+        let palette = ColorPalette::with_palette_file([0; 3], [0; 3], Some(migrated));
+        assert_eq!(palette.swatches, [[1, 2, 3, 255]]);
+        assert!(new.is_file());
+
+        // A failed save is reported once.
+        let mut palette =
+            ColorPalette::with_palette_file([0; 3], [0; 3], file(&path.join("below-a-file")));
+        palette.save_error = None;
+        palette.palette_path = Some(path.join("below-a-file"));
+        palette.autosave();
+        assert!(palette.take_save_error().is_some());
+        assert!(palette.take_save_error().is_none());
         Ok(())
     }
 
