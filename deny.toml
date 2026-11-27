@@ -1,0 +1,47 @@
+# Configuration for `cargo deny check`, run by .github/workflows/ci.yml.
+
+[graph]
+# Only the platforms OpenPaintR builds for.
+targets = ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"]
+all-features = true
+
+[advisories]
+version = 2
+yanked = "deny"
+# Fail on unmaintained crates only when OpenPaintR depends on them directly.
+# Transitive ones come from the GUI stack and have no replacement to pick here.
+# Vulnerabilities and unsound advisories still fail for the whole graph.
+unmaintained = "workspace"
+ignore = []
+
+[licenses]
+version = 2
+confidence-threshold = 0.9
+allow = [
+    "0BSD",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "MIT",
+    "OFL-1.1",
+    "Ubuntu-font-1.0",
+    "Unicode-3.0",
+    "Zlib",
+]
+
+[licenses.private]
+# OpenPaintR itself is not published to a registry and has no license field.
+ignore = true
+
+[bans]
+# The GUI stack pulls in several major versions of some crates.
+multiple-versions = "warn"
+wildcards = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
