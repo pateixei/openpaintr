@@ -7,6 +7,7 @@ mod editor;
 mod feather;
 mod flash;
 mod geometry;
+mod glyph_outlines;
 mod gradient_tool;
 mod i18n;
 mod icon_atlas;

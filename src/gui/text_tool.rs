@@ -1,17 +1,20 @@
 use super::i18n::text as tr;
-use std::{collections::BTreeMap, fs, path::Path, sync::Arc};
+use std::{fs, path::Path, sync::Arc};
 
 use eframe::egui::{
     self, Align, Color32, Rect, Stroke, Vec2,
     epaint::{
         FontFamily, FontId,
-        text::{FontData, Fonts, Galley, LayoutJob, LayoutSection, TextFormat},
+        text::{FontData, Fonts, Galley, Glyph, LayoutJob, LayoutSection, TextFormat},
     },
     pos2, vec2,
 };
+use gfx::{RULE_NONZERO, path::Path as GfxPath};
 use openpaintr::Pixel;
 
 use super::{
+    app_settings::AaMode,
+    glyph_outlines::OutlineFonts,
     i18n, paint_dashed_line,
     selection::{Point, Selection},
     session::{
@@ -19,6 +22,7 @@ use super::{
         set_grab_cursor, track_handle_drag,
     },
     tolerance::{self, StrokeBlend},
+    vector_tools::{CoverageMask, rasterize_path_analytical, rasterize_path_ssaa, trace_path},
     view::CanvasViewport,
 };
 
@@ -53,6 +57,7 @@ impl TextAlign {
 pub struct FontCatalog {
     pub families: Vec<String>,
     fonts: Fonts,
+    outlines: OutlineFonts,
 }
 
 /// Built-in family IDs; shown through `family_label` translations.
@@ -113,8 +118,13 @@ impl FontCatalog {
                 families.push(name.to_owned());
             }
         }
+        let outlines = OutlineFonts::new(defs.clone());
         let fonts = Fonts::new(4096, Default::default(), defs);
-        Self { families, fonts }
+        Self {
+            families,
+            fonts,
+            outlines,
+        }
     }
 
     fn font_family(&self, name: &str) -> FontFamily {
@@ -126,7 +136,8 @@ impl FontCatalog {
         }
     }
 
-    fn layout_4x(&mut self, session: &TextSession) -> (Arc<Galley>, egui::ColorImage) {
+    /// Positions the glyphs, with one point per canvas pixel.
+    fn layout(&mut self, session: &TextSession) -> Arc<Galley> {
         self.fonts.begin_pass(4096, Default::default());
         let text = if session.text.is_empty() {
             " ".to_owned()
@@ -165,13 +176,20 @@ impl FontCatalog {
             break_on_newline: true,
             ..Default::default()
         };
-        let galley = {
-            let mut view = self.fonts.with_pixels_per_point(4.0);
-            view.layout_job(job)
-        };
-        let image = self.fonts.image();
-        (galley, image)
+        let resolution = layout_resolution(session.params.size_px);
+        self.fonts.with_pixels_per_point(resolution).layout_job(job)
     }
+}
+
+/// Glyph pixels up to which egui lays text out at a finer resolution.
+const LAYOUT_GLYPH_PIXELS: f32 = 240.0;
+
+/// Pixels per point for the layout. egui rounds positions to this grid and also
+/// draws every glyph at this resolution into its font atlas: finer for small
+/// text, where rounding shows, and coarser for large text, whose glyphs would
+/// overflow the atlas and be redrawn on every keystroke.
+fn layout_resolution(size_px: f32) -> f32 {
+    (LAYOUT_GLYPH_PIXELS / size_px).floor().clamp(1.0, 4.0)
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -235,128 +253,108 @@ impl TextSession {
         base_layer: &[Pixel],
         size: Point,
         selection: Option<&Selection>,
+        aa_mode: AaMode,
     ) -> Vec<Pixel> {
         let mut out = base_layer.to_vec();
         if self.text.trim().is_empty() || size.0 == 0 || size.1 == 0 {
             self.last_bounds = vec2(12.0, self.params.size_px.max(12.0));
             return out;
         }
-        let (galley, atlas) = catalog.layout_4x(self);
+        let galley = catalog.layout(self);
         self.last_bounds = galley.size().max(vec2(12.0, self.params.size_px.max(12.0)));
-        if atlas.width() == 0 || atlas.height() == 0 {
-            return out;
-        }
 
-        // Accumulate 4x4 subpixel alpha coverage in a sparse row-major pixel map.
-        let mut cov_map: BTreeMap<Point, [u8; 16]> = BTreeMap::new();
-        let bold_dx = if self.params.bold {
-            (self.params.size_px * 0.045).clamp(0.45, 2.2)
-        } else {
-            0.0
+        let scale = aa_mode.path_scale();
+        let mut paths = self.paths(catalog, &galley, scale);
+        // Each shape is rasterized on its own and then combined: fonts disagree
+        // on the winding of their contours, so overlaps could cancel out.
+        let coverage = match aa_mode {
+            AaMode::Analytical => CoverageMask::combined(
+                paths
+                    .iter_mut()
+                    .map(|path| rasterize_path_analytical(path, RULE_NONZERO, size))
+                    .collect(),
+                u8::max,
+            ),
+            AaMode::Ssaa4x4 => CoverageMask::combined(
+                paths
+                    .iter_mut()
+                    .map(|path| rasterize_path_ssaa(path, RULE_NONZERO, size))
+                    .collect(),
+                |a, b| a | b,
+            )
+            .map(super::stroke_raster::mask16_to_u8),
         };
-        let atlas_w = atlas.width() as i32;
-        let atlas_h = atlas.height() as i32;
-        let sample_atlas = |u: f32, v: f32| -> u8 {
-            let x = u.floor() as i32;
-            let y = v.floor() as i32;
-            if x < 0 || y < 0 || x >= atlas_w || y >= atlas_h {
-                return 0;
-            }
-            let x1 = (x + 1).min(atlas_w - 1);
-            let y1 = (y + 1).min(atlas_h - 1);
-            let fx = u - x as f32;
-            let fy = v - y as f32;
-            let a_at = |px: i32, py: i32| {
-                f32::from(atlas.pixels[py as usize * atlas_w as usize + px as usize].a())
-            };
-            let top = a_at(x, y) * (1.0 - fx) + a_at(x1, y) * fx;
-            let bot = a_at(x, y1) * (1.0 - fx) + a_at(x1, y1) * fx;
-            (top * (1.0 - fy) + bot * fy).round().clamp(0.0, 255.0) as u8
-        };
-
-        for row in &galley.rows {
-            if row.visuals.mesh.is_empty() {
-                continue;
-            }
-            let row_pos = self.anchor + row.pos.to_vec2();
-            let mesh = &row.visuals.mesh;
-            for tri in mesh.indices.as_chunks::<3>().0 {
-                let (i0, i1, i2) = (tri[0] as usize, tri[1] as usize, tri[2] as usize);
-                let is_glyph = row.visuals.glyph_vertex_range.contains(&i0);
-                let (v0, v1, v2) = (mesh.vertices[i0], mesh.vertices[i1], mesh.vertices[i2]);
-                let p0 = row_pos + v0.pos.to_vec2();
-                let p1 = row_pos + v1.pos.to_vec2();
-                let p2 = row_pos + v2.pos.to_vec2();
-
-                let min_x = (p0.x.min(p1.x).min(p2.x).floor() as i32).max(0);
-                let min_y = (p0.y.min(p1.y).min(p2.y).floor() as i32).max(0);
-                let max_x =
-                    ((p0.x.max(p1.x).max(p2.x) + bold_dx).ceil() as i32).min(size.0 as i32 - 1);
-                let max_y = (p0.y.max(p1.y).max(p2.y).ceil() as i32).min(size.1 as i32 - 1);
-                if min_x > max_x || min_y > max_y {
-                    continue;
-                }
-
-                let area = edge_fn(p0, p1, p2);
-                if area.abs() < 1e-6 {
-                    continue;
-                }
-                let inv_area = 1.0 / area;
-
-                let eval_sample = |px: f32, py: f32| -> u8 {
-                    let pt = vec2(px, py);
-                    let w0 = edge_fn(p1, p2, pt) * inv_area;
-                    let w1 = edge_fn(p2, p0, pt) * inv_area;
-                    let w2 = 1.0 - w0 - w1;
-                    if w0 < -1e-4 || w1 < -1e-4 || w2 < -1e-4 {
-                        return 0;
-                    }
-                    if !is_glyph {
-                        return 255;
-                    }
-                    let u = w0 * v0.uv.x + w1 * v1.uv.x + w2 * v2.uv.x;
-                    let v = w0 * v0.uv.y + w1 * v1.uv.y + w2 * v2.uv.y;
-                    sample_atlas(u, v)
-                };
-
-                for py in min_y..=max_y {
-                    for px in min_x..=max_x {
-                        for (sy, &oy) in super::stroke_raster::SSAA_OFFSETS_UNIT.iter().enumerate()
-                        {
-                            let y_sub = py as f32 + oy as f32;
-                            for (sx, &ox) in
-                                super::stroke_raster::SSAA_OFFSETS_UNIT.iter().enumerate()
-                            {
-                                let x_sub = px as f32 + ox as f32;
-                                let mut a = eval_sample(x_sub, y_sub);
-                                if bold_dx > 0.0 {
-                                    a = a.max(eval_sample(x_sub - bold_dx, y_sub));
-                                }
-                                if a > 0 {
-                                    let slot =
-                                        cov_map.entry((px as u32, py as u32)).or_insert([0; 16]);
-                                    let idx = sy * 4 + sx;
-                                    slot[idx] = slot[idx].max(a);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
         tolerance::blend_coverage_in_place(
             &mut out,
             size,
             selection,
-            cov_map.into_iter().map(|(pt, subs)| {
-                let sum: u32 = subs.into_iter().map(u32::from).sum();
-                (pt, super::stroke_raster::avg16_u8(sum))
-            }),
+            coverage.pixels(),
             self.params.blend,
             |_| self.color,
         );
         out
+    }
+
+    /// The outlines of the glyphs and decoration lines of a layout, in canvas
+    /// coordinates multiplied by `scale`.
+    fn paths(&self, catalog: &mut FontCatalog, galley: &Galley, scale: f32) -> Vec<GfxPath> {
+        let family = catalog.font_family(&self.params.family);
+        let size = self.params.size_px;
+        // Bold is simulated by drawing each glyph again, slightly to the right.
+        let bold_dx = self.params.bold.then(|| (size * 0.045).clamp(0.45, 2.2));
+        let line_width = (size * 0.075).max(1.0);
+        let mut paths = Vec::new();
+        for row in &galley.rows {
+            let origin = self.anchor + row.pos.to_vec2();
+            for glyph in &row.glyphs {
+                let Some(outline) = catalog.outlines.glyph(&family, glyph.chr, size) else {
+                    continue;
+                };
+                let pen = origin + glyph.pos.to_vec2() + vec2(0.0, outline.y_offset);
+                // Italic slants the glyph from its lowest point.
+                let bottom = pen.y + outline.bottom();
+                let slant = if self.params.italic { 0.25 } else { 0.0 };
+                let mut path = GfxPath::default();
+                for offset in std::iter::once(0.0).chain(bold_dx) {
+                    outline.trace(&mut path, pen.to_pos2(), |x, y| {
+                        ((x + offset + slant * (bottom - y)) * scale, y * scale)
+                    });
+                }
+                paths.push(path);
+            }
+            let underline = |glyph: &Glyph| glyph.logical_rect().bottom();
+            let strikethrough = |glyph: &Glyph| glyph.logical_rect().center().y;
+            let decorations = [
+                (self.params.underline, underline as fn(&Glyph) -> f32),
+                (self.params.strikethrough, strikethrough),
+            ];
+            for (_, y_of) in decorations.into_iter().filter(|(enabled, _)| *enabled) {
+                // One line per run of glyphs at the same height.
+                for run in row.glyphs.chunk_by(|a, b| y_of(a) == y_of(b)) {
+                    let (Some(first), Some(last)) = (run.first(), run.last()) else {
+                        continue;
+                    };
+                    let mut y = y_of(first);
+                    // As egui places lines, to a quarter of a pixel.
+                    Stroke::new(line_width, Color32::WHITE).round_center_to_pixel(4.0, &mut y);
+                    let top = origin.y + y - line_width * 0.5;
+                    let corners = [
+                        (origin.x + first.pos.x, top),
+                        (origin.x + last.max_x(), top),
+                        (origin.x + last.max_x(), top + line_width),
+                        (origin.x + first.pos.x, top + line_width),
+                    ];
+                    let mut path = GfxPath::default();
+                    trace_path(
+                        &mut path,
+                        corners.map(|(x, y)| (x * scale, y * scale)),
+                        true,
+                    );
+                    paths.push(path);
+                }
+            }
+        }
+        paths
     }
 
     pub fn handles(&mut self, viewport: CanvasViewport, ui: &egui::Ui) -> SessionOutcome {
@@ -424,11 +422,6 @@ impl TextSession {
     }
 }
 
-#[inline]
-fn edge_fn(a: Vec2, b: Vec2, p: Vec2) -> f32 {
-    (p.x - a.x) * (b.y - a.y) - (p.y - a.y) * (b.x - a.x)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -450,8 +443,102 @@ mod tests {
             },
         );
         session.text = "Aa".to_owned();
-        let pixels = session.render_preview(&mut catalog, &base, size, None);
+        let pixels = session.render_preview(&mut catalog, &base, size, None, AaMode::Analytical);
         assert!(pixels.iter().any(|p| p.0[3] > 200));
         assert!(pixels.iter().any(|p| (1..255).contains(&p.0[3])));
+    }
+
+    /// Text over a transparent layer, in an opaque color.
+    fn coverage(text: &str, size_px: f32, size: Point, aa_mode: AaMode) -> Vec<u8> {
+        let params = TextParams {
+            size_px,
+            ..TextParams::default()
+        };
+        let mut session = TextSession::new(vec2(5.3, 4.6), Pixel([0, 0, 0, 255]), params);
+        session.text = text.to_owned();
+        let base = vec![Pixel::default(); (size.0 * size.1) as usize];
+        session
+            .render_preview(&mut FontCatalog::new(), &base, size, None, aa_mode)
+            .iter()
+            .map(|pixel| pixel.0[3])
+            .collect()
+    }
+
+    #[test]
+    fn text_edges_follow_the_antialiasing_mode() {
+        let size = (200, 70);
+        let analytical = coverage("Ag 45", 48.0, size, AaMode::Analytical);
+        let supersampled = coverage("Ag 45", 48.0, size, AaMode::Ssaa4x4);
+        assert_ne!(analytical, supersampled);
+        // 4 x 4 supersampling has 17 levels of coverage.
+        let levels: Vec<u8> = (0..=16_u32)
+            .map(|count| super::super::stroke_raster::mask16_to_u8(((1_u32 << count) - 1) as u16))
+            .collect();
+        assert!(supersampled.iter().all(|alpha| levels.contains(alpha)));
+        assert!(analytical.iter().any(|alpha| !levels.contains(alpha)));
+    }
+
+    #[test]
+    fn long_large_text_renders_to_the_end() {
+        // Far more distinct glyphs than a font atlas holds at this size.
+        let text: String = ('a'..='z')
+            .chain('A'..='Z')
+            .chain("こんにちは日本語汉字测试样例水火木金土山川田人口目耳手足力".chars())
+            .chain(['W'])
+            .collect();
+        let size = (24_000, 330);
+        let drawn = coverage(&text, 240.0, size, AaMode::Analytical);
+        let params = TextParams {
+            size_px: 240.0,
+            ..TextParams::default()
+        };
+        let mut session = TextSession::new(vec2(5.3, 4.6), Pixel::default(), params);
+        session.text = text;
+        let galley = FontCatalog::new().layout(&session);
+        let glyphs = &galley.rows[0].glyphs;
+        assert_eq!(glyphs.len(), session.text.chars().count());
+        // Every glyph has ink within its advance.
+        for glyph in glyphs {
+            let from = (5.3 + glyph.pos.x).floor() as usize;
+            let to = (5.3 + glyph.max_x()).ceil() as usize;
+            let inked = drawn
+                .chunks_exact(size.0 as usize)
+                .any(|row| row[from..to].iter().any(|&alpha| alpha > 128));
+            assert!(inked, "{:?} at {from} is missing", glyph.chr);
+        }
+    }
+
+    #[test]
+    fn outlines_come_from_the_fonts_egui_lays_out() {
+        let mut catalog = FontCatalog::new();
+        let text = "Ag.fi \u{E000}\u{25FB} مرحبا こんにちは 汉字 \u{1F600} ∑";
+        for family in catalog.families.clone() {
+            for size_px in [13.0, 96.0] {
+                let params = TextParams {
+                    family: family.clone(),
+                    size_px,
+                    ..TextParams::default()
+                };
+                let mut session = TextSession::new(Vec2::ZERO, Pixel::default(), params);
+                session.text = text.to_owned();
+                let galley = catalog.layout(&session);
+                let font = catalog.font_family(&family);
+                let mut compared = 0;
+                for glyph in galley.rows.iter().flat_map(|row| &row.glyphs) {
+                    let Some(outline) = catalog.outlines.glyph(&font, glyph.chr, size_px) else {
+                        continue;
+                    };
+                    compared += 1;
+                    assert!(
+                        (outline.advance - glyph.advance_width).abs() < 0.01,
+                        "{family} {size_px} {:?}: {} != {}",
+                        glyph.chr,
+                        outline.advance,
+                        glyph.advance_width
+                    );
+                }
+                assert!(compared > 10, "{family}: {compared}");
+            }
+        }
     }
 }

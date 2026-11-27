@@ -272,7 +272,7 @@ impl ActiveSession {
             Self::Gradient(g) => Some(g.render_preview(src, size, selection)),
             Self::LineCurve(lc) => Some(lc.render_preview(src, size, selection, aa_mode)),
             Self::Shape(s) => Some(s.render_preview(src, size, selection, aa_mode)),
-            Self::Text(t) => Some(t.render_preview(fonts, src, size, selection)),
+            Self::Text(t) => Some(t.render_preview(fonts, src, size, selection, aa_mode)),
             Self::Transform(_) | Self::CanvasResize(_) => None,
         }
     }

@@ -400,7 +400,35 @@ impl<T: Copy + Default + PartialEq> CoverageMask<T> {
             })
     }
 
-    fn map<U>(self, convert: impl Fn(T) -> U) -> CoverageMask<U> {
+    /// One mask over all of `masks`, merging the values of shared pixels.
+    pub fn combined(masks: Vec<Self>, merge: impl Fn(T, T) -> T) -> Self {
+        let span = |range: fn(&Self) -> &Range<u32>| {
+            let used = masks.iter().filter(|mask| !mask.data.is_empty()).map(range);
+            let start = used.clone().map(|range| range.start).min().unwrap_or(0);
+            start..used.map(|range| range.end).max().unwrap_or(0)
+        };
+        let columns = span(|mask| &mask.columns);
+        let rows = span(|mask| &mask.rows);
+        let mut all = Self {
+            data: vec![T::default(); columns.len() * rows.len()],
+            columns,
+            rows,
+        };
+        for mask in &masks {
+            let offset = (mask.columns.start.saturating_sub(all.columns.start)) as usize;
+            let rows = mask.data.chunks_exact(mask.columns.len().max(1));
+            for (row, y) in rows.zip(mask.rows.clone()) {
+                if let Some(target) = all.row_mut(y) {
+                    for (target, &value) in target[offset..].iter_mut().zip(row) {
+                        *target = merge(*target, value);
+                    }
+                }
+            }
+        }
+        all
+    }
+
+    pub fn map<U>(self, convert: impl Fn(T) -> U) -> CoverageMask<U> {
         CoverageMask {
             columns: self.columns,
             rows: self.rows,
