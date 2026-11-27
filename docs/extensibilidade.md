@@ -177,7 +177,7 @@ export_effect!(AddNoisePlugin);
 ```
 
 - Using global coordinates `(dst.origin_x() + x, dst.origin_y() + y)` avoids seams at `256 × 256 px` tile boundaries.
-- The host applies the 4×4 SSAA `TMask` selection coverage when committing a tile to the layer.
+- The host applies the selection's `TMask` coverage when committing a tile to the layer.
 
 ---
 
@@ -340,7 +340,7 @@ openpaintr plugin check .
 # Build the portable my-effect.rpdn-plugin package
 openpaintr plugin pack . -o my-effect.rpdn-plugin
 
-# Run headless checks for preview, SSAA selection, alpha edges, and CPU/GPU parity
+# Run headless checks for preview, antialiased selection, alpha edges, and CPU/GPU parity
 openpaintr plugin test my-effect.rpdn-plugin
 ```
 

@@ -1,6 +1,6 @@
 # OpenPaintR Roadmap
 
-**Status** — Approved on November 25, 2026. Last updated on November 26, 2026.
+**Status** — Approved on November 25, 2026. Last updated on November 27, 2026.
 
 The first GitHub publication uses **OpenPaintR** as the project name and `openpaintr` as the executable. Phases 1 and 2 are complete. Phase 3 tools are implemented. Color profiles, broader format support, desktop integration, and performance are next in phase 4, followed by the plugin infrastructure, adjustments, and effects in phase 5. [GitHub repository](https://github.com/pateixei/openpaintr)
 
@@ -82,6 +82,7 @@ The five phase 1 workflows below, plus `Ctrl+double-click` bottom-right corner r
 - [x] **Configurable antialiasing.** Support both **Analytical / Distance-Field AA** (default, 256-level continuous coverage) and **4×4 SSAA** across brush/eraser/recolor/clone strokes, lines/curves, shapes, selections, and feathering, selectable in **Settings → Antialiasing** and persisted in global application settings (`settings.json`). Preserve partial alpha in history, PDN saves, and antialiased Paint Bucket edge recovery across both modes. Owner sign-off received on November 26, 2026.
 - [x] **Text.** Click to position and drag the anchor. Type directly on the canvas or use the contextual toolbar field. Press `Shift+Enter` for a line break, `Enter` to commit, and `Esc` to cancel. Choose a detected system or bundled font, size (`6..=240 px`), bold, italic, underline, strikethrough, and left, center, or right alignment. Rasterize with 4×4 SSAA and record one history entry.
 - [x] **Colors.** Primary and secondary colors, swap (`X`), reset (`D`), HSVA wheel, brightness and opacity controls, and a compact or expanded panel with synchronized RGB, HSV, hex, and alpha fields. Provide 32 editable swatches with `+` to add or right-click to remove, Default, Pastel, and Grayscale presets, Paint.NET-compatible `.txt` import and export (`AARRGGBB`), and automatic saving to `paleta.txt`.
+- [ ] **Color Ribbon swatches and opacity.** Keep the custom, black, and white swatches visible beside an opacity slider and the hue spectrum. Preserve each swatch's opacity when switching. Use the selected primary swatch's RGBA in painting and keep the alpha controls in sync with the Colors panel. Support configurable primary and secondary swatch gestures in both shortcut profiles.
 
 **Acceptance criteria** — Each tool follows its active-layer and selection rules, maintains a preview during the gesture, and produces one reversible edit on confirmation. Test sampling with hidden layers and strokes containing semitransparent pixels. [Tools and settings](https://paint.net/doc/latest/ToolsWindow.html) · [Paint.NET 5.2 changelog](https://paint.net/roadmap.html)
 
@@ -93,6 +94,7 @@ The five phase 1 workflows below, plus `Ctrl+double-click` bottom-right corner r
 
 - [x] **Mouse gestures.** Share the active profile and `atalhos.json` between keyboard and mouse. The **Mouse** tab remaps strokes, selection gestures, the color wheel, navigation, transforms, and layer commands. The schema distinguishes gesture identifiers from keyboard commands.
 - [x] **Stroke width via the wheel.** In the Paint.NET and Adobe profiles, `Ctrl+Shift+Wheel` changes width in 1 px steps over the canvas. Offer the configurable gesture for all tools with pixel-width strokes and update the preview of a line, curve, or shape being edited.
+- [ ] **Stroke-size cursor preview.** While the wheel gesture's key combination is held over the canvas, show a zoom-scaled outline of the current stroke width, with a dot for very small sizes. Apply wheel changes immediately and restore the normal cursor when the keys are released.
 - [x] **Reference gesture parity.** The equivalent Paint.NET and Photoshop gestures are configurable in `atalhos.json` and documented in `atalhos.schema.json`. They include marquee zoom (`zoom.marquee` in Paint.NET), scrubby zoom (`zoom.scrubby` in Adobe), repositioning a selection while drawing (`selection.relocate`, right button in Paint.NET or `Space+Left` in Adobe), Eyedropper, temporary Brush sampling, global Paint Bucket, Clone Stamp source, Recolor target, and handles for gradients, curves, shapes, and text. [Paint.NET](https://paint.net/doc/latest/KeyboardMouseCommands.html) · [Adobe Photoshop](https://helpx.adobe.com/photoshop/desktop/get-started/learn-the-basics/zoom-images.html)
 
 **Shortcut acceptance criteria** — Switch between Paint.NET and Adobe, create a custom profile, change a binding, restart, and verify that the active profile is restored. Add a new action to the schema and verify that existing custom bindings still work.
@@ -110,6 +112,72 @@ Switching to Adobe, creating a custom profile, and restoring its binding after a
 - [ ] **Additional formats.** DDS, WebP, AVIF, HEIC/HEIF, JPEG XL, and JPEG XR. Document read and write support, variants, available Linux dependencies, and round-trip criteria for each codec. [v5 file formats](https://paint.net/doc/latest/index.html)
 - [ ] **Desktop and support.** Add printing and scanner or camera acquisition using Linux integrations, file associations and drag-and-drop, tool defaults and settings, themes, help, tutorials, About, and support and feedback links. Use the Linux distribution channel for updates.
 - [ ] **Performance.** Extend phase 1 interactive benchmarks to compositing, clipboard operations, and large layer stacks (and later to effects in phase 5). Use observed bottlenecks to prioritize region updates, caching, and parallelism. Assess FP32 compositing, SIMD, and a portable GPU backend using precision comparisons and benchmarks. [Rendering, color, and extension changes in 5.2](https://paint.net/roadmap.html)
+
+  **Per-tool baseline (November 27, 2026).** Development moved from WSL2 to native Ubuntu 26.04, so these numbers are **not comparable with the phase 1 table**. Compare later measurements only with results from this environment.
+
+  Environment: `Linux ptlinux 7.0.0-44-generic #44-Ubuntu SMP PREEMPT_DYNAMIC Fri Nov  6 02:38:04 UTC 2026 x86_64 GNU/Linux`; `13th Gen Intel(R) Core(TM) i7-13700K`, `powersave` governor; `rustc 1.100.0 (0ef1bc386 2026-11-09)`; commit `f03fc24`; desktop session with other applications running.
+
+  Reproduce with `cargo test --release --locked --bin openpaintr perf_baseline -- --ignored --nocapture`, which writes `target/perf/baseline.jsonl`. Keep the filter: other ignored tests rewrite versioned fixtures. Each case runs in its own process with 2 warm-ups and 10 timed runs, on the typical (`800 × 600`, 4 layers) and large (`2560 × 1440`, 8 layers) documents, with Analytical antialiasing. A frame is one headless UI update (UI, preview, compositing, and texture conversion), without tessellation or GPU upload.
+
+  Phase 1 workloads, measured as in phase 1 (median and maximum of per-run means). The stroke now uses the default Analytical antialiasing.
+
+  | Workload | Open to editable canvas | Stroke + frame | Zoom / scroll frame | PNG export | Peak `VmHWM` | Undo bytes per stroke |
+  | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+  | Typical (`800 × 600`, 4 layers) | `10.17 ms` med / `11.74 ms` max | `0.15 ms` med / `0.31 ms` max | `0.11 ms` med / `0.19 ms` max | `4.48 ms` med / `5.28 ms` max | `38,676 kB` | `4,546` |
+  | Large (`2560 × 1440`, 8 layers) | `124.35 ms` med / `125.39 ms` max | `0.18 ms` med / `0.19 ms` max | `0.13 ms` med / `0.13 ms` max | `56.41 ms` med / `57.57 ms` max | `250,408 kB` | `4,546` |
+
+  Per-tool workloads (median and maximum over all timed frames; T = typical, L = large):
+
+  | Workload | Variant | Phase | Samples | T frame ms (med / max) | L frame ms (med / max) | Peak `VmHWM` kB (T / L) | Undo bytes per entry (T / L) |
+  | --- | --- | --- | ---: | ---: | ---: | ---: | ---: |
+  | `transform_layer` | nearest | preview | 100 | 6.19 / 7.15 | 72.26 / 76.33 | 43,976 / 275,916 | — |
+  | `transform_layer` | nearest | commit | 10 | 7.96 / 9.00 | 111.20 / 112.16 | 43,976 / 275,916 | 1,920,128 / 14,745,728 |
+  | `transform_floating` | bilinear-64x64 | preview | 100 | 10.08 / 11.08 | 100.20 / 113.15 | 40,632 / 250,540 | — |
+  | `transform_floating` | bilinear-64x64 | commit | 10 | 13.10 / 13.45 | 141.51 / 144.57 | 40,632 / 250,540 | 1,920,128 / 14,745,728 |
+  | `rotate_zoom` | nearest | preview | 100 | 6.35 / 7.44 | 72.64 / 77.85 | 45,588 / 275,992 | — |
+  | `rotate_zoom` | nearest | commit | 10 | 8.31 / 8.98 | 115.22 / 118.73 | 45,588 / 275,992 | 1,920,128 / 14,745,728 |
+  | `gradient` | linear | preview | 100 | 24.55 / 26.16 | 211.23 / 227.54 | 47,820 / 250,228 | — |
+  | `gradient` | linear | commit | 10 | 28.09 / 28.72 | 279.31 / 289.76 | 47,820 / 250,228 | 7,680,064 / 58,982,464 |
+  | `gradient` | conical | preview | 100 | 32.39 / 45.69 | 272.25 / 298.53 | 47,748 / 250,324 | — |
+  | `gradient` | conical | commit | 10 | 35.70 / 36.93 | 336.74 / 342.60 | 47,748 / 250,324 | 7,680,064 / 58,982,464 |
+  | `shape_star` | star5 | preview | 100 | 3.76 / 6.39 | 54.38 / 75.25 | 41,632 / 250,696 | — |
+  | `shape_star` | star5 | commit | 10 | 9.15 / 9.90 | 124.53 / 125.97 | 41,632 / 250,696 | 1,797,536 / 13,509,632 |
+  | `shape_freeform` | spiral | preview | 600 | 4.33 / 9.29 | 59.31 / 101.45 | 43,908 / 250,380 | — |
+  | `shape_freeform` | spiral | commit | 10 | 11.42 / 12.42 | 151.64 / 158.63 | 43,908 / 250,380 | 2,452,528 / 18,414,576 |
+  | `text` | 24px | typing | 140 | 3.29 / 3.77 | 44.92 / 46.88 | 43,172 / 250,960 | — |
+  | `text` | 24px | commit | 10 | 5.92 / 6.12 | 86.97 / 87.46 | 43,172 / 250,960 | 20,752 / 21,056 |
+  | `text` | 96px | typing | 140 | 11.19 / 17.54 | 53.21 / 70.08 | 55,464 / 250,664 | — |
+  | `text` | 96px | commit | 10 | 19.65 / 20.23 | 100.30 / 101.83 | 55,464 / 250,664 | 203,792 / 204,944 |
+  | `text` | 240px | typing | 140 | 44.05 / 55.52 | 96.73 / 148.99 | 117,096 / 250,712 | — |
+  | `text` | 240px | commit | 10 | 55.40 / 55.86 | 190.56 / 191.64 | 117,096 / 250,712 | 524,832 / 1,156,192 |
+  | `bucket` | contiguous | click | 10 | 20.86 / 21.89 | 173.32 / 174.82 | 41,600 / 250,540 | 1,920,128 / 14,745,728 |
+  | `bucket` | contiguous | refresh | 10 | 4.92 / 5.05 | 86.13 / 86.32 | 41,600 / 250,540 | — |
+  | `bucket` | global | click | 10 | 4.69 / 4.78 | 35.68 / 36.14 | 41,132 / 250,640 | 1,920,128 / 14,745,728 |
+  | `bucket` | global | refresh | 10 | 4.62 / 4.93 | 86.15 / 87.44 | 41,132 / 250,640 | — |
+  | `magic_wand` | default | click | 10 | 7.88 / 8.09 | 74.32 / 74.73 | 39,924 / 250,800 | 256 / 256 |
+  | `magic_wand` | default | refresh | 10 | 0.51 / 0.53 | 0.96 / 0.99 | 39,924 / 250,800 | — |
+  | `clone_stamp` | default | start | 10 | 0.19 / 0.24 | 1.04 / 1.11 | 44,880 / 276,292 | — |
+  | `clone_stamp` | default | stroke | 100 | 0.14 / 0.22 | 0.27 / 0.39 | 44,880 / 276,292 | — |
+  | `clone_stamp` | default | release | 10 | 0.15 / 0.23 | 0.33 / 0.35 | 44,880 / 276,292 | 80,128 / 237,152 |
+  | `layer_opacity` | default | drag | 100 | 2.43 / 2.61 | 43.16 / 45.07 | 39,744 / 250,808 | 128 / 128 |
+  | `thumbnails` | after-stroke | refresh | 100 | 2.12 / 2.38 | 40.40 / 43.55 | 39,560 / 250,300 | — |
+  | `save_dialog` | pdn-1 | encode | 10 | 12.23 / 15.16 | 105.15 / 106.38 | 43,040 / 269,976 | — |
+  | `save_dialog` | pdn-5 | encode | 10 | 13.58 / 14.52 | 117.01 / 118.76 | 42,236 / 270,060 | — |
+  | `save_dialog` | pdn-9 | encode | 10 | 13.73 / 14.13 | 118.15 / 127.03 | 42,108 / 269,808 | — |
+  | `save_dialog` | png-none | encode | 10 | 8.24 / 8.42 | 111.29 / 114.56 | 26,388 / 250,432 | — |
+  | `save_dialog` | png-fast | encode | 10 | 5.13 / 5.46 | 82.69 / 88.00 | 26,476 / 250,552 | — |
+  | `save_dialog` | png-balanced | encode | 10 | 7.27 / 7.45 | 97.61 / 112.08 | 26,596 / 250,816 | — |
+  | `save_dialog` | png-high | encode | 10 | 7.90 / 8.44 | 96.88 / 101.91 | 26,788 / 250,800 | — |
+  | `pdn_open` | default | open | 10 | 10.62 / 10.73 | 124.39 / 135.55 | 39,876 / 250,528 | — |
+  | `pdn_save` | default | save | 10 | 8.69 / 9.28 | 89.07 / 96.72 | 41,320 / 258,540 | — |
+  | `png_export` | default | export | 10 | 4.50 / 4.76 | 56.78 / 59.08 | 25,816 / 250,552 | — |
+
+  Reading the table:
+
+  - Layers are uniform, as in phase 1, so encoding times are favorable. `transform_layer`, `rotate_zoom`, and `clone_stamp` use a patterned top layer.
+  - `layer_opacity` and `save_dialog` call the work their control triggers instead of locating the widget. Each `save_dialog` sample is one re-encoding with its preview.
+  - Shape previews grow during the drag, so their maximum is well above the median.
+  - `VmHWM` includes document setup. Undo bytes are the history's own estimate (plan item 3.2).
 
 **Acceptance criteria** — Publish the format and metadata support matrix, test file and clipboard integration on Wayland and X11, and record reproducible interactive benchmarks.
 
@@ -140,9 +208,9 @@ The screenshot shows 13 format families and 24 extensions. **All Image Types** i
 
 ## Phase 5 — Plugin engine, adjustments, effects catalog, and extensibility
 
-- [ ] **Shared infrastructure and plugin engine.** Implement the portable **`.rpdn-plugin`** package for Windows, macOS, and Linux on `x86_64` and `aarch64`. Provide a sandboxed hybrid runtime using **`wasmtime`** with `simd128`, optional **WGSL** compute shaders via `wgpu` and `naga`, and a deterministic CPU fallback. Implement the WIT contract `rustpdn:plugin@1.0.0`, the `egui` **`PluginUiHost`** for theme-aware declarative UI (`UiSchema`), and the minimal **`rustpdn-plugin-sdk`**. Pass the layer, 4×4 SSAA `TMask`, declarative parameters, and seed to operations. Provide cancelable asynchronous tile previews, one history entry per commit, reset to defaults, CLI verification (`plugin check/pack/test`), Repeat Last Effect (`Ctrl+F`), an installed plugin manager, actionable `.rpdn-plugin` load and execution errors, and access to the extension catalog.
+- [ ] **Shared infrastructure and plugin engine.** Implement the portable **`.rpdn-plugin`** package for Windows, macOS, and Linux on `x86_64` and `aarch64`. Provide a sandboxed hybrid runtime using **`wasmtime`** with `simd128`, optional **WGSL** compute shaders via `wgpu` and `naga`, and a deterministic CPU fallback. Implement the WIT contract `rustpdn:plugin@1.0.0`, the `egui` **`PluginUiHost`** for theme-aware declarative UI (`UiSchema`), and the minimal **`rustpdn-plugin-sdk`**. Pass the layer, the selection's `TMask` coverage, declarative parameters, and seed to operations. Provide cancelable asynchronous tile previews, one history entry per commit, reset to defaults, CLI verification (`plugin check/pack/test`), Repeat Last Effect (`Ctrl+F`), an installed plugin manager, actionable `.rpdn-plugin` load and execution errors, and access to the extension catalog.
 - [ ] **5A — Adjustments.** Auto-Level, Black and White, Brightness / Contrast, Curves, Exposure, Highlights / Shadows, Hue / Saturation, Invert Alpha, Invert Colors, Levels, Posterize, Sepia, and Temperature / Tint. Share `PluginUiHost`, asynchronous previews, and a single history entry per edit.
-- [ ] **5B — First effect plugins.** Ship official `.rpdn-plugin` packages using only the public API and `rustpdn-plugin-sdk`. Start with Gaussian Blur (two separable Wasm and WGSL passes), Square Blur, Sharpen, Pixelate, Add Noise (deterministic `Seed`), and Edge Detect. These cover kernels, halos, borders, SSAA selections, declarative UI, asynchronous previews, and CPU/GPU parity.
+- [ ] **5B — First effect plugins.** Ship official `.rpdn-plugin` packages using only the public API and `rustpdn-plugin-sdk`. Start with Gaussian Blur (two separable Wasm and WGSL passes), Square Blur, Sharpen, Pixelate, Add Noise (deterministic `Seed`), and Edge Detect. These cover kernels, halos, borders, antialiased selections, declarative UI, asynchronous previews, and CPU/GPU parity.
 - [ ] **5C — Full effects catalog.** Deliver all 48 effects below as `.rpdn-plugin` packages loaded through the same registry as external plugins. This catalog includes the phase 5B effects.
 
 | Category | Effects shown in Paint.NET 5.2 |
@@ -160,7 +228,7 @@ The screenshot shows 13 format families and 24 extensions. **All Image Types** i
 - [ ] **5D — Historical compatibility.** Evaluate Unfocus as a historical blur variant. Document the obsolete blur as a legacy Gaussian implementation and check whether classes such as Color Fill and Color Difference are exposed before adding menu commands. Rotate/Zoom is delivered in phase 2. [v3 effect source](https://github.com/nakijun/OpenPDN-1/tree/cca476b0df2a2f70996e6b9486ec45327631568c/src/Effects)
 - [ ] **5E — Advanced extensibility (codecs and adjustments).** Extend the versioned `rustpdn:plugin@1.x` API and `rustpdn-plugin-sdk` from phase 5 to support third-party file codecs (`FileTypes`) and adjustments in the same `.rpdn-plugin` format. Evaluate Paint.NET 5.2 framework pixel formats and operations, including channel extraction and replacement, conversion, and interpolation. Support `RGBA16`, `RGBA32Float`, CMYK, and HDR at the import boundary as codecs require. Legacy .NET plugin binary compatibility remains a separate scope decision.
 
-**Acceptance criteria** — Each adjustment and effect exposes parameters or a direct action, respects the 4×4 SSAA `TMask` selection and alpha, and creates one undo entry. Keep reference images for representative settings and use controlled seeds for noise and procedural effects. Compare against Paint.NET 5.2 to establish operation-specific tolerances. Every effect must load from the same `.rpdn-plugin` file on Windows, macOS, and Linux, include a CPU Wasm reference path, and match WGSL within the documented numerical tolerance. Verify that a third-party plugin can be built from scratch with the SDK and guide. [Extensibility guide](extensibilidade.md)
+**Acceptance criteria** — Each adjustment and effect exposes parameters or a direct action, respects the selection's `TMask` coverage and alpha, and creates one undo entry. Keep reference images for representative settings and use controlled seeds for noise and procedural effects. Compare against Paint.NET 5.2 to establish operation-specific tolerances. Every effect must load from the same `.rpdn-plugin` file on Windows, macOS, and Linux, include a CPU Wasm reference path, and match WGSL within the documented numerical tolerance. Verify that a third-party plugin can be built from scratch with the SDK and guide. [Extensibility guide](extensibilidade.md)
 
 ## Post-Phase 5 — Usability study (SUS) and workspace redesign
 
@@ -168,6 +236,16 @@ Once phase 5 adjustments and `.rpdn-plugin` effects are integrated into the inte
 
 - [ ] **Usability.** Record unaided completion, time, and errors per task. Administer the 10-item SUS after the tasks for each version and before discussing the test. The redesign target is a **mean SUS above 80/100**. Interpret the mean with sample size, uncertainty, and task results. Define participants and sample size before the acceptance study. [Original SUS questionnaire](https://germanupa.de/sites/default/files/2021-12/brooke1996sus.pdf) · [Validated Brazilian Portuguese version](https://aquichan.unisabana.edu.co/index.php/aquichan/article/view/16497)
 - [ ] **Redesign.** Use the problems that most affect task completion in the SUS sessions and baseline measurements to decide between targeted improvements and a broader workspace redesign. Keep the application's visual identity, preserve document, editing, and history behavior, and repeat comparable evaluation runs on updated builds.
+
+## Future — MCP server for AI agents
+
+Expose the editing engine to AI agents as a local [Model Context Protocol](https://modelcontextprotocol.io) server, alongside the CLI. The server runs as `openpaintr mcp` over stdio, behind an optional `mcp` feature, in its own `openpaintr-mcp` crate built on the official Rust SDK (`rmcp`). It depends on the separate core, engine, and CLI crates and on the CLI commands proposed in the [architecture improvement plan](architecture-improvement-plan.md) (items 5.6 and 5.7). Live control of a running editor window is out of scope.
+
+- [ ] **Stateless tools.** Expose the CLI commands (`info`, `convert`, `flatten`, `resize`, `canvas-size`, `rotate`, `flip`, `export-layer`, and batch processing) as MCP tools with JSON Schema parameters. Define each command once and generate both the CLI arguments and the tool schema from that definition. Tools call the same engine functions as the GUI and the CLI. A `render` tool returns the composite or a single layer as a PNG image, downscaled to a configurable maximum size.
+- [ ] **Stateful editing sessions.** Keep documents open between calls through session handles. Create, open, save, and close documents. Add, delete, reorder, and change layers. Select, fill, and erase. Draw gradients, lines and curves, shapes, and text from explicit parameters. Undo, redo, and inspect history. Each tool call creates at most one history entry, as in the GUI. This requires a non-interactive engine API for the tools that the GUI drives with pointer gestures, and editor state that is `Send` (architecture plan item 4.1).
+- [ ] **Security.** Read and write only inside directories the user allows (`--allow-dir` or MCP roots). Keep the no-overwrite rule unless overwriting is explicitly allowed. Apply the core decode limits, cap the size of returned images and the memory of each session, and offer stdio only, with no network transport. Treat layer names, metadata, and other file content returned to the model as untrusted data.
+
+**Acceptance criteria** — An MCP client, such as Claude Desktop or the MCP Inspector, lists the tools with their schemas and completes an end-to-end workflow through the server: open a PDN, change a layer's properties, draw, undo, save, and reopen. Results are byte-identical to the corresponding CLI command or GUI action and are checked against the same reference images as the GUI tests. Integration tests cover paths outside the allowed directories, oversized images, and invalid session handles.
 
 ## Evidence and scope decisions
 

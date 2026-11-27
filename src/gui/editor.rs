@@ -1,12 +1,13 @@
 use super::i18n::text as tr;
 use std::{
+    borrow::Cow,
     collections::{HashMap, VecDeque},
     io, mem,
 };
 
-use openpaintr::{Document, LayerData, Pixel};
+use openpaintr::{Document, LayerData, Pixel, mul_u8, try_vec_filled, try_vec_with_capacity};
 
-use super::selection::{Bounds, Point, Selection, Shape};
+use super::selection::{Bounds, Point, Selection, Shape, bounds_size};
 use super::{
     app_settings::AaMode,
     bucket_edges,
@@ -179,7 +180,7 @@ impl Edit {
                 ..
             } => {
                 if redo {
-                    let layer_data = data.take().expect("dados da camada inserida");
+                    let layer_data = data.take().expect("inserted layer data");
                     document.insert_layer_data(*index, layer_data)?;
                     editor.selected = *index;
                 } else {
@@ -199,7 +200,7 @@ impl Edit {
                     *data = Some(document.remove_layer(*index)?);
                     editor.selected = (*index).min(document.layer_count() - 1);
                 } else {
-                    let layer_data = data.take().expect("dados da camada removida");
+                    let layer_data = data.take().expect("removed layer data");
                     document.insert_layer_data(*index, layer_data)?;
                     editor.selected = *prev_selected;
                 }
@@ -232,8 +233,8 @@ impl Edit {
                     *bottom_before = Some(prev_bottom);
                     editor.selected = *top_index - 1;
                 } else {
-                    let prev_bottom = bottom_before.take().expect("camada inferior anterior");
-                    let removed_top = top.take().expect("camada superior mesclada");
+                    let prev_bottom = bottom_before.take().expect("previous bottom layer");
+                    let removed_top = top.take().expect("merged top layer");
                     document.replace_layer_data(*top_index - 1, prev_bottom)?;
                     document.insert_layer_data(*top_index, removed_top)?;
                     editor.selected = *prev_selected;
@@ -316,7 +317,7 @@ impl StrokeSpec {
     }
 
     fn apply_pixel(&self, (x, y): Point, before: Pixel, stroke_alpha: u8, sel_cov: u8) -> Pixel {
-        let eff = ((u32::from(stroke_alpha) * u32::from(sel_cov) + 127) / 255) as u8;
+        let eff = mul_u8(stroke_alpha, sel_cov);
         if eff == 0 {
             return before;
         }
@@ -361,16 +362,14 @@ impl StrokeSpec {
                 blend,
                 ..
             } => {
-                let sx = i64::from(x) + offset.0;
-                let sy = i64::from(y) + offset.1;
-                if sx < 0
-                    || sy < 0
-                    || sx >= i64::from(source_size.0)
-                    || sy >= i64::from(source_size.1)
-                {
+                let Some(fg) = geometry::pixel_checked(
+                    source_pixels,
+                    *source_size,
+                    i64::from(x) + offset.0,
+                    i64::from(y) + offset.1,
+                ) else {
                     return before;
-                }
-                let fg = source_pixels[sy as usize * source_size.0 as usize + sx as usize];
+                };
                 tolerance::blend_covered(fg, before, eff, *blend)
             }
         }
@@ -508,6 +507,12 @@ impl Editor {
         self.undo_bytes
     }
 
+    /// Bytes accounted for the newest undo entry.
+    #[cfg(test)]
+    pub fn last_undo_entry_bytes(&self) -> Option<usize> {
+        self.undo.back().map(|entry| entry.bytes)
+    }
+
     pub fn can_redo(&self) -> bool {
         !self.redo.is_empty()
     }
@@ -577,7 +582,7 @@ impl Editor {
     }
 
     pub fn record_layer_meta(&mut self, layer: usize, before: LayerMeta, label: &'static str) {
-        let after = self.layer_meta(layer).expect("camada existente");
+        let after = self.layer_meta(layer).expect("existing layer");
         if before != after {
             self.record(Edit::LayerMetadata {
                 label,
@@ -585,6 +590,66 @@ impl Editor {
                 before,
                 after,
             });
+        }
+    }
+
+    fn record_inserted_layer(
+        &mut self,
+        label: &'static str,
+        index: usize,
+        prev_selected: usize,
+        prev_selection: Option<Selection>,
+    ) {
+        self.selected = index;
+        self.mark_full_refresh();
+        self.record(Edit::LayerInserted {
+            label,
+            index,
+            data: None,
+            prev_selected,
+            prev_selection,
+        });
+    }
+
+    fn commit_raster_changes(
+        &mut self,
+        pixels: Vec<PixelChange>,
+        label: &'static str,
+    ) -> io::Result<bool> {
+        if pixels.is_empty() {
+            return Ok(false);
+        }
+        let mut edit = Edit::Raster {
+            label,
+            layer: self.selected,
+            pixels,
+        };
+        edit.apply(self, true)?;
+        self.record(edit);
+        Ok(true)
+    }
+
+    pub fn sample_buffer(&self, composite: bool) -> io::Result<Cow<'_, [Pixel]>> {
+        if composite {
+            Ok(Cow::Owned(self.document.composite()?))
+        } else {
+            Ok(Cow::Borrowed(
+                self.document
+                    .layer_pixels(self.selected)
+                    .expect("active layer"),
+            ))
+        }
+    }
+
+    pub fn sample_pixel(&self, point: Point, composite: bool) -> Pixel {
+        if composite {
+            self.document
+                .composite_pixel(point.0, point.1)
+                .unwrap_or_default()
+        } else {
+            self.document
+                .pixel(self.selected, point.0, point.1)
+                .unwrap_or_default()
         }
     }
 
@@ -598,15 +663,7 @@ impl Editor {
             super::i18n::format_logical("layer-number", &[&(self.document.layer_count() + 1)]);
         self.document.insert_blank_layer(index, name)?;
         let prev_selected = self.selected;
-        self.selected = index;
-        self.mark_full_refresh();
-        self.record(Edit::LayerInserted {
-            label: "add-layer",
-            index,
-            data: None,
-            prev_selected,
-            prev_selection: self.selection.clone(),
-        });
+        self.record_inserted_layer("add-layer", index, prev_selected, self.selection.clone());
         Ok(())
     }
 
@@ -631,15 +688,12 @@ impl Editor {
         let target = self.document.duplicate_layer_with_name(index, |name| {
             super::i18n::format_logical("layer-copy", &[&name])
         })?;
-        self.selected = target;
-        self.mark_full_refresh();
-        self.record(Edit::LayerInserted {
-            label: "duplicate-layer",
-            index: target,
-            data: None,
+        self.record_inserted_layer(
+            "duplicate-layer",
+            target,
             prev_selected,
-            prev_selection: self.selection.clone(),
-        });
+            self.selection.clone(),
+        );
         Ok(())
     }
 
@@ -684,26 +738,17 @@ impl Editor {
         if imported.layer_count() == 1 && target_size == cur {
             let mut data = imported.clone_layer_data(0)?;
             if imp != cur {
-                let mut pixels = vec![Pixel::default(); (cur.0 * cur.1) as usize];
-                for y in 0..imp.1 {
-                    for x in 0..imp.0 {
-                        pixels[(y * cur.0 + x) as usize] = data.pixels[(y * imp.0 + x) as usize];
-                    }
-                }
-                data.pixels = pixels;
+                data.pixels = blit_onto_blank(&data.pixels, imp, cur, (0, 0))?;
             }
             let index = self.document.layer_count();
             let prev_selected = self.selected;
             self.document.insert_layer_data(index, data)?;
-            self.selected = index;
-            self.mark_full_refresh();
-            self.record(Edit::LayerInserted {
-                label: "import-layer",
+            self.record_inserted_layer(
+                "import-layer",
                 index,
-                data: None,
                 prev_selected,
-                prev_selection: self.selection.clone(),
-            });
+                self.selection.clone(),
+            );
             return Ok(());
         }
 
@@ -717,14 +762,7 @@ impl Editor {
         for idx in 0..imported.layer_count() {
             let mut data = imported.clone_layer_data(idx)?;
             if imp != target_size {
-                let mut pixels = vec![Pixel::default(); (target_size.0 * target_size.1) as usize];
-                for y in 0..imp.1 {
-                    for x in 0..imp.0 {
-                        pixels[(y * target_size.0 + x) as usize] =
-                            data.pixels[(y * imp.0 + x) as usize];
-                    }
-                }
-                data.pixels = pixels;
+                data.pixels = blit_onto_blank(&data.pixels, imp, target_size, (0, 0))?;
             }
             next.insert_layer_data(next.layer_count(), data)?;
         }
@@ -841,29 +879,20 @@ impl Editor {
         }
 
         let size = self.document.dimensions();
-        let composite = sample_composite
-            .then(|| self.document.composite())
-            .transpose()?;
+        let sample_src = self.sample_buffer(sample_composite)?;
         let source = self
             .document
             .layer_pixels(self.selected)
-            .expect("camada ativa");
+            .expect("active layer");
         let index = |(x, y): Point| y as usize * size.0 as usize + x as usize;
-        let sample_px = |point: Point| -> Pixel {
-            composite
-                .as_deref()
-                .map_or_else(|| source[index(point)], |comp| comp[index(point)])
-        };
+        let sample_px = |point: Point| sample_src[index(point)];
         let target = if sample_composite {
             sample_px(seed)
         } else {
             target_layer
         };
 
-        let mut pixels = Vec::new();
-        pixels
-            .try_reserve_exact(source.len())
-            .map_err(io::Error::other)?;
+        let mut pixels = try_vec_with_capacity(source.len())?;
         pixels.extend_from_slice(source);
         let mut changed = false;
         let matches = |point: Point| {
@@ -971,14 +1000,7 @@ impl Editor {
         if pixels.is_empty() {
             return Ok(false);
         }
-        let mut edit = Edit::Raster {
-            label,
-            layer: self.selected,
-            pixels,
-        };
-        edit.apply(self, true)?;
-        self.record(edit);
-        Ok(true)
+        self.commit_raster_changes(pixels, label)
     }
 
     fn edit_selection(&mut self, color: Pixel, label: &'static str) -> io::Result<bool> {
@@ -1014,17 +1036,7 @@ impl Editor {
                 }
             }
         }
-        if pixels.is_empty() {
-            return Ok(false);
-        }
-        let mut edit = Edit::Raster {
-            label,
-            layer: self.selected,
-            pixels,
-        };
-        edit.apply(self, true)?;
-        self.record(edit);
-        Ok(true)
+        self.commit_raster_changes(pixels, label)
     }
 
     pub fn replace_geometry(
@@ -1053,33 +1065,16 @@ impl Editor {
                 .ok_or_else(|| io::Error::other(tr("empty-selection")))?,
             None => ((0, 0), (size.0 - 1, size.1 - 1)),
         };
-        let composite = flattened.then(|| self.document.composite()).transpose()?;
-        let source = composite
-            .as_deref()
-            .unwrap_or_else(|| self.document.layer_pixels(self.selected).unwrap());
-        let mut pixels = Vec::new();
-        let copied_size = (max.0 - min.0 + 1, max.1 - min.1 + 1);
-        pixels
-            .try_reserve_exact(copied_size.0 as usize * copied_size.1 as usize)
-            .map_err(io::Error::other)?;
+        let source = self.sample_buffer(flattened)?;
+        let copied_size = bounds_size((min, max));
+        let mut pixels = try_vec_with_capacity(copied_size.0 as usize * copied_size.1 as usize)?;
         for y in min.1..=max.1 {
             for x in min.0..=max.0 {
-                let cov = self
-                    .selection
-                    .as_ref()
-                    .map_or(255, |s| s.coverage_u8((x, y)));
-                if cov == 0 {
-                    pixels.push(Pixel::default());
-                } else {
-                    let mut px = geometry::pixel(source, size, i64::from(x), i64::from(y));
-                    if cov < 255 {
-                        px.0[3] = ((u32::from(px.0[3]) * u32::from(cov) + 127) / 255) as u8;
-                        if px.0[3] == 0 {
-                            px = Pixel::default();
-                        }
-                    }
-                    pixels.push(px);
-                }
+                let px = match self.selection.as_ref() {
+                    Some(sel) => sel.mask_pixel(&source, size, (x, y)),
+                    None => geometry::pixel(&source, size, i64::from(x), i64::from(y)),
+                };
+                pixels.push(px);
             }
         }
         Ok(Image {
@@ -1094,63 +1089,25 @@ impl Editor {
             self.edit_selection(Pixel::default(), "cut")
         } else {
             let size = self.document.dimensions();
-            let mut pixels = Vec::new();
-            pixels
-                .try_reserve_exact(size.0 as usize * size.1 as usize)
-                .map_err(io::Error::other)?;
-            pixels.resize(size.0 as usize * size.1 as usize, Pixel::default());
+            let pixels = try_vec_filled(size.0 as usize * size.1 as usize, Pixel::default())?;
             self.replace_layer_pixels(pixels, None, "cut")
                 .map(|()| true)
         }
     }
 
-    pub fn paste_image(&mut self, image: Image, new_layer: bool) -> io::Result<()> {
+    pub fn paste_into_new_layer(&mut self, image: Image) -> io::Result<()> {
         self.finish_stroke();
         let size = self.document.dimensions();
-        let origin = if image.origin.0 >= size.0 || image.origin.1 >= size.1 {
-            (0, 0)
-        } else {
-            image.origin
-        };
-        let len = size.0 as usize * size.1 as usize;
-        let mut pixels = Vec::new();
-        pixels.try_reserve_exact(len).map_err(io::Error::other)?;
-        if new_layer {
-            pixels.resize(len, Pixel::default());
-        } else {
-            pixels.extend_from_slice(self.document.layer_pixels(self.selected).unwrap());
-        }
-        for y in 0..image.size.1.min(size.1 - origin.1) {
-            for x in 0..image.size.0.min(size.0 - origin.0) {
-                let index = (y + origin.1) as usize * size.0 as usize + (x + origin.0) as usize;
-                let foreground = image.pixels[y as usize * image.size.0 as usize + x as usize];
-                pixels[index] = if new_layer {
-                    foreground
-                } else {
-                    foreground.over(pixels[index], 255)
-                };
-            }
-        }
-        if new_layer {
-            let index = self
-                .document
-                .add_layer(super::i18n::logical_text("paste-in-progress"))?;
-            self.document.swap_layer_pixels(index, &mut pixels)?;
-            let prev_selected = self.selected;
-            self.selected = index;
-            let prev_selection = self.selection.take();
-            self.mark_full_refresh();
-            self.record(Edit::LayerInserted {
-                label: "paste-new-layer",
-                index,
-                data: None,
-                prev_selected,
-                prev_selection,
-            });
-            Ok(())
-        } else {
-            self.replace_layer_pixels(pixels, None, "paste")
-        }
+        let origin = image.clamped_origin(size);
+        let mut pixels = blit_onto_blank(&image.pixels, image.size, size, origin)?;
+        let index = self
+            .document
+            .add_layer(super::i18n::logical_text("paste-in-progress"))?;
+        self.document.swap_layer_pixels(index, &mut pixels)?;
+        let prev_selected = self.selected;
+        let prev_selection = self.selection.take();
+        self.record_inserted_layer("paste-new-layer", index, prev_selected, prev_selection);
+        Ok(())
     }
 
     fn replace_layer_pixels(
@@ -1174,10 +1131,7 @@ impl Editor {
     pub fn orthogonal_layer(&mut self, operation: geometry::Orthogonal) -> io::Result<()> {
         let size = self.document.dimensions();
         let source = self.document.layer_pixels(self.selected).unwrap();
-        let mut pixels = Vec::new();
-        pixels
-            .try_reserve_exact(source.len())
-            .map_err(io::Error::other)?;
+        let mut pixels = try_vec_with_capacity(source.len())?;
         for y in 0..size.1 {
             for x in 0..size.0 {
                 let (sx, sy) = operation.source(size, (x, y));
@@ -1211,6 +1165,34 @@ impl Editor {
             .transpose()
     }
 
+    fn resample_over(
+        &self,
+        transform: Affine,
+        method: Resampling,
+        overlay_on_base: bool,
+        at: impl Fn(i64, i64) -> Pixel,
+        base_at: impl Fn(u32, u32) -> Pixel,
+    ) -> io::Result<Vec<Pixel>> {
+        let size = self.document.dimensions();
+        let mut out = try_vec_with_capacity(size.0 as usize * size.1 as usize)?;
+        for y in 0..size.1 {
+            for x in 0..size.0 {
+                let fg = geometry::resample(&at, |pt| transform.inverse(pt), (x, y), method);
+                if !overlay_on_base {
+                    out.push(fg);
+                } else {
+                    let base = base_at(x, y);
+                    out.push(if fg.0[3] == 0 {
+                        base
+                    } else {
+                        fg.over(base, 255)
+                    });
+                }
+            }
+        }
+        Ok(out)
+    }
+
     pub fn transform_pixels(
         &self,
         transform: Affine,
@@ -1221,61 +1203,26 @@ impl Editor {
         let size = self.document.dimensions();
         let source = self.document.layer_pixels(self.selected).unwrap();
         let selection = self.selection.as_ref().filter(|_| use_selection);
-        let at = |x: i64, y: i64| {
-            if x < 0 || y < 0 || x >= i64::from(size.0) || y >= i64::from(size.1) {
-                return Pixel::default();
-            }
-            let mut px = geometry::pixel(source, size, x, y);
-            if let Some(sel) = selection {
-                let cov = sel.coverage_u8((x as u32, y as u32));
-                if cov == 0 {
-                    return Pixel::default();
+        self.resample_over(
+            transform,
+            method,
+            selection.is_some(),
+            |x, y| match selection {
+                Some(sel) if x >= 0 && y >= 0 && x < i64::from(size.0) && y < i64::from(size.1) => {
+                    sel.mask_pixel(source, size, (x as u32, y as u32))
                 }
-                if cov < 255 {
-                    px.0[3] = ((u32::from(px.0[3]) * u32::from(cov) + 127) / 255) as u8;
-                }
-            }
-            px
-        };
-        let mut transformed = Vec::new();
-        transformed
-            .try_reserve_exact(source.len())
-            .map_err(io::Error::other)?;
-        for y in 0..size.1 {
-            for x in 0..size.0 {
+                Some(_) => Pixel::default(),
+                None => geometry::pixel(source, size, x, y),
+            },
+            |x, y| {
                 let src_px = geometry::pixel(source, size, i64::from(x), i64::from(y));
-                let base = match selection {
+                match selection {
                     None => Pixel::default(),
                     Some(_) if clone_source => src_px,
-                    Some(sel) => {
-                        let cov = sel.coverage_u8((x, y));
-                        if cov == 0 {
-                            src_px
-                        } else if cov == 255 {
-                            Pixel::default()
-                        } else {
-                            let rem = 255 - cov;
-                            Pixel([
-                                src_px.0[0],
-                                src_px.0[1],
-                                src_px.0[2],
-                                ((u32::from(src_px.0[3]) * u32::from(rem) + 127) / 255) as u8,
-                            ])
-                        }
-                    }
-                };
-                let foreground =
-                    geometry::resample(at, |point| transform.inverse(point), (x, y), method);
-                transformed.push(if selection.is_none() {
-                    foreground
-                } else if foreground.0[3] == 0 {
-                    base
-                } else {
-                    foreground.over(base, 255)
-                });
-            }
-        }
-        Ok(transformed)
+                    Some(sel) => src_px.scale_alpha(255 - sel.coverage_u8((x, y))),
+                }
+            },
+        )
     }
 
     pub fn preview_floating(
@@ -1287,34 +1234,20 @@ impl Editor {
         let size = self.document.dimensions();
         let source = self.document.layer_pixels(self.selected).unwrap();
         let origin = floating.origin;
-        let at = |x: i64, y: i64| {
-            let fx = x - i64::from(origin.0);
-            let fy = y - i64::from(origin.1);
-            if fx < 0
-                || fy < 0
-                || fx >= i64::from(floating.size.0)
-                || fy >= i64::from(floating.size.1)
-            {
-                Pixel::default()
-            } else {
-                floating.pixels[fy as usize * floating.size.0 as usize + fx as usize]
-            }
-        };
-        let mut out = Vec::new();
-        out.try_reserve_exact(source.len())
-            .map_err(io::Error::other)?;
-        for y in 0..size.1 {
-            for x in 0..size.0 {
-                let base = geometry::pixel(source, size, i64::from(x), i64::from(y));
-                let fg = geometry::resample(at, |pt| transform.inverse(pt), (x, y), method);
-                out.push(if fg.0[3] == 0 {
-                    base
-                } else {
-                    fg.over(base, 255)
-                });
-            }
-        }
-        Ok(out)
+        self.resample_over(
+            transform,
+            method,
+            true,
+            |x, y| {
+                geometry::pixel(
+                    &floating.pixels,
+                    floating.size,
+                    x - i64::from(origin.0),
+                    y - i64::from(origin.1),
+                )
+            },
+            |x, y| geometry::pixel(source, size, i64::from(x), i64::from(y)),
+        )
     }
 
     pub fn commit_floating(
@@ -1474,7 +1407,7 @@ impl Editor {
             let entry = st.get(pt).unwrap_or((current, 0, 0, sel_cov));
             let combined_mask = entry.1 | next_mask;
             let mask_alpha = if combined_mask != 0 {
-                ((combined_mask.count_ones() * 255 + 8) / 16) as u8
+                stroke_raster::mask16_to_u8(combined_mask)
             } else {
                 0
             };
@@ -1494,100 +1427,69 @@ impl Editor {
             }
         };
 
-        match stroke.aa_mode {
-            AaMode::Ssaa4x4 => {
-                if hardness >= 100 && spacing <= 15 {
-                    stroke_raster::capsule(
-                        previous.unwrap_or(point),
-                        point,
-                        stroke_size,
-                        dimensions,
-                        |pt, mask| {
-                            apply_sample(
-                                document,
-                                stroke,
-                                &mut dirty_points,
-                                &mut changed,
-                                pt,
-                                mask,
-                                0,
-                            );
-                        },
+        if stroke.aa_mode == AaMode::Ssaa4x4 && hardness >= 100 && spacing <= 15 {
+            stroke_raster::capsule(
+                previous.unwrap_or(point),
+                point,
+                stroke_size,
+                dimensions,
+                |pt, mask| {
+                    apply_sample(
+                        document,
+                        stroke,
+                        &mut dirty_points,
+                        &mut changed,
+                        pt,
+                        mask,
+                        0,
                     );
-                } else {
-                    let is_first = previous.is_none();
-                    let mut carry = stroke.carry;
-                    stroke_raster::segment_dabs(
-                        previous.unwrap_or(point),
-                        point,
-                        &mut carry,
-                        stroke_size,
-                        hardness,
-                        spacing,
-                        dimensions,
-                        is_first,
-                        |pt, alpha| {
-                            apply_sample(
-                                document,
-                                stroke,
-                                &mut dirty_points,
-                                &mut changed,
-                                pt,
-                                0,
-                                alpha,
-                            );
-                        },
+                },
+            );
+        } else if stroke.aa_mode == AaMode::Analytical && spacing <= 15 {
+            stroke_raster::capsule_analytical(
+                previous.unwrap_or(point),
+                point,
+                stroke_size,
+                hardness,
+                dimensions,
+                |pt, alpha| {
+                    apply_sample(
+                        document,
+                        stroke,
+                        &mut dirty_points,
+                        &mut changed,
+                        pt,
+                        0,
+                        alpha,
                     );
-                    stroke.carry = carry;
-                }
-            }
-            AaMode::Analytical => {
-                if spacing <= 15 {
-                    stroke_raster::capsule_analytical(
-                        previous.unwrap_or(point),
-                        point,
-                        stroke_size,
-                        hardness,
-                        dimensions,
-                        |pt, alpha| {
-                            apply_sample(
-                                document,
-                                stroke,
-                                &mut dirty_points,
-                                &mut changed,
-                                pt,
-                                0,
-                                alpha,
-                            );
-                        },
+                },
+            );
+        } else {
+            let is_first = previous.is_none();
+            let mut carry = stroke.carry;
+            stroke_raster::segment_dabs(
+                previous.unwrap_or(point),
+                point,
+                &mut carry,
+                stroke_size,
+                hardness,
+                spacing,
+                dimensions,
+                is_first,
+                stroke.aa_mode,
+                |pt, alpha| {
+                    apply_sample(
+                        document,
+                        stroke,
+                        &mut dirty_points,
+                        &mut changed,
+                        pt,
+                        0,
+                        alpha,
                     );
-                } else {
-                    let is_first = previous.is_none();
-                    let mut carry = stroke.carry;
-                    stroke_raster::segment_dabs_analytical(
-                        previous.unwrap_or(point),
-                        point,
-                        &mut carry,
-                        stroke_size,
-                        hardness,
-                        spacing,
-                        dimensions,
-                        is_first,
-                        |pt, alpha| {
-                            apply_sample(
-                                document,
-                                stroke,
-                                &mut dirty_points,
-                                &mut changed,
-                                pt,
-                                0,
-                                alpha,
-                            );
-                        },
-                    );
-                    stroke.carry = carry;
-                }
-            }
+                },
+            );
+            stroke.carry = carry;
         }
         for pt in dirty_points {
             self.mark_dirty_point(pt);
@@ -1638,6 +1540,27 @@ impl Editor {
     }
 }
 
+fn blit_onto_blank(
+    src: &[Pixel],
+    src_size: Point,
+    dst_size: Point,
+    origin: Point,
+) -> io::Result<Vec<Pixel>> {
+    let len = usize::try_from(u64::from(dst_size.0) * u64::from(dst_size.1))
+        .map_err(|error| io::Error::new(io::ErrorKind::OutOfMemory, error))?;
+    let mut pixels = try_vec_filled(len, Pixel::default())?;
+    let copy_w = src_size.0.min(dst_size.0.saturating_sub(origin.0)) as usize;
+    let copy_h = src_size.1.min(dst_size.1.saturating_sub(origin.1)) as usize;
+    let src_stride = src_size.0 as usize;
+    let dst_stride = dst_size.0 as usize;
+    for y in 0..copy_h {
+        let src_start = y * src_stride;
+        let dst_start = (y + origin.1 as usize) * dst_stride + origin.0 as usize;
+        pixels[dst_start..dst_start + copy_w].copy_from_slice(&src[src_start..src_start + copy_w]);
+    }
+    Ok(pixels)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1664,6 +1587,39 @@ mod tests {
             false,
             aa_mode,
         )
+    }
+
+    fn assert_pixels_within(
+        actual: &[Pixel],
+        expected: &[Pixel],
+        width: usize,
+        tol: u8,
+        label: &str,
+    ) {
+        for (i, (&actual, &expected)) in actual.iter().zip(expected).enumerate() {
+            assert!(
+                actual
+                    .0
+                    .iter()
+                    .zip(expected.0)
+                    .all(|(&a, b)| a.abs_diff(b) <= tol),
+                "{label} pixel {},{}: actual {actual:?} vs expected {expected:?}",
+                i % width,
+                i / width
+            );
+        }
+    }
+
+    fn assert_pdn_roundtrip_layer0(doc: &Document, expected: &[Pixel]) -> io::Result<()> {
+        let mut bytes = Vec::new();
+        doc.write_pdn(&mut bytes)?;
+        assert_eq!(
+            Document::read_pdn(bytes.as_slice())?
+                .layer_pixels(0)
+                .unwrap(),
+            expected
+        );
+        Ok(())
     }
 
     #[test]
@@ -1700,21 +1656,19 @@ mod tests {
         let green = Pixel([50, 220, 75, 255]);
         let orange = Pixel([255, 130, 16, 255]);
         let blue = Pixel([10, 40, 240, 255]);
+        let stroke_over = |bg: Pixel, mode: AaMode| -> io::Result<Editor> {
+            let mut ed = Editor::new(Document::new(12, 8)?);
+            ed.document.fill_layer(0, bg)?;
+            ed.begin_stroke_with_aa(orange, 4, mode);
+            ed.draw_to(Some((4, 0)));
+            ed.draw_to(Some((8, 7)));
+            ed.finish_stroke();
+            Ok(ed)
+        };
         for mode in AaMode::ALL {
-            let mut editor = Editor::new(Document::new(12, 8)?);
-            editor.document.fill_layer(0, green)?;
-            editor.begin_stroke_with_aa(orange, 4, mode);
-            editor.draw_to(Some((4, 0)));
-            editor.draw_to(Some((8, 7)));
-            editor.finish_stroke();
-
+            let mut editor = stroke_over(green, mode)?;
             // Compare against the same geometry rendered directly over blue.
-            let mut on_blue = Editor::new(Document::new(12, 8)?);
-            on_blue.document.fill_layer(0, blue)?;
-            on_blue.begin_stroke_with_aa(orange, 4, mode);
-            on_blue.draw_to(Some((4, 0)));
-            on_blue.draw_to(Some((8, 7)));
-            on_blue.finish_stroke();
+            let on_blue = stroke_over(blue, mode)?;
             let before = editor.document.layer_pixels(0).unwrap().to_vec();
 
             assert!(fill_exact_with_aa(&mut editor, (0, 3), blue, mode)?);
@@ -1738,41 +1692,23 @@ mod tests {
             }
             assert!(mixed > 0);
             let tol = if mode == AaMode::Ssaa4x4 { 0 } else { 2 };
-            for (i, (&actual, &expected)) in editor
-                .document
-                .layer_pixels(0)
-                .unwrap()
-                .iter()
-                .zip(&expected)
-                .enumerate()
-            {
-                assert!(
-                    actual
-                        .0
-                        .iter()
-                        .zip(expected.0)
-                        .all(|(&a, b)| a.abs_diff(b) <= tol),
-                    "mode {mode:?} pixel {},{}: actual {actual:?} vs expected {expected:?}",
-                    i % 12,
-                    i / 12
-                );
-            }
+            assert_pixels_within(
+                editor.document.layer_pixels(0).unwrap(),
+                &expected,
+                12,
+                tol,
+                &format!("mode {mode:?}"),
+            );
             assert!(editor.undo()?);
             assert_eq!(editor.document.layer_pixels(0).unwrap(), before);
             assert!(editor.redo()?);
-            let after_redo = editor.document.layer_pixels(0).unwrap();
-            for (i, (&actual, &expected)) in after_redo.iter().zip(&expected).enumerate() {
-                assert!(
-                    actual
-                        .0
-                        .iter()
-                        .zip(expected.0)
-                        .all(|(&a, b)| a.abs_diff(b) <= tol),
-                    "mode {mode:?} redo pixel {},{}",
-                    i % 12,
-                    i / 12
-                );
-            }
+            assert_pixels_within(
+                editor.document.layer_pixels(0).unwrap(),
+                &expected,
+                12,
+                tol,
+                &format!("mode {mode:?} redo"),
+            );
         }
         Ok(())
     }
@@ -1824,7 +1760,7 @@ mod tests {
         assert!(source_image.pixels.contains(&Pixel::default()));
 
         let mut destination = Editor::new(Document::new(8, 8)?);
-        destination.paste_image(source_image, true)?;
+        destination.paste_into_new_layer(source_image)?;
         assert_eq!(destination.document.pixel(1, 2, 2), Some(red));
         assert_eq!(destination.document.pixel(1, 4, 4), Some(Pixel::default()));
         assert!(destination.undo()?);
@@ -1959,7 +1895,7 @@ mod tests {
         assert_eq!(editor.selected, 1);
 
         editor.move_layer(1, 2, "Mover camada para o topo")?;
-        assert_eq!(editor.document.layer_name(2), Some("Fundo (copy)"));
+        assert_eq!(editor.document.layer_name(2), Some("Background (copy)"));
 
         let before = editor.layer_meta(2).unwrap();
         let mut next = before.clone();
@@ -2000,14 +1936,7 @@ mod tests {
             assert_eq!(editor.document.pixel(0, 5, 5), Some(Pixel::default()));
             assert!(editor.redo()?);
             assert_eq!(editor.document.layer_pixels(0).unwrap(), pixels);
-            let mut bytes = Vec::new();
-            editor.document.write_pdn(&mut bytes)?;
-            assert_eq!(
-                Document::read_pdn(bytes.as_slice())?
-                    .layer_pixels(0)
-                    .unwrap(),
-                pixels
-            );
+            assert_pdn_roundtrip_layer0(&editor.document, &pixels)?;
         }
         Ok(())
     }
@@ -2023,14 +1952,7 @@ mod tests {
             editor.finish_stroke();
             let pixels = editor.document.layer_pixels(0).unwrap().to_vec();
             assert!(pixels.iter().any(|p| (1..255).contains(&p.0[3])));
-            let mut bytes = Vec::new();
-            editor.document.write_pdn(&mut bytes)?;
-            assert_eq!(
-                Document::read_pdn(bytes.as_slice())?
-                    .layer_pixels(0)
-                    .unwrap(),
-                pixels
-            );
+            assert_pdn_roundtrip_layer0(&editor.document, &pixels)?;
 
             editor.select_all();
             editor.invert_selection();

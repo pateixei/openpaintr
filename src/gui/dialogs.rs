@@ -1,14 +1,18 @@
 use super::i18n::text as tr;
-use std::{
-    fs::File,
-    io::{self, BufReader, BufWriter, Write},
-    path::{Path, PathBuf},
+use std::{io, path::PathBuf};
+
+use eframe::egui::{self, Color32, TextureHandle, TextureOptions};
+use openpaintr::{Document, PngCompression, PngDepth, is_valid_layer_name};
+
+use super::{
+    editor::LayerMeta,
+    storage::{JsonWrite, atomic_write_bytes, exe_adjacent, read_json, write_json_atomic},
+    theme::CARD_CORNER_RADIUS,
+    widgets::{
+        blend_mode_combo, enum_combo_box, opacity_slider, paint_thumbnail, pixels_to_color_image,
+    },
+    window_chrome,
 };
-
-use eframe::egui::{self, Color32, ColorImage, TextureHandle, TextureOptions};
-use openpaintr::{BLEND_MODES, Document, Pixel, PngCompression, PngDepth};
-
-use super::{editor::LayerMeta, theme::CARD_CORNER_RADIUS, window_chrome};
 
 const RECENT_FILE: &str = "recentes.json";
 const MAX_RECENT: usize = 10;
@@ -28,25 +32,6 @@ pub(super) fn modal(ctx: &egui::Context, id: &str) -> egui::Modal {
         .frame(egui::Frame::popup(&ctx.style()).corner_radius(CARD_CORNER_RADIUS))
 }
 
-pub fn atomic_write_bytes(path: &Path, bytes: &[u8], replace: bool) -> io::Result<()> {
-    let parent = path
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty());
-    let mut file = tempfile::NamedTempFile::new_in(parent.unwrap_or(Path::new(".")))?;
-    {
-        let mut output = BufWriter::new(file.as_file_mut());
-        output.write_all(bytes)?;
-        output.flush()?;
-    }
-    file.as_file().sync_all()?;
-    if replace {
-        file.persist(path)?;
-    } else {
-        file.persist_noclobber(path)?;
-    }
-    Ok(())
-}
-
 pub fn make_thumbnail_texture(
     ctx: &egui::Context,
     name: &str,
@@ -58,11 +43,7 @@ pub fn make_thumbnail_texture(
         Some(idx) => document.layer_thumbnail(idx, max_side)?,
         None => document.composite_thumbnail(max_side).ok()?,
     };
-    let colors = pixels
-        .into_iter()
-        .map(|Pixel([r, g, b, a])| Color32::from_rgba_unmultiplied(r, g, b, a))
-        .collect();
-    let image = ColorImage::new([w as usize, h as usize], colors);
+    let image = pixels_to_color_image(w as usize, h as usize, &pixels);
     Some(ctx.load_texture(name, image, TextureOptions::LINEAR))
 }
 
@@ -74,13 +55,10 @@ pub struct RecentFiles {
 
 impl RecentFiles {
     pub fn from_executable() -> Self {
-        let path = std::env::current_exe()
-            .ok()
-            .and_then(|exe| exe.parent().map(|parent| parent.join(RECENT_FILE)));
+        let path = exe_adjacent(RECENT_FILE).ok();
         let entries = path
             .as_deref()
-            .and_then(|p| File::open(p).ok())
-            .and_then(|f| serde_json::from_reader::<_, Vec<PathBuf>>(BufReader::new(f)).ok())
+            .and_then(|p| read_json::<Vec<PathBuf>>(p).ok())
             .unwrap_or_default();
         Self { path, entries }
     }
@@ -101,8 +79,7 @@ impl RecentFiles {
         let Some(path) = &self.path else {
             return Ok(());
         };
-        let bytes = serde_json::to_vec_pretty(&self.entries).map_err(io::Error::other)?;
-        atomic_write_bytes(path, &bytes, true)
+        write_json_atomic(path, &self.entries, JsonWrite::PRETTY)
     }
 }
 
@@ -117,30 +94,42 @@ pub enum SaveFormat {
     },
 }
 
+impl SaveFormat {
+    pub fn pdn() -> Self {
+        Self::Pdn { effort: 1 }
+    }
+
+    pub fn png() -> Self {
+        Self::Png {
+            depth: PngDepth::Rgba32,
+            compression: PngCompression::Balanced,
+        }
+    }
+}
+
 pub struct SaveOptionsDialog {
     pub path: PathBuf,
     pub format: SaveFormat,
     pub needs_overwrite_confirm: bool,
     pub overwrite_confirmed: bool,
-    pub is_project: bool,
     encoded: Vec<u8>,
     preview: Option<TextureHandle>,
     error: Option<String>,
 }
 
 impl SaveOptionsDialog {
-    pub fn new_pdn(
+    pub fn new(
         path: PathBuf,
+        format: SaveFormat,
         needs_overwrite_confirm: bool,
         document: &Document,
         ctx: &egui::Context,
     ) -> Self {
         let mut dialog = Self {
             path,
-            format: SaveFormat::Pdn { effort: 1 },
+            format,
             needs_overwrite_confirm,
             overwrite_confirmed: !needs_overwrite_confirm,
-            is_project: true,
             encoded: Vec::new(),
             preview: None,
             error: None,
@@ -149,27 +138,14 @@ impl SaveOptionsDialog {
         dialog
     }
 
-    pub fn new_png(
-        path: PathBuf,
-        needs_overwrite_confirm: bool,
-        document: &Document,
-        ctx: &egui::Context,
-    ) -> Self {
-        let mut dialog = Self {
-            path,
-            format: SaveFormat::Png {
-                depth: PngDepth::Rgba32,
-                compression: PngCompression::Balanced,
-            },
-            needs_overwrite_confirm,
-            overwrite_confirmed: !needs_overwrite_confirm,
-            is_project: false,
-            encoded: Vec::new(),
-            preview: None,
-            error: None,
-        };
-        dialog.refresh(document, ctx);
-        dialog
+    /// Size of the last successful encoding.
+    #[cfg(test)]
+    pub fn encoded_len(&self) -> Option<usize> {
+        self.error.is_none().then_some(self.encoded.len())
+    }
+
+    pub fn is_project(&self) -> bool {
+        matches!(self.format, SaveFormat::Pdn { .. })
     }
 
     fn refresh(&mut self, document: &Document, ctx: &egui::Context) {
@@ -182,27 +158,12 @@ impl SaveOptionsDialog {
         };
         self.error = res.err().as_ref().map(super::i18n::error_message);
         if let Ok((w, h, mut pixels)) = document.composite_thumbnail(160) {
-            if let SaveFormat::Png {
-                depth: depth @ (PngDepth::Rgb24White | PngDepth::Rgb24Black),
-                ..
-            } = self.format
-            {
-                let bg = if depth == PngDepth::Rgb24White {
-                    Pixel([255, 255, 255, 255])
-                } else {
-                    Pixel([0, 0, 0, 255])
-                };
+            if let SaveFormat::Png { depth, .. } = self.format {
                 for px in &mut pixels {
-                    if px.0[3] < 255 {
-                        *px = px.over(bg, 255);
-                    }
+                    *px = depth.flatten_pixel(*px);
                 }
             }
-            let colors = pixels
-                .into_iter()
-                .map(|Pixel([r, g, b, a])| Color32::from_rgba_unmultiplied(r, g, b, a))
-                .collect();
-            let image = ColorImage::new([w as usize, h as usize], colors);
+            let image = pixels_to_color_image(w as usize, h as usize, &pixels);
             self.preview = Some(ctx.load_texture("save_preview", image, TextureOptions::LINEAR));
         }
     }
@@ -216,9 +177,10 @@ impl SaveOptionsDialog {
         let mut changed = false;
         let response = modal(ctx, "opcoes_salvamento").show(ctx, |ui| {
             ui.set_width((ctx.content_rect().width() - 40.0).clamp(320.0, 480.0));
-            let title = match self.format {
-                SaveFormat::Pdn { .. } => tr("pdn-save-options"),
-                SaveFormat::Png { .. } => tr("png-export-options"),
+            let title = if self.is_project() {
+                tr("pdn-save-options")
+            } else {
+                tr("png-export-options")
             };
             ui.heading(title);
             ui.weak(self.path.display().to_string());
@@ -230,25 +192,11 @@ impl SaveOptionsDialog {
                     let size = tex.size_vec2();
                     let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
                     let painter = ui.painter_at(rect);
-                    painter.image(
-                        checker.id(),
-                        rect,
-                        egui::Rect::from_min_max(
-                            egui::pos2(0.0, 0.0),
-                            egui::pos2(size.x / 16.0, size.y / 16.0),
-                        ),
-                        Color32::WHITE,
-                    );
-                    painter.image(
-                        tex.id(),
-                        rect,
-                        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                        Color32::WHITE,
-                    );
+                    paint_thumbnail(&painter, checker, tex.id(), rect, 0, None, 16.0);
                 }
                 ui.vertical(|ui| {
                     ui.label(super::i18n::format("dimensions", &[&w, &h]));
-                    if matches!(self.format, SaveFormat::Pdn { .. }) {
+                    if self.is_project() {
                         ui.label(super::i18n::format(
                             "layer-count",
                             &[&document.layer_count()],
@@ -275,34 +223,20 @@ impl SaveOptionsDialog {
                     }
                 }
                 SaveFormat::Png { depth, compression } => {
-                    egui::ComboBox::new("color-depth", tr("color-depth"))
-                        .selected_text(depth_label(*depth))
-                        .show_ui(ui, |ui| {
-                            for option in PngDepth::ALL {
-                                if ui
-                                    .selectable_value(depth, option, depth_label(option))
-                                    .changed()
-                                {
-                                    changed = true;
-                                }
-                            }
-                        });
-                    egui::ComboBox::new("png-compression", tr("png-compression"))
-                        .selected_text(compression_label(*compression))
-                        .show_ui(ui, |ui| {
-                            for option in PngCompression::ALL {
-                                if ui
-                                    .selectable_value(
-                                        compression,
-                                        option,
-                                        compression_label(option),
-                                    )
-                                    .changed()
-                                {
-                                    changed = true;
-                                }
-                            }
-                        });
+                    changed |= enum_combo_box(
+                        ui,
+                        egui::ComboBox::new("color-depth", tr("color-depth")),
+                        depth,
+                        &PngDepth::ALL,
+                        |opt| tr(opt.label_key()),
+                    );
+                    changed |= enum_combo_box(
+                        ui,
+                        egui::ComboBox::new("png-compression", tr("png-compression")),
+                        compression,
+                        &PngCompression::ALL,
+                        |opt| tr(opt.label_key()),
+                    );
                 }
             }
 
@@ -384,38 +318,14 @@ impl LayerPropertiesDialog {
             {
                 live_changed = true;
             }
-            if ui
-                .add(
-                    egui::Slider::new(&mut self.draft.opacity, 0..=255)
-                        .custom_formatter(|value, _| format!("{:.0}%", value * 100.0 / 255.0))
-                        .custom_parser(|text| {
-                            text.trim_end_matches('%')
-                                .parse::<f64>()
-                                .ok()
-                                .map(|value| value * 255.0 / 100.0)
-                        })
-                        .text(tr("opacity")),
-                )
-                .changed()
-            {
-                live_changed = true;
-            }
-            egui::ComboBox::new("blend-mode", tr("blend-mode"))
-                .selected_text(super::i18n::blend_name(self.draft.blend))
-                .show_ui(ui, |ui| {
-                    for mode in 0..BLEND_MODES.len() as u8 {
-                        if ui
-                            .selectable_value(
-                                &mut self.draft.blend,
-                                mode,
-                                super::i18n::blend_name(mode),
-                            )
-                            .changed()
-                        {
-                            live_changed = true;
-                        }
-                    }
-                });
+            live_changed |= ui
+                .add(opacity_slider(&mut self.draft.opacity).text(tr("opacity")))
+                .changed();
+            live_changed |= blend_mode_combo(
+                ui,
+                egui::ComboBox::new("blend-mode", tr("blend-mode")),
+                &mut self.draft.blend,
+            );
             if let Some(error) = &self.error {
                 ui.colored_label(ui.visuals().error_fg_color, error);
             }
@@ -424,7 +334,7 @@ impl LayerPropertiesDialog {
         });
         let (ok, cancel) = response.inner;
         if ok {
-            if self.draft.name.trim().is_empty() || self.draft.name.contains('\0') {
+            if !is_valid_layer_name(&self.draft.name) {
                 self.error = Some(tr("invalid-layer-name").into());
                 LayerDialogAction::Open(live_changed)
             } else {
@@ -452,21 +362,4 @@ fn format_bytes(bytes: usize) -> String {
     } else {
         format!("{:.2} MiB", bytes as f64 / (1024.0 * 1024.0))
     }
-}
-
-fn depth_label(depth: PngDepth) -> &'static str {
-    tr(match depth {
-        PngDepth::Rgba32 => "png-rgba32",
-        PngDepth::Rgb24White => "png-rgb-white",
-        PngDepth::Rgb24Black => "png-rgb-black",
-    })
-}
-
-fn compression_label(compression: PngCompression) -> &'static str {
-    tr(match compression {
-        PngCompression::None => "compression-none",
-        PngCompression::Fast => "compression-fast",
-        PngCompression::Balanced => "compression-balanced",
-        PngCompression::High => "compression-high",
-    })
 }

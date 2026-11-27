@@ -1,3 +1,6 @@
+#![deny(unsafe_code)]
+#![deny(unsafe_op_in_unsafe_fn)]
+
 use std::{
     env,
     fs::File,
@@ -10,7 +13,7 @@ use openpaintr::{Document, Pixel};
 #[cfg(feature = "gui")]
 mod gui;
 
-const USAGE: &str = "Uso: openpaintr [gui]\n     openpaintr demo <arquivo.pam>\n     openpaintr demo-png <arquivo.png>\n     openpaintr png <entrada.png> <saída.png>\n     openpaintr pdn <entrada.pdn> <saída.png>\n     openpaintr --help";
+const USAGE: &str = "Usage: openpaintr [gui]\n       openpaintr demo <file.pam>\n       openpaintr demo-png <file.png>\n       openpaintr png <input.png> <output.png>\n       openpaintr pdn <input.pdn> <output.png>\n       openpaintr --help";
 
 fn main() -> io::Result<()> {
     let mut args = env::args_os().skip(1);

@@ -510,6 +510,12 @@
             "colors.snap_hue_only": {
               "$ref": "#/$defs/combinações"
             },
+            "colors.ribbon_primary": {
+              "$ref": "#/$defs/combinações"
+            },
+            "colors.ribbon_secondary": {
+              "$ref": "#/$defs/combinações"
+            },
             "transform.move": {
               "$ref": "#/$defs/combinações"
             },

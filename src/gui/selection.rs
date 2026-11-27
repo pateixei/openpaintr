@@ -10,6 +10,10 @@ use openpaintr::Pixel;
 pub type Point = (u32, u32);
 pub type Bounds = (Point, Point);
 
+pub fn bounds_size((min, max): Bounds) -> Point {
+    (max.0 - min.0 + 1, max.1 - min.1 + 1)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Shape {
     Rectangle,
@@ -216,17 +220,16 @@ impl Selection {
                 );
             }
             AaMode::Ssaa4x4 => {
-                if let Some(&(fx, fy)) = pts.first() {
-                    gfx_path.move_f(fx * 4.0, fy * 4.0);
-                    for &(px, py) in &pts[1..] {
-                        gfx_path.line_f(px * 4.0, py * 4.0);
-                    }
-                    gfx_path.close();
-                }
+                let scale = aa_mode.path_scale();
+                super::vector_tools::trace_path(
+                    &mut gfx_path,
+                    pts.iter().map(|&(x, y)| (x * scale, y * scale)),
+                    true,
+                );
                 let cov_map =
                     super::vector_tools::rasterize_path_ssaa(&gfx_path, gfx::RULE_EVENODD, size);
                 for (pt, cov_mask) in cov_map {
-                    let cov = ((cov_mask.count_ones() * 255 + 8) / 16) as u8;
+                    let cov = super::stroke_raster::mask16_to_u8(cov_mask);
                     if cov > 0 {
                         mask.set(pt, cov);
                     }
@@ -280,14 +283,9 @@ impl Selection {
         mask.set(seed, 255);
         while let Some((x, y)) = queue.pop_front() {
             visit((x, y));
-            for candidate in [
-                x.checked_sub(1).map(|x| (x, y)),
-                y.checked_sub(1).map(|y| (x, y)),
-                (x + 1 < size.0).then_some((x + 1, y)),
-                (y + 1 < size.1).then_some((x, y + 1)),
-            ]
-            .into_iter()
-            .flatten()
+            for candidate in super::bucket_edges::NEIGHBORS
+                .iter()
+                .filter_map(|&delta| super::bucket_edges::offset((x, y), delta, size))
             {
                 if !mask.contains(candidate) && matches(candidate) {
                     mask.set(candidate, 255);
@@ -314,20 +312,17 @@ impl Selection {
                 m
             }
             Region::Shape(Shape::Ellipse, (min, max)) => {
-                let mut m = Mask::empty(size)?.inner;
+                let mut m = Mask::empty(size)?;
                 for y in min.1..=max.1 {
                     for x in min.0..=max.0 {
                         let val = ellipse_coverage((x, y), *min, *max, self.aa_mode);
-                        if val > 0
-                            && let Some(row) = m.row_w(x as i32, y as i32)
-                            && !row.is_empty()
-                        {
-                            row[0] = val;
+                        if val > 0 {
+                            m.set((x, y), val);
                         }
                     }
                 }
-                m.optimize();
-                m
+                m.inner.optimize();
+                m.inner
             }
         };
         if self.inverted {
@@ -467,6 +462,15 @@ impl Selection {
         }
     }
 
+    pub fn mask_pixel(&self, source: &[Pixel], size: Point, pt: Point) -> Pixel {
+        let cov = self.coverage_u8(pt);
+        if cov == 0 {
+            Pixel::default()
+        } else {
+            super::geometry::pixel(source, size, i64::from(pt.0), i64::from(pt.1)).scale_alpha(cov)
+        }
+    }
+
     pub fn coverage_u8(&self, point: Point) -> u8 {
         let raw = match &self.region {
             Region::Mask(mask) => mask.get(point),
@@ -500,25 +504,30 @@ impl Selection {
     }
 }
 
-fn ellipse_contains((x, y): Point, min: Point, max: Point) -> bool {
+fn ellipse_normalized((x, y): Point, min: Point, max: Point) -> Option<(f64, f64, f64, f64)> {
     if !(min.0..=max.0).contains(&x) || !(min.1..=max.1).contains(&y) {
-        return false;
-    }
-    let nx = (2.0 * f64::from(x - min.0) + 1.0) / (f64::from(max.0 - min.0) + 1.0) - 1.0;
-    let ny = (2.0 * f64::from(y - min.1) + 1.0) / (f64::from(max.1 - min.1) + 1.0) - 1.0;
-    nx * nx + ny * ny <= 1.0
-}
-
-fn ellipse_coverage((x, y): Point, min: Point, max: Point, aa_mode: AaMode) -> u8 {
-    use super::stroke_raster::{half_plane_coverage, samples};
-
-    if !(min.0..=max.0).contains(&x) || !(min.1..=max.1).contains(&y) {
-        return 0;
+        return None;
     }
     let width = f64::from(max.0 - min.0) + 1.0;
     let height = f64::from(max.1 - min.1) + 1.0;
     let nx = (2.0 * f64::from(x - min.0) + 1.0) / width - 1.0;
     let ny = (2.0 * f64::from(y - min.1) + 1.0) / height - 1.0;
+    Some((width, height, nx, ny))
+}
+
+fn ellipse_contains(point: Point, min: Point, max: Point) -> bool {
+    let Some((_, _, nx, ny)) = ellipse_normalized(point, min, max) else {
+        return false;
+    };
+    nx * nx + ny * ny <= 1.0
+}
+
+fn ellipse_coverage(point: Point, min: Point, max: Point, aa_mode: AaMode) -> u8 {
+    use super::stroke_raster::{coverage_to_u8, half_plane_coverage, samples, samples16_to_u8};
+
+    let Some((width, height, nx, ny)) = ellipse_normalized(point, min, max) else {
+        return 0;
+    };
     let furthest = (nx.abs() + 0.75 / width).powi(2) + (ny.abs() + 0.75 / height).powi(2);
     let nearest =
         (nx.abs() - 0.75 / width).max(0.0).powi(2) + (ny.abs() - 0.75 / height).max(0.0).powi(2);
@@ -534,15 +543,14 @@ fn ellipse_coverage((x, y): Point, min: Point, max: Point, aa_mode: AaMode) -> u
         if g_len < 1e-12 {
             if f <= 0.0 { 255 } else { 0 }
         } else {
-            let cov = half_plane_coverage(gx / g_len, gy / g_len, -f / g_len);
-            (cov * 255.0).round().clamp(0.0, 255.0) as u8
+            coverage_to_u8(half_plane_coverage(gx / g_len, gy / g_len, -f / g_len))
         }
     } else {
         let count = samples(|sx, sy| {
             (nx + 2.0 * sx / width).powi(2) + (ny + 2.0 * sy / height).powi(2) <= 1.0
         })
         .count_ones();
-        ((count * 255 + 8) / 16) as u8
+        samples16_to_u8(count)
     }
 }
 

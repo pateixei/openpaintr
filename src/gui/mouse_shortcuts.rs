@@ -1,9 +1,11 @@
-use super::i18n::text as tr;
 use std::collections::{BTreeMap, HashMap};
 
 use eframe::egui::{self, Key, Modifiers, PointerButton};
 
-use super::shortcuts::Base;
+use super::shortcuts::{
+    Base, ModFlags, backfill_missing, bindable_actions, binding_conflict_error, binding_editor_row,
+    binding_value_error, parse_key,
+};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum Scope {
@@ -32,6 +34,7 @@ pub enum Scope {
     LayerUpButton,
     LayerDownButton,
     ColorWheel,
+    ColorRibbonSwatch,
     TransformMove,
     TransformScale,
     TransformRotate,
@@ -67,33 +70,16 @@ impl Scope {
 
 macro_rules! mouse_actions {
     ($($action:ident : $id:literal, $label:literal, $scope:ident, [$($paint:literal),*], [$($adobe:literal),*];)*) => {
-        #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-        pub enum MouseAction { $($action),* }
+        bindable_actions! {
+            #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+            pub enum MouseAction {
+                $($action : $id, $label, [$($paint),*], [$($adobe),*];)*
+            }
+        }
 
         impl MouseAction {
-            pub const ALL: &[Self] = &[$(Self::$action),*];
-
-            pub fn id(self) -> &'static str {
-                match self { $(Self::$action => $id),* }
-            }
-
-            pub fn label(self) -> &'static str {
-                tr(self.label_key())
-            }
-
-            fn label_key(self) -> &'static str {
-                match self { $(Self::$action => $label),* }
-            }
-
             pub fn scope(self) -> Scope {
                 match self { $(Self::$action => Scope::$scope),* }
-            }
-
-            pub fn defaults(self, base: Base) -> &'static [&'static str] {
-                match (self, base) {
-                    $((Self::$action, Base::PaintNet) => &[$($paint),*],
-                      (Self::$action, Base::Adobe) => &[$($adobe),*],)*
-                }
             }
         }
     };
@@ -170,6 +156,8 @@ mouse_actions! {
     ColorSaturation: "colors.saturation_only", "mouse.colors.saturation_only", ColorWheel, ["Alt+Left"], [];
     ColorSnap: "colors.snap_hue", "mouse.colors.snap_hue", ColorWheel, ["Shift+Left"], [];
     ColorSnapHue: "colors.snap_hue_only", "mouse.colors.snap_hue_only", ColorWheel, ["Ctrl+Shift+Left"], [];
+    RibbonSwatchPrimary: "colors.ribbon_primary", "mouse.colors.ribbon_primary", ColorRibbonSwatch, ["Left"], ["Left"];
+    RibbonSwatchSecondary: "colors.ribbon_secondary", "mouse.colors.ribbon_secondary", ColorRibbonSwatch, ["Right"], ["Alt+Left"];
     Move: "transform.move", "mouse.transform.move", TransformMove, ["Left"], ["Left"];
     MoveCopy: "transform.move_copy", "mouse.transform.move_copy", TransformMove, ["Ctrl+Left"], ["Alt+Left"];
     Scale: "transform.scale", "mouse.transform.scale", TransformScale, ["Left"], ["Left"];
@@ -189,35 +177,19 @@ pub enum Trigger {
     WheelX,
 }
 
+// `PointerButton` does not implement `Hash`, so hash its discriminant.
 impl std::hash::Hash for Trigger {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        let btn_code = |b: PointerButton| match b {
-            PointerButton::Primary => 0u8,
-            PointerButton::Secondary => 1,
-            PointerButton::Middle => 2,
-            PointerButton::Extra1 => 3,
-            PointerButton::Extra2 => 4,
-        };
-        match *self {
-            Self::Button(b) => {
-                0u8.hash(state);
-                btn_code(b).hash(state);
-            }
-            Self::Double(b) => {
-                1u8.hash(state);
-                btn_code(b).hash(state);
-            }
-            Self::Wheel => 2u8.hash(state),
-            Self::WheelX => 3u8.hash(state),
+        std::mem::discriminant(self).hash(state);
+        if let Self::Button(button) | Self::Double(button) = *self {
+            (button as u8).hash(state);
         }
     }
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct Gesture {
-    ctrl: bool,
-    alt: bool,
-    shift: bool,
+    mods: ModFlags,
     pub held: Option<Key>,
     pub trigger: Trigger,
 }
@@ -244,9 +216,7 @@ impl Gesture {
             value => Trigger::Button(button(value)?),
         };
         let mut gesture = Self {
-            ctrl: false,
-            alt: false,
-            shift: false,
+            mods: ModFlags::default(),
             held: None,
             trigger,
         };
@@ -255,29 +225,20 @@ impl Gesture {
             .map(str::trim)
             .filter(|part| !part.is_empty())
         {
-            match token.to_ascii_lowercase().as_str() {
-                "ctrl" if !gesture.ctrl => gesture.ctrl = true,
-                "alt" if !gesture.alt => gesture.alt = true,
-                "shift" if !gesture.shift => gesture.shift = true,
-                _ if gesture.held.is_none() => {
-                    gesture.held = Some(Key::from_name(token).or_else(|| {
-                        Key::ALL
-                            .iter()
-                            .copied()
-                            .find(|key| key.name().eq_ignore_ascii_case(token))
-                    })?);
-                }
-                _ => return None,
+            if gesture.mods.apply_token(token) {
+                continue;
+            }
+            if gesture.held.is_none() {
+                gesture.held = Some(parse_key(token)?);
+            } else {
+                return None;
             }
         }
         Some(gesture)
     }
 
     fn matches(self, trigger: Trigger, modifiers: Modifiers) -> bool {
-        self.trigger == trigger
-            && self.ctrl == modifiers.ctrl
-            && self.alt == modifiers.alt
-            && self.shift == modifiers.shift
+        self.trigger == trigger && self.mods.matches(modifiers)
     }
 }
 
@@ -289,12 +250,8 @@ impl MouseBindings {
         let mut bindings = HashMap::new();
         for &action in MouseAction::ALL {
             for value in values.get(action.id()).into_iter().flatten() {
-                let gesture = Gesture::parse(value).ok_or_else(|| {
-                    super::i18n::format_logical(
-                        "invalid-gesture",
-                        &[&super::i18n::logical_text(action.label_key()), &value],
-                    )
-                })?;
+                let gesture = Gesture::parse(value)
+                    .ok_or_else(|| binding_value_error("invalid-gesture", action, value))?;
                 let scope = action.scope();
                 let supported = match scope {
                     Scope::ToolbarHand
@@ -317,24 +274,18 @@ impl MouseBindings {
                     _ => matches!(gesture.trigger, Trigger::Button(_)),
                 };
                 if !supported {
-                    return Err(super::i18n::format_logical(
-                        "unsupported-gesture",
-                        &[&super::i18n::logical_text(action.label_key()), &value],
-                    ));
+                    return Err(binding_value_error("unsupported-gesture", action, value));
                 }
                 for (&(other_scope, other_gesture), &other) in &bindings {
                     if other_gesture == gesture
                         && other != action
                         && scope.conflicts_with(other_scope)
                     {
-                        let other: MouseAction = other;
-                        return Err(super::i18n::format_logical(
+                        return Err(binding_conflict_error(
                             "gesture-conflict",
-                            &[
-                                &value,
-                                &super::i18n::logical_text(other.label_key()),
-                                &super::i18n::logical_text(action.label_key()),
-                            ],
+                            value,
+                            other,
+                            action,
                         ));
                     }
                 }
@@ -349,8 +300,19 @@ impl MouseBindings {
         scope: Scope,
         trigger: Trigger,
         modifiers: Modifiers,
-        mut down: impl FnMut(Key) -> bool,
+        down: impl FnMut(Key) -> bool,
     ) -> Option<MouseAction> {
+        self.resolve_gesture(scope, trigger, modifiers, down)
+            .map(|(_, action)| action)
+    }
+
+    fn resolve_gesture(
+        &self,
+        scope: Scope,
+        trigger: Trigger,
+        modifiers: Modifiers,
+        mut down: impl FnMut(Key) -> bool,
+    ) -> Option<(Gesture, MouseAction)> {
         self.0
             .iter()
             .filter(|&(&(registered, gesture), _)| {
@@ -359,7 +321,20 @@ impl MouseBindings {
                     && gesture.held.is_none_or(&mut down)
             })
             .max_by_key(|&(&(_, gesture), _)| (gesture.held.is_some(), gesture.held))
-            .map(|(_, &action)| action)
+            .map(|(&(_, gesture), &action)| (gesture, action))
+    }
+
+    pub fn wheel_chord_down(&self, action: MouseAction, input: &egui::InputState) -> bool {
+        [Trigger::Wheel, Trigger::WheelX]
+            .into_iter()
+            .any(|trigger| {
+                self.resolve_gesture(action.scope(), trigger, input.modifiers, |key| {
+                    input.key_down(key)
+                })
+                .is_some_and(|(gesture, resolved)| {
+                    resolved == action && (gesture.mods.any() || gesture.held.is_some())
+                })
+            })
     }
 
     pub fn is_gesture_down(&self, action: MouseAction, input: &egui::InputState) -> bool {
@@ -372,9 +347,7 @@ impl MouseBindings {
                     Trigger::Wheel | Trigger::WheelX => false,
                 }
                 && gesture.held.is_none_or(|key| input.key_down(key))
-                && (!gesture.ctrl || input.modifiers.ctrl)
-                && (!gesture.alt || input.modifiers.alt)
-                && (!gesture.shift || input.modifiers.shift)
+                && gesture.mods.all_held(input.modifiers)
         })
     }
 
@@ -406,50 +379,111 @@ impl MouseBindings {
     ) -> Option<MouseAction> {
         ctx.input(|input| self.resolve(scope, trigger, modifiers, |key| input.key_down(key)))
     }
+
+    pub fn active_button(ctx: &egui::Context) -> Option<PointerButton> {
+        ctx.input(|input| {
+            BUTTONS
+                .into_iter()
+                .find(|&btn| input.pointer.button_down(btn) || input.pointer.button_pressed(btn))
+        })
+    }
+
+    pub fn active_match<T>(
+        &self,
+        ctx: &egui::Context,
+        allow_held: bool,
+        mut pick: impl FnMut(&Self, &egui::InputState, PointerButton) -> Option<T>,
+    ) -> Option<T> {
+        ctx.input(|input| {
+            BUTTONS.into_iter().find_map(|btn| {
+                let active = input.pointer.button_pressed(btn)
+                    || (allow_held && input.pointer.button_down(btn));
+                active.then(|| pick(self, input, btn))?
+            })
+        })
+    }
+
+    fn button_in(
+        &self,
+        ctx: &egui::Context,
+        scopes: &[Scope],
+        double: bool,
+        allow_held: bool,
+    ) -> Option<(PointerButton, MouseAction)> {
+        ctx.input(|input| {
+            BUTTONS.into_iter().find_map(|btn| {
+                let active = if double {
+                    input.pointer.button_double_clicked(btn)
+                } else {
+                    input.pointer.button_pressed(btn)
+                        || (allow_held && input.pointer.button_down(btn))
+                };
+                if !active {
+                    return None;
+                }
+                let trigger = if double {
+                    Trigger::Double(btn)
+                } else {
+                    Trigger::Button(btn)
+                };
+                scopes.iter().find_map(|&scope| {
+                    self.resolve(scope, trigger, input.modifiers, |k| input.key_down(k))
+                        .map(|action| (btn, action))
+                })
+            })
+        })
+    }
+
+    pub fn pressed_in(
+        &self,
+        ctx: &egui::Context,
+        scope: Scope,
+    ) -> Option<(PointerButton, MouseAction)> {
+        self.button_in(ctx, &[scope], false, false)
+    }
+
+    pub fn pressed_in_any(
+        &self,
+        ctx: &egui::Context,
+        scopes: &[Scope],
+    ) -> Option<(PointerButton, MouseAction)> {
+        self.button_in(ctx, scopes, false, false)
+    }
+
+    pub fn double_clicked_in(
+        &self,
+        ctx: &egui::Context,
+        scope: Scope,
+    ) -> Option<(PointerButton, MouseAction)> {
+        self.button_in(ctx, &[scope], true, false)
+    }
+
+    pub fn active_in(
+        &self,
+        ctx: &egui::Context,
+        scope: Scope,
+    ) -> Option<(PointerButton, MouseAction)> {
+        self.button_in(ctx, &[scope], false, true)
+    }
 }
 
 pub fn add_missing(values: &mut BTreeMap<String, Vec<String>>, base: Base) {
-    for &action in MouseAction::ALL {
-        if values.contains_key(action.id()) {
-            continue;
-        }
-        values.insert(action.id().into(), Vec::new());
-        for &gesture in action.defaults(base) {
-            values.get_mut(action.id()).unwrap().push(gesture.into());
-            if MouseBindings::compile(values).is_err() {
-                values.get_mut(action.id()).unwrap().pop();
-            }
-        }
-    }
+    backfill_missing::<MouseAction>(values, base, |bindings| {
+        MouseBindings::compile(bindings).is_ok()
+    });
 }
 
 pub fn settings_rows(ui: &mut egui::Ui, values: &mut BTreeMap<String, Vec<String>>, base: Base) {
     for &action in MouseAction::ALL {
-        ui.label(egui::RichText::new(action.label()).small());
-        let bindings = values.get_mut(action.id()).expect("gesto conhecido");
-        let mut text = bindings.join(";");
-        if ui
-            .add_sized(
-                [172.0, 19.0],
-                egui::TextEdit::singleline(&mut text).id_salt(action.id()),
-            )
-            .changed()
-        {
-            *bindings = text
-                .split(';')
-                .map(str::trim)
-                .filter(|part| !part.is_empty())
-                .map(str::to_string)
-                .collect();
-        }
-        if ui.small_button(tr("preset-default")).clicked() {
-            *bindings = action
-                .defaults(base)
-                .iter()
-                .map(ToString::to_string)
-                .collect();
-        }
-        ui.end_row();
+        let bindings = values.get_mut(action.id()).expect("known gesture");
+        binding_editor_row(
+            ui,
+            egui::RichText::new(action.label()).small(),
+            action.id(),
+            172.0,
+            bindings,
+            action.defaults(base),
+        );
     }
 }
 
@@ -461,7 +495,7 @@ pub fn clean_empty(values: &mut BTreeMap<String, Vec<String>>) {
     }
 }
 
-pub const BUTTONS: [PointerButton; 5] = [
+const BUTTONS: [PointerButton; 5] = [
     PointerButton::Primary,
     PointerButton::Secondary,
     PointerButton::Middle,
@@ -517,6 +551,19 @@ mod tests {
                     |k| k == Key::Space
                 ),
                 Some(MouseAction::Pan)
+            );
+            let (button, modifiers) = match base {
+                Base::PaintNet => (PointerButton::Secondary, Modifiers::NONE),
+                Base::Adobe => (PointerButton::Primary, Modifiers::ALT),
+            };
+            assert_eq!(
+                bindings.resolve(
+                    Scope::ColorRibbonSwatch,
+                    Trigger::Button(button),
+                    modifiers,
+                    |_| false
+                ),
+                Some(MouseAction::RibbonSwatchSecondary)
             );
         }
         Ok(())

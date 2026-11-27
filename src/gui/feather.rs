@@ -16,10 +16,8 @@ pub fn expand(
     let area = width
         .checked_mul(height)
         .ok_or(io::ErrorKind::OutOfMemory)?;
-    let mut nearest = Vec::new();
-    nearest.try_reserve_exact(area).map_err(io::Error::other)?;
     const EMPTY: u32 = u32::MAX;
-    nearest.resize(area, EMPTY);
+    let mut nearest = openpaintr::try_vec_filled(area, EMPTY)?;
     for (y, row) in nearest.chunks_exact_mut(width).enumerate() {
         let mut site = EMPTY;
         for (x, nearest) in row.iter_mut().enumerate() {
@@ -40,10 +38,7 @@ pub fn expand(
         }
     }
 
-    let mut envelope = Vec::<(usize, f64)>::new();
-    envelope
-        .try_reserve_exact(height)
-        .map_err(io::Error::other)?;
+    let mut envelope = openpaintr::try_vec_with_capacity::<(usize, f64)>(height)?;
     for x in 0..width {
         envelope.clear();
         let horizontal = |y| nearest[y * width + x];
@@ -87,19 +82,18 @@ pub fn expand(
                 // Estimate its footprint with an equal-area square for distance sampling.
                 let source_coverage = coverage((source_x, source_y as u32));
                 let half_side = 0.5 * (f64::from(source_coverage) / 255.0).sqrt();
-                let opacity = match aa_mode {
-                    AaMode::Analytical => {
-                        let edge_x = (dx.abs() - half_side).max(0.0);
-                        let edge_y = (dy.abs() - half_side).max(0.0);
-                        (1.0 - (edge_x * edge_x + edge_y * edge_y).sqrt() / radius).max(0.0)
-                    }
-                    AaMode::Ssaa4x4 => stroke_raster::average_samples(|sx, sy| {
-                        let edge_x = ((dx + sx).abs() - half_side).max(0.0);
-                        let edge_y = ((dy + sy).abs() - half_side).max(0.0);
-                        (1.0 - (edge_x * edge_x + edge_y * edge_y).sqrt() / radius).max(0.0)
-                    }),
+                let falloff = |ox: f64, oy: f64| {
+                    let edge_x = (ox.abs() - half_side).max(0.0);
+                    let edge_y = (oy.abs() - half_side).max(0.0);
+                    (1.0 - edge_x.hypot(edge_y) / radius).max(0.0)
                 };
-                value = base.max((opacity * 255.0).round() as u8);
+                let opacity = match aa_mode {
+                    AaMode::Analytical => falloff(dx, dy),
+                    AaMode::Ssaa4x4 => {
+                        stroke_raster::average_samples(|sx, sy| falloff(dx + sx, dy + sy))
+                    }
+                };
+                value = base.max(stroke_raster::coverage_to_u8(opacity));
             }
             if value > 0 {
                 set(point, value);

@@ -36,10 +36,8 @@ static CATALOGS: LazyLock<Catalogs> = LazyLock::new(|| {
     if let Ok(cwd) = std::env::current_dir() {
         catalogs.scan(&cwd.join("translations"));
     }
-    if let Ok(executable) = std::env::current_exe()
-        && let Some(directory) = executable.parent()
-    {
-        catalogs.scan(&directory.join("translations"));
+    if let Ok(path) = super::storage::exe_adjacent("translations") {
+        catalogs.scan(&path);
     }
     catalogs
 });
@@ -212,12 +210,7 @@ impl Locale {
     }
 
     fn settings_path() -> io::Result<PathBuf> {
-        std::env::var_os("XDG_CONFIG_HOME")
-            .map(PathBuf::from)
-            .filter(|path| path.is_absolute())
-            .or_else(|| std::env::var_os("HOME").map(|path| PathBuf::from(path).join(".config")))
-            .map(|path| path.join("openpaintr").join("language.json"))
-            .ok_or_else(|| io::ErrorKind::NotFound.into())
+        super::storage::config_file("language.json")
     }
 
     pub fn save(self) -> io::Result<()> {
@@ -225,13 +218,11 @@ impl Locale {
     }
 
     fn load_at(path: &Path) -> io::Result<String> {
-        let bytes = std::fs::read(path)?;
-        serde_json::from_slice(&bytes).map_err(io::Error::other)
+        super::storage::read_json(path)
     }
 
     fn save_at(self, path: &Path) -> io::Result<()> {
-        std::fs::create_dir_all(path.parent().expect("settings file has a directory"))?;
-        super::dialogs::atomic_write_bytes(path, &serde_json::to_vec(self.0)?, true)
+        super::storage::write_json_atomic(path, &self.0, super::storage::JsonWrite::COMPACT)
     }
 
     // Render helpers use the active frame's locale, not a shared app preference.
@@ -370,23 +361,8 @@ pub fn blend_name(index: u8) -> &'static str {
 }
 
 pub fn blend_name_logical(index: u8) -> &'static str {
-    const KEYS: [&str; 14] = [
-        "blend.normal",
-        "blend.multiply",
-        "blend.additive",
-        "blend.color-burn",
-        "blend.color-dodge",
-        "blend.reflect",
-        "blend.glow",
-        "blend.overlay",
-        "blend.difference",
-        "blend.negation",
-        "blend.lighten",
-        "blend.darken",
-        "blend.screen",
-        "blend.xor",
-    ];
-    logical_text(KEYS.get(usize::from(index)).copied().unwrap_or(KEYS[0]))
+    let keys = &openpaintr::BLEND_MODE_KEYS;
+    logical_text(keys.get(usize::from(index)).copied().unwrap_or(keys[0]))
 }
 
 pub fn error_message(error: &io::Error) -> String {
@@ -403,19 +379,66 @@ pub fn error_message(error: &io::Error) -> String {
 mod tests {
     use super::*;
 
+    fn describe_placeholders(message: &str) -> String {
+        let slots: Vec<_> = placeholders(message)
+            .into_iter()
+            .map(|slot| match slot {
+                usize::MAX => "{invalid}".to_owned(),
+                slot => format!("{{{slot}}}"),
+            })
+            .collect();
+        format!("[{}]", slots.join(", "))
+    }
+
     #[test]
     fn bundled_catalogs_have_all_keys_and_matching_parameters() {
-        let catalogs = Catalogs::bundled();
-        let english = &catalogs.0[ENGLISH];
-        assert!(!english.is_empty());
-        for catalog in catalogs.0.values() {
-            assert!(english.keys().eq(catalog.keys()));
+        let catalogs: BTreeMap<&str, Catalog> = BUILTIN
+            .into_iter()
+            .map(|(code, data)| {
+                let catalog = serde_json::from_str(data)
+                    .unwrap_or_else(|error| panic!("{code}.json: invalid catalog: {error}"));
+                (code, catalog)
+            })
+            .collect();
+        assert_eq!(catalogs.len(), BUILTIN.len(), "repeated catalog code");
+        let english = &catalogs[ENGLISH];
+        assert!(!english.is_empty(), "{ENGLISH}.json: no keys");
+
+        let mut problems = Vec::new();
+        for (code, catalog) in &catalogs {
+            let mut report = |key: &str, problem: String| {
+                problems.push(format!("{code}.json: key \"{key}\": {problem}"));
+            };
+            for key in english.keys().filter(|key| !catalog.contains_key(*key)) {
+                report(key, "missing".to_owned());
+            }
             for (key, message) in catalog {
-                assert!(!message.trim().is_empty(), "{key}");
-                assert_eq!(placeholders(message), placeholders(&english[key]), "{key}");
-                assert!(!placeholders(message).contains(&usize::MAX), "{key}");
+                let Some(base) = english.get(key) else {
+                    report(key, format!("not in {ENGLISH}.json"));
+                    continue;
+                };
+                if message.trim().is_empty() {
+                    report(key, "empty value".to_owned());
+                    continue;
+                }
+                let slots = placeholders(message);
+                if slots != placeholders(base) || slots.contains(&usize::MAX) {
+                    report(
+                        key,
+                        format!(
+                            "placeholders {} do not match {} in {ENGLISH}.json",
+                            describe_placeholders(message),
+                            describe_placeholders(base),
+                        ),
+                    );
+                }
             }
         }
+        assert!(
+            problems.is_empty(),
+            "translation catalog problems:\n{}",
+            problems.join("\n")
+        );
     }
 
     #[test]

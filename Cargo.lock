@@ -1305,6 +1305,8 @@ dependencies = [
  "num-traits",
  "png",
  "tiff",
+ "zune-core",
+ "zune-jpeg",
 ]
 
 [[package]]
@@ -2016,6 +2018,7 @@ dependencies = [
  "arabic_reshaper",
  "arboard",
  "eframe",
+ "image",
  "jflib-gfx",
  "jflib-img-core",
  "jflib-img-pdn",
@@ -2027,6 +2030,8 @@ dependencies = [
  "serde_json",
  "tempfile",
  "unicode-bidi",
+ "url",
+ "wayland-client",
  "winit",
 ]
 

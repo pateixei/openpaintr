@@ -2,7 +2,7 @@ use super::app_settings::AaMode;
 use super::i18n::text as tr;
 use std::collections::HashMap;
 
-use eframe::egui::{self, Color32, CursorIcon, Rect, Stroke, Vec2, vec2};
+use eframe::egui::{self, Color32, Stroke, Vec2, vec2};
 use gfx::{
     dash::{
         DASH_COUNT, DASH_DASH, DASH_DASHDOT, DASH_DASHDOTDOT, DASH_DOT, DASH_SOLID, DStyle,
@@ -17,11 +17,59 @@ use openpaintr::Pixel;
 
 use super::{
     geometry::Affine,
-    gradient_tool::{SessionOutcome, snap_if},
+    gradient_tool::snap_if,
     paint_dashed_line,
     selection::{Point, Selection},
+    session::{
+        HandleDrag, SessionOutcome, handle_response, paint_affine_box, resize_cursor,
+        set_grab_cursor, track_handle_drag,
+    },
+    stroke_raster,
     tolerance::{self, FillPattern, StrokeBlend},
+    view::CanvasViewport,
 };
+
+const BEZIER_CIRCLE_KAPPA: f32 = 0.552_284_8;
+const ARROW_RIGHT: [(f32, f32); 7] = [
+    (0.0, 0.28),
+    (0.58, 0.28),
+    (0.58, 0.05),
+    (1.0, 0.5),
+    (0.58, 0.95),
+    (0.58, 0.72),
+    (0.0, 0.72),
+];
+
+pub(super) fn trace_path(
+    path: &mut GfxPath,
+    pts: impl IntoIterator<Item = (f32, f32)>,
+    closed: bool,
+) {
+    let mut iter = pts.into_iter();
+    let Some((fx, fy)) = iter.next() else {
+        return;
+    };
+    path.move_f(fx, fy);
+    for (x, y) in iter {
+        path.line_f(x, y);
+    }
+    if closed {
+        path.close();
+    }
+}
+
+fn stroke_style(thickness: u32, scale: f32, dash: u32, cap0: u32, cap1: u32) -> DStyle<'static> {
+    DStyle {
+        width: (f64::from(thickness.max(1)) * f64::from(scale)).max(0.2),
+        pat: dash_pattern(dash),
+        join: JOIN_ROUND,
+        cap0,
+        cap1,
+        dcap: LCAP_FLAT,
+        offset: 0.0,
+        miter: 4.0,
+    }
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum CurveKind {
@@ -359,74 +407,59 @@ fn rasterize_path(path: &GfxPath, rule: u32, size: Point, aa_mode: AaMode) -> Ha
         AaMode::Ssaa4x4 => rasterize_path_ssaa(path, rule, size)
             .into_iter()
             .filter_map(|(pt, mask)| {
-                let alpha = ((mask.count_ones() * 255 + 8) / 16) as u8;
+                let alpha = stroke_raster::mask16_to_u8(mask);
                 (alpha > 0).then_some((pt, alpha))
             })
             .collect(),
     }
 }
 
-fn apply_coverage_map(
-    out: &mut [Pixel],
-    base_layer: &[Pixel],
-    size: Point,
-    selection: Option<&Selection>,
-    cov_map: &HashMap<Point, u8>,
-    blend: StrokeBlend,
-    mut color_at: impl FnMut(Point) -> Pixel,
-) {
-    let w = size.0 as usize;
-    for (&pt @ (x, y), &cov) in cov_map {
-        let sel_cov = selection.map_or(255, |sel| sel.coverage_u8(pt));
-        if sel_cov == 0 {
-            continue;
-        }
-        let eff = ((u32::from(cov) * u32::from(sel_cov) + 127) / 255) as u8;
-        if eff == 0 {
-            continue;
-        }
-        let idx = y as usize * w + x as usize;
-        out[idx] = tolerance::blend_covered(color_at(pt), base_layer[idx], eff, blend);
-    }
-}
-
-#[derive(Clone)]
-pub struct LineCurveSession {
-    pub points: [Vec2; 4],
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LineCurveParams {
     pub kind: CurveKind,
     pub thickness: u32,
     pub dash: DashPreset,
     pub start_cap: LineCapStyle,
     pub end_cap: LineCapStyle,
-    pub color: Pixel,
     pub blend: StrokeBlend,
-    dragging: Option<(usize, [Vec2; 4], Vec2)>,
+}
+
+impl Default for LineCurveParams {
+    fn default() -> Self {
+        Self {
+            kind: CurveKind::CubicBezier,
+            thickness: 2,
+            dash: DashPreset::Solid,
+            start_cap: LineCapStyle::Flat,
+            end_cap: LineCapStyle::Round,
+            blend: StrokeBlend::Normal,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CurveGrip {
+    Point(usize),
+    Body,
+}
+
+#[derive(Clone)]
+pub struct LineCurveSession {
+    pub points: [Vec2; 4],
+    pub color: Pixel,
+    pub params: LineCurveParams,
+    dragging: Option<HandleDrag<CurveGrip, [Vec2; 4]>>,
 }
 
 impl LineCurveSession {
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        start: Vec2,
-        end: Vec2,
-        kind: CurveKind,
-        thickness: u32,
-        dash: DashPreset,
-        start_cap: LineCapStyle,
-        end_cap: LineCapStyle,
-        color: Pixel,
-        blend: StrokeBlend,
-    ) -> Self {
+    pub fn new(start: Vec2, end: Vec2, color: Pixel, mut params: LineCurveParams) -> Self {
+        params.thickness = params.thickness.max(1);
         let p1 = start + (end - start) / 3.0;
         let p2 = start + (end - start) * (2.0 / 3.0);
         Self {
             points: [start, p1, p2, end],
-            kind,
-            thickness: thickness.max(1),
-            dash,
-            start_cap,
-            end_cap,
             color,
-            blend,
+            params,
             dragging: None,
         }
     }
@@ -457,15 +490,12 @@ impl LineCurveSession {
     ) -> Vec<Pixel> {
         let mut out = base_layer.to_vec();
         let mut path = GfxPath::default();
-        let scale = match aa_mode {
-            AaMode::Analytical => 1.0_f32,
-            AaMode::Ssaa4x4 => 4.0_f32,
-        };
+        let scale = aa_mode.path_scale();
         let s = |v: Vec2| (v.x * scale, v.y * scale);
         let [p0, p1, p2, p3] = self.points;
         let (ax, ay) = s(p0);
         path.move_f(ax, ay);
-        match self.kind {
+        match self.params.kind {
             CurveKind::CubicBezier => {
                 path.cubic_f(s(p1), s(p2), s(p3));
             }
@@ -481,100 +511,74 @@ impl LineCurveSession {
                 seg(p1, p2, p3, p3, &mut path);
             }
         }
-        let style = DStyle {
-            width: (f64::from(self.thickness.max(1)) * f64::from(scale)).max(0.2),
-            pat: dash_pattern(self.dash.code()),
-            join: JOIN_ROUND,
-            cap0: self.start_cap.code(),
-            cap1: self.end_cap.code(),
-            dcap: LCAP_FLAT,
-            offset: 0.0,
-            miter: 4.0,
-        };
+        let style = stroke_style(
+            self.params.thickness,
+            scale,
+            self.params.dash.code(),
+            self.params.start_cap.code(),
+            self.params.end_cap.code(),
+        );
         dash_stroke(&mut path, &style);
         let cov_map = rasterize_path(&path, RULE_NONZERO, size, aa_mode);
-        apply_coverage_map(
+        tolerance::blend_coverage_in_place(
             &mut out,
-            base_layer,
             size,
             selection,
-            &cov_map,
-            self.blend,
+            cov_map,
+            self.params.blend,
             |_| self.color,
         );
         out
     }
 
-    pub fn handles(&mut self, rect: Rect, zoom: f32, ui: &egui::Ui) -> SessionOutcome {
-        let to_screen = |pt: Vec2| rect.min + pt * zoom;
-        let to_world = |pos: egui::Pos2| (pos - rect.min) / zoom;
+    pub fn handles(&mut self, viewport: CanvasViewport, ui: &egui::Ui) -> SessionOutcome {
         let bg_response = ui.interact(
             ui.clip_rect(),
             ui.id().with("line_curve_bg"),
             egui::Sense::click_and_drag(),
         );
         let mut changed = false;
-        let screen_pts = self.points.map(to_screen);
+        let screen_pts = self.points.map(|p| viewport.to_screen(p));
 
         for (idx, pos) in screen_pts.into_iter().enumerate() {
-            let response = ui.interact(
-                Rect::from_center_size(pos, Vec2::splat(15.0)),
-                ui.id().with(("line_curve_pt", idx)),
-                egui::Sense::drag(),
-            );
-            if response.dragged() {
-                ui.ctx().set_cursor_icon(CursorIcon::Grabbing);
-            } else if response.hovered() {
-                ui.ctx().set_cursor_icon(CursorIcon::Grab);
-            }
-            if response.drag_started()
-                && let Some(pointer) = response.interact_pointer_pos()
+            let response = handle_response(ui, pos, 15.0, ("line_curve_pt", idx));
+            set_grab_cursor(ui.ctx(), &response);
+            let grip = CurveGrip::Point(idx);
+            let points = self.points;
+            if let Some((_, mut next)) =
+                track_handle_drag(&mut self.dragging, grip, &response, viewport, false, || {
+                    points
+                })
             {
-                let origin = to_world(pointer - response.total_drag_delta().unwrap_or_default());
-                self.dragging = Some((idx, self.points, origin));
-            }
-            if let Some((active, _orig_pts, _origin)) = self.dragging
-                && active == idx
-            {
-                if response.drag_stopped() {
-                    self.dragging = None;
-                }
-                if let Some(pointer) = response.interact_pointer_pos() {
-                    let mut next = to_world(pointer);
-                    let constrain = ui.ctx().input(|i| i.modifiers.shift);
-                    if constrain && idx == 0 {
-                        next = snap_if(self.points[3], next, true);
-                    } else if constrain && idx == 3 {
-                        next = snap_if(self.points[0], next, true);
+                if ui.ctx().input(|i| i.modifiers.shift) {
+                    match idx {
+                        0 => next = snap_if(self.points[3], next, true),
+                        3 => next = snap_if(self.points[0], next, true),
+                        _ => {}
                     }
-                    self.points[idx] = next;
-                    changed = true;
                 }
-            }
-        }
-
-        // Dragging canvas moves the whole curve cleanly if not on control handle
-        if bg_response.drag_started()
-            && self.dragging.is_none()
-            && let Some(pointer) = bg_response.interact_pointer_pos()
-        {
-            let origin = to_world(pointer - bg_response.total_drag_delta().unwrap_or_default());
-            self.dragging = Some((usize::MAX, self.points, origin));
-        }
-        if let Some((usize::MAX, orig_pts, origin)) = self.dragging {
-            if bg_response.drag_stopped() {
-                self.dragging = None;
-            }
-            if let Some(pointer) = bg_response.interact_pointer_pos() {
-                let delta = to_world(pointer) - origin;
-                for (i, p) in self.points.iter_mut().enumerate() {
-                    *p = orig_pts[i] + delta;
-                }
+                self.points[idx] = next;
                 changed = true;
             }
         }
 
+        // Dragging the canvas away from a control handle moves the whole curve.
+        let points = self.points;
+        if let Some((drag, current)) = track_handle_drag(
+            &mut self.dragging,
+            CurveGrip::Body,
+            &bg_response,
+            viewport,
+            true,
+            || points,
+        ) {
+            let delta = current - drag.origin;
+            self.points = drag.start.map(|p| p + delta);
+            changed = true;
+        }
+
         let painter = ui.painter();
+        let accent = ui.visuals().selection.stroke.color;
         paint_dashed_line(
             painter,
             &[screen_pts[0], screen_pts[1], screen_pts[2], screen_pts[3]],
@@ -583,78 +587,85 @@ impl LineCurveSession {
             let fill = if idx == 0 || idx == 3 {
                 Color32::WHITE
             } else {
-                Color32::from_rgb(103, 75, 195)
+                accent
             };
             painter.circle(pos, 5.0, fill, Stroke::new(1.2_f32, Color32::BLACK));
         }
 
-        if bg_response.clicked() && self.dragging.is_none() && !changed {
-            SessionOutcome::Commit
-        } else if changed {
-            SessionOutcome::Changed
-        } else {
-            SessionOutcome::None
-        }
+        SessionOutcome::from_interaction(bg_response.clicked(), self.dragging.is_none(), changed)
     }
 }
 
-#[derive(Clone)]
-pub struct ShapeSession {
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ShapeParams {
     pub kind: ShapeKind,
-    pub bounds: (Vec2, Vec2),
-    pub affine: Affine,
-    pub freeform_pts: Vec<Vec2>,
     pub fill_mode: ShapeFillMode,
     pub thickness: u32,
     pub corner_radius: f32,
     pub pattern: FillPattern,
+    pub blend: StrokeBlend,
+}
+
+impl Default for ShapeParams {
+    fn default() -> Self {
+        Self {
+            kind: ShapeKind::Rectangle,
+            fill_mode: ShapeFillMode::Both,
+            thickness: 2,
+            corner_radius: 8.0,
+            pattern: FillPattern::Solid,
+            blend: StrokeBlend::Normal,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum ShapeGrip {
+    Corner(usize),
+    Rotate,
+    Body,
+}
+
+#[derive(Clone)]
+pub struct ShapeSession {
+    pub bounds: (Vec2, Vec2),
+    pub affine: Affine,
+    pub freeform_pts: Vec<Vec2>,
     pub outline_color: Pixel,
     pub fill_color: Pixel,
-    pub blend: StrokeBlend,
-    dragging: Option<(usize, Affine, Vec2)>,
+    pub params: ShapeParams,
+    dragging: Option<HandleDrag<ShapeGrip, Affine>>,
 }
 
 impl ShapeSession {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
-        kind: ShapeKind,
         start: Vec2,
         end: Vec2,
-        fill_mode: ShapeFillMode,
-        thickness: u32,
-        corner_radius: f32,
-        pattern: FillPattern,
         outline_color: Pixel,
         fill_color: Pixel,
-        blend: StrokeBlend,
+        mut params: ShapeParams,
     ) -> Self {
+        params.thickness = params.thickness.max(1);
         let min = vec2(start.x.min(end.x), start.y.min(end.y));
         let max = vec2(start.x.max(end.x), start.y.max(end.y));
         let center = (min + max) * 0.5;
-        let mut affine = Affine::centered((1, 1));
-        affine.center = (f64::from(center.x), f64::from(center.y));
         Self {
-            kind,
             bounds: (min, max),
-            affine,
-            freeform_pts: if kind == ShapeKind::Freeform {
+            affine: Affine::centered_on((f64::from(center.x), f64::from(center.y))),
+            freeform_pts: if params.kind == ShapeKind::Freeform {
                 vec![start]
             } else {
                 Vec::new()
             },
-            fill_mode,
-            thickness: thickness.max(1),
-            corner_radius,
-            pattern,
             outline_color,
             fill_color,
-            blend,
+            params,
             dragging: None,
         }
     }
 
     pub fn set_creation_bounds(&mut self, anchor: Vec2, current: Vec2, constrain: bool) {
-        if self.kind == ShapeKind::Freeform {
+        if self.params.kind == ShapeKind::Freeform {
             if self
                 .freeform_pts
                 .last()
@@ -682,7 +693,7 @@ impl ShapeSession {
     }
 
     pub fn nudge(&mut self, dx: f32, dy: f32) {
-        if self.kind == ShapeKind::Freeform {
+        if self.params.kind == ShapeKind::Freeform {
             let d = vec2(dx, dy);
             for p in &mut self.freeform_pts {
                 *p += d;
@@ -702,83 +713,80 @@ impl ShapeSession {
     ) -> Vec<Pixel> {
         let mut out = base_layer.to_vec();
         let (min, max) = self.bounds;
-        if self.kind != ShapeKind::Freeform
+        if self.params.kind != ShapeKind::Freeform
             && (max.x - min.x).abs() < 0.5
             && (max.y - min.y).abs() < 0.5
         {
             return out;
         }
-        if self.kind == ShapeKind::Freeform && self.freeform_pts.len() < 2 {
+        if self.params.kind == ShapeKind::Freeform && self.freeform_pts.len() < 2 {
             return out;
         }
 
-        let scale = match aa_mode {
-            AaMode::Analytical => 1.0_f32,
-            AaMode::Ssaa4x4 => 4.0_f32,
-        };
+        let scale = aa_mode.path_scale();
         let mut fill_path = build_shape_path(
-            self.kind,
+            self.params.kind,
             self.bounds,
-            self.corner_radius,
+            self.params.corner_radius,
             &self.freeform_pts,
             self.affine,
             scale,
         );
-        let do_fill = matches!(self.fill_mode, ShapeFillMode::Fill | ShapeFillMode::Both)
-            && !(self.kind == ShapeKind::Freeform && self.freeform_pts.len() < 3);
-        let do_outline = matches!(self.fill_mode, ShapeFillMode::Outline | ShapeFillMode::Both);
+        let do_fill = matches!(
+            self.params.fill_mode,
+            ShapeFillMode::Fill | ShapeFillMode::Both
+        ) && !(self.params.kind == ShapeKind::Freeform
+            && self.freeform_pts.len() < 3);
+        let do_outline = matches!(
+            self.params.fill_mode,
+            ShapeFillMode::Outline | ShapeFillMode::Both
+        );
 
         if do_fill {
             let fill_map = rasterize_path(&fill_path, RULE_EVENODD, size, aa_mode);
-            let fg = if self.fill_mode == ShapeFillMode::Fill {
+            let fg = if self.params.fill_mode == ShapeFillMode::Fill {
                 self.outline_color
             } else {
                 self.fill_color
             };
-            let bg = if self.fill_mode == ShapeFillMode::Fill {
+            let bg = if self.params.fill_mode == ShapeFillMode::Fill {
                 self.fill_color
             } else {
                 self.outline_color
             };
-            apply_coverage_map(
+            tolerance::blend_coverage_in_place(
                 &mut out,
-                base_layer,
                 size,
                 selection,
-                &fill_map,
-                self.blend,
-                |pt| self.pattern.sample(pt.0, pt.1, fg, bg),
+                fill_map,
+                self.params.blend,
+                |pt| self.params.pattern.sample(pt.0, pt.1, fg, bg),
             );
         }
         if do_outline {
-            let style = DStyle {
-                width: (f64::from(self.thickness.max(1)) * f64::from(scale)).max(0.2),
-                pat: dash_pattern(DASH_SOLID),
-                join: JOIN_ROUND,
-                cap0: LCAP_ROUND,
-                cap1: LCAP_ROUND,
-                dcap: LCAP_FLAT,
-                offset: 0.0,
-                miter: 4.0,
-            };
+            let style = stroke_style(
+                self.params.thickness,
+                scale,
+                DASH_SOLID,
+                LCAP_ROUND,
+                LCAP_ROUND,
+            );
             dash_stroke(&mut fill_path, &style);
             let stroke_map = rasterize_path(&fill_path, RULE_NONZERO, size, aa_mode);
-            let base_after_fill = out.clone();
-            apply_coverage_map(
+            tolerance::blend_coverage_in_place(
                 &mut out,
-                &base_after_fill,
                 size,
                 selection,
-                &stroke_map,
-                self.blend,
+                stroke_map,
+                self.params.blend,
                 |_| self.outline_color,
             );
         }
         out
     }
 
-    pub fn handles(&mut self, rect: Rect, zoom: f32, ui: &egui::Ui) -> SessionOutcome {
-        if self.kind == ShapeKind::Freeform {
+    pub fn handles(&mut self, viewport: CanvasViewport, ui: &egui::Ui) -> SessionOutcome {
+        if self.params.kind == ShapeKind::Freeform {
             let bg_response = ui.interact(
                 ui.clip_rect(),
                 ui.id().with("shape_freeform_bg"),
@@ -789,26 +797,17 @@ impl ShapeSession {
                 let mut pts: Vec<_> = self
                     .freeform_pts
                     .iter()
-                    .map(|&p| rect.min + p * zoom)
+                    .map(|&p| viewport.to_screen(p))
                     .collect();
                 pts.push(pts[0]);
                 paint_dashed_line(painter, &pts);
             }
-            return if bg_response.clicked() {
-                SessionOutcome::Commit
-            } else {
-                SessionOutcome::None
-            };
+            return SessionOutcome::from_interaction(bg_response.clicked(), true, false);
         }
 
         let (min, max) = self.bounds;
         let corners = [min, vec2(max.x, min.y), max, vec2(min.x, max.y)];
-        let project = |a: Affine, pt: Vec2| {
-            let (x, y) = a.forward((f64::from(pt.x), f64::from(pt.y)));
-            rect.min + zoom * vec2(x as f32, y as f32)
-        };
-        let to_world = |pos: egui::Pos2| (pos - rect.min) / zoom;
-        let points = corners.map(|p| project(self.affine, p));
+        let points = corners.map(|p| viewport.project(self.affine, p));
         let top = points[0].lerp(points[1], 0.5);
         let box_center = points[0].lerp(points[2], 0.5);
         let top_dir = top - box_center;
@@ -825,146 +824,73 @@ impl ShapeSession {
         );
         let mut changed = false;
 
-        // 0..=3 corners, 4 rotate, 99 bg move
         let targets = [
-            (0usize, points[0], CursorIcon::ResizeNwSe),
-            (1, points[1], CursorIcon::ResizeNeSw),
-            (2, points[2], CursorIcon::ResizeNwSe),
-            (3, points[3], CursorIcon::ResizeNeSw),
-            (4, rotation, CursorIcon::Grab),
+            (ShapeGrip::Corner(0), points[0]),
+            (ShapeGrip::Corner(1), points[1]),
+            (ShapeGrip::Corner(2), points[2]),
+            (ShapeGrip::Corner(3), points[3]),
+            (ShapeGrip::Rotate, rotation),
         ];
+        let world = |v: Vec2| (f64::from(v.x), f64::from(v.y));
 
-        for (idx, pos, cursor) in targets {
-            let resp = ui.interact(
-                Rect::from_center_size(pos, Vec2::splat(14.0)),
-                ui.id().with(("shape_handle", idx)),
-                egui::Sense::drag(),
-            );
-            if resp.dragged() || resp.hovered() {
-                ui.ctx().set_cursor_icon(cursor);
-            }
-            if resp.drag_started()
-                && let Some(ptr) = resp.interact_pointer_pos()
-            {
-                let origin = to_world(ptr - resp.total_drag_delta().unwrap_or_default());
-                self.dragging = Some((idx, self.affine, origin));
-            }
-            if let Some((active, start, origin)) = self.dragging
-                && active == idx
-            {
-                if resp.drag_stopped() {
-                    self.dragging = None;
+        for (grip, pos) in targets {
+            let resp = handle_response(ui, pos, 14.0, ("shape_handle", grip));
+            match grip {
+                ShapeGrip::Corner(idx) if resp.hovered() || resp.dragged() => {
+                    let base_deg = if idx.is_multiple_of(2) { 45.0 } else { 135.0 };
+                    ui.ctx()
+                        .set_cursor_icon(resize_cursor(self.affine.degrees as f32 + base_deg));
                 }
-                if let Some(ptr) = resp.interact_pointer_pos() {
-                    let current = to_world(ptr);
-                    if idx == 4 {
-                        let c = vec2(
-                            (start.center.0 + start.shift.0) as f32,
-                            (start.center.1 + start.shift.1) as f32,
-                        );
-                        let mut deg =
-                            f64::from(((current - c).angle() - (origin - c).angle()).to_degrees());
-                        if ui.ctx().input(|i| i.modifiers.shift) {
-                            deg = (deg / 15.0).round() * 15.0;
-                        }
-                        self.affine.degrees = start.degrees + deg;
-                    } else {
-                        let opp_corner = corners[(idx + 2) % 4];
-                        let opp_world =
-                            start.forward((f64::from(opp_corner.x), f64::from(opp_corner.y)));
-                        let pivot = vec2(opp_world.0 as f32, opp_world.1 as f32);
-                        let rot =
-                            egui::emath::Rot2::from_angle(-(start.degrees as f32).to_radians());
-                        let from = rot * (origin - pivot);
-                        let to = rot * (current - pivot);
-                        let rx = if from.x.abs() < 0.01 {
-                            1.0
-                        } else {
-                            f64::from(to.x / from.x)
-                        };
-                        let ry = if from.y.abs() < 0.01 {
-                            1.0
-                        } else {
-                            f64::from(to.y / from.y)
-                        };
-                        let (rx, ry) = if ui.ctx().input(|i| i.modifiers.shift) {
-                            let u = if (rx - 1.0).abs() > (ry - 1.0).abs() {
-                                rx
-                            } else {
-                                ry
-                            };
-                            (u, u)
-                        } else {
-                            (rx, ry)
-                        };
-                        self.affine.scale = (
-                            (start.scale.0 * rx).clamp(0.02, 32.0),
-                            (start.scale.1 * ry).clamp(0.02, 32.0),
-                        );
-                        let mut temp = start;
-                        temp.scale = self.affine.scale;
-                        let temp_opp =
-                            temp.forward((f64::from(opp_corner.x), f64::from(opp_corner.y)));
-                        self.affine.shift = (
-                            start.shift.0 + (opp_world.0 - temp_opp.0),
-                            start.shift.1 + (opp_world.1 - temp_opp.1),
-                        );
-                    }
-                    changed = true;
+                ShapeGrip::Rotate => set_grab_cursor(ui.ctx(), &resp),
+                _ => {}
+            }
+            let affine = self.affine;
+            let Some((drag, current)) =
+                track_handle_drag(&mut self.dragging, grip, &resp, viewport, false, || affine)
+            else {
+                continue;
+            };
+            let shift = ui.ctx().input(|i| i.modifiers.shift);
+            self.affine = match grip {
+                ShapeGrip::Corner(idx) => drag.start.scale_from_anchor(
+                    world(drag.origin),
+                    world(current),
+                    world(corners[(idx + 2) % 4]),
+                    true,
+                    true,
+                    false,
+                    shift,
+                    0.02,
+                ),
+                // `Body` is only dragged through the background response below.
+                ShapeGrip::Rotate | ShapeGrip::Body => {
+                    drag.start
+                        .rotate_from_drag(world(drag.origin), world(current), shift)
                 }
-            }
+            };
+            changed = true;
         }
 
-        if bg_response.drag_started()
-            && self.dragging.is_none()
-            && let Some(ptr) = bg_response.interact_pointer_pos()
-        {
-            let origin = to_world(ptr - bg_response.total_drag_delta().unwrap_or_default());
-            self.dragging = Some((99, self.affine, origin));
-        }
-        if let Some((99, start, origin)) = self.dragging {
-            if bg_response.drag_stopped() {
-                self.dragging = None;
-            }
-            if let Some(ptr) = bg_response.interact_pointer_pos() {
-                let d = to_world(ptr) - origin;
-                self.affine.shift = (
-                    start.shift.0 + f64::from(d.x),
-                    start.shift.1 + f64::from(d.y),
-                );
-                changed = true;
-            }
-        }
-
-        let painter = ui.painter();
-        paint_dashed_line(
-            painter,
-            &[points[0], points[1], points[2], points[3], points[0]],
-        );
-        painter.line_segment([top, rotation], Stroke::new(1.0_f32, Color32::WHITE));
-        painter.circle(
-            rotation,
-            5.0,
-            Color32::WHITE,
-            Stroke::new(1.0_f32, Color32::BLACK),
-        );
-        for pt in points {
-            painter.rect(
-                Rect::from_center_size(pt, Vec2::splat(8.0)),
-                1,
-                Color32::WHITE,
-                Stroke::new(1.0_f32, Color32::BLACK),
-                egui::StrokeKind::Inside,
+        let affine = self.affine;
+        if let Some((drag, current)) = track_handle_drag(
+            &mut self.dragging,
+            ShapeGrip::Body,
+            &bg_response,
+            viewport,
+            true,
+            || affine,
+        ) {
+            let d = current - drag.origin;
+            self.affine.shift = (
+                drag.start.shift.0 + f64::from(d.x),
+                drag.start.shift.1 + f64::from(d.y),
             );
+            changed = true;
         }
 
-        if bg_response.clicked() && self.dragging.is_none() && !changed {
-            SessionOutcome::Commit
-        } else if changed {
-            SessionOutcome::Changed
-        } else {
-            SessionOutcome::None
-        }
+        paint_affine_box(ui.painter(), points, &[], top, rotation);
+
+        SessionOutcome::from_interaction(bg_response.clicked(), self.dragging.is_none(), changed)
     }
 }
 
@@ -978,15 +904,11 @@ fn build_shape_path(
 ) -> GfxPath {
     let mut path = GfxPath::default();
     if kind == ShapeKind::Freeform {
-        if let Some(&first) = freeform_pts.first() {
-            path.move_f(first.x * scale, first.y * scale);
-            for &pt in &freeform_pts[1..] {
-                path.line_f(pt.x * scale, pt.y * scale);
-            }
-            if freeform_pts.len() >= 3 {
-                path.close();
-            }
-        }
+        trace_path(
+            &mut path,
+            freeform_pts.iter().map(|pt| (pt.x * scale, pt.y * scale)),
+            freeform_pts.len() >= 3,
+        );
         return path;
     }
 
@@ -999,17 +921,7 @@ fn build_shape_path(
         (wx as f32 * scale, wy as f32 * scale)
     };
     let poly = |pts: &[(f32, f32)], closed: bool, p: &mut GfxPath| {
-        if let Some(&(x, y)) = pts.first() {
-            let (px, py) = tx(x, y);
-            p.move_f(px, py);
-            for &(nx, ny) in &pts[1..] {
-                let (px, py) = tx(nx, ny);
-                p.line_f(px, py);
-            }
-            if closed {
-                p.close();
-            }
-        }
+        trace_path(p, pts.iter().map(|&(x, y)| tx(x, y)), closed);
     };
 
     match kind {
@@ -1028,7 +940,7 @@ fn build_shape_path(
                     &mut path,
                 );
             } else {
-                let k = 0.552_284_8_f32;
+                let k = BEZIER_CIRCLE_KAPPA;
                 let (p0x, p0y) = tx(rx, 0.0);
                 path.move_f(p0x, p0y);
                 let l = tx(1.0 - rx, 0.0);
@@ -1059,7 +971,7 @@ fn build_shape_path(
             }
         }
         ShapeKind::Ellipse => {
-            let k = 0.552_284_8_f32 * 0.5;
+            let k = BEZIER_CIRCLE_KAPPA * 0.5;
             let (p0x, p0y) = tx(0.5, 0.0);
             path.move_f(p0x, p0y);
             path.cubic_f(tx(0.5 + k, 0.0), tx(1.0, 0.5 - k), tx(1.0, 0.5));
@@ -1085,63 +997,40 @@ fn build_shape_path(
         ),
         ShapeKind::Triangle => poly(&[(0.5, 0.0), (1.0, 1.0), (0.0, 1.0)], true, &mut path),
         ShapeKind::RightTriangle => poly(&[(0.0, 0.0), (1.0, 1.0), (0.0, 1.0)], true, &mut path),
-        ShapeKind::Pentagon => regular_polygon(5, &tx, &mut path),
-        ShapeKind::Hexagon => regular_polygon(6, &tx, &mut path),
-        ShapeKind::Star4 => star_polygon(4, 0.38, &tx, &mut path),
-        ShapeKind::Star5 => star_polygon(5, 0.38, &tx, &mut path),
-        ShapeKind::Star6 => star_polygon(6, 0.45, &tx, &mut path),
-        ShapeKind::ArrowRight => poly(
-            &[
-                (0.0, 0.28),
-                (0.58, 0.28),
-                (0.58, 0.05),
-                (1.0, 0.5),
-                (0.58, 0.95),
-                (0.58, 0.72),
-                (0.0, 0.72),
-            ],
-            true,
+        ShapeKind::Pentagon => radial_polygon(5, |_| 0.5, &tx, &mut path),
+        ShapeKind::Hexagon => radial_polygon(6, |_| 0.5, &tx, &mut path),
+        ShapeKind::Star4 => radial_polygon(
+            8,
+            |i| if i.is_multiple_of(2) { 0.5 } else { 0.5 * 0.38 },
+            &tx,
             &mut path,
         ),
-        ShapeKind::ArrowLeft => poly(
-            &[
-                (1.0, 0.28),
-                (0.42, 0.28),
-                (0.42, 0.05),
-                (0.0, 0.5),
-                (0.42, 0.95),
-                (0.42, 0.72),
-                (1.0, 0.72),
-            ],
-            true,
+        ShapeKind::Star5 => radial_polygon(
+            10,
+            |i| if i.is_multiple_of(2) { 0.5 } else { 0.5 * 0.38 },
+            &tx,
             &mut path,
         ),
-        ShapeKind::ArrowUp => poly(
-            &[
-                (0.28, 1.0),
-                (0.28, 0.42),
-                (0.05, 0.42),
-                (0.5, 0.0),
-                (0.95, 0.42),
-                (0.72, 0.42),
-                (0.72, 1.0),
-            ],
-            true,
+        ShapeKind::Star6 => radial_polygon(
+            12,
+            |i| if i.is_multiple_of(2) { 0.5 } else { 0.5 * 0.45 },
+            &tx,
             &mut path,
         ),
-        ShapeKind::ArrowDown => poly(
-            &[
-                (0.28, 0.0),
-                (0.28, 0.58),
-                (0.05, 0.58),
-                (0.5, 1.0),
-                (0.95, 0.58),
-                (0.72, 0.58),
-                (0.72, 0.0),
-            ],
-            true,
+        ShapeKind::ArrowRight => poly(&ARROW_RIGHT, true, &mut path),
+        ShapeKind::ArrowLeft => trace_path(
             &mut path,
+            ARROW_RIGHT.iter().map(|&(x, y)| tx(1.0 - x, y)),
+            true,
         ),
+        ShapeKind::ArrowUp => trace_path(
+            &mut path,
+            ARROW_RIGHT.iter().map(|&(x, y)| tx(y, 1.0 - x)),
+            true,
+        ),
+        ShapeKind::ArrowDown => {
+            trace_path(&mut path, ARROW_RIGHT.iter().map(|&(x, y)| tx(y, x)), true)
+        }
         ShapeKind::DoubleArrow => poly(
             &[
                 (0.0, 0.5),
@@ -1235,7 +1124,7 @@ fn build_shape_path(
             &mut path,
         ),
         ShapeKind::CalloutOval => {
-            let k = 0.552_284_8_f32 * 0.5;
+            let k = BEZIER_CIRCLE_KAPPA * 0.5;
             let (p0x, p0y) = tx(0.5, 0.0);
             path.move_f(p0x, p0y);
             path.cubic_f(tx(0.5 + k, 0.0), tx(1.0, 0.38 - k * 0.76), tx(1.0, 0.38));
@@ -1253,41 +1142,22 @@ fn build_shape_path(
     path
 }
 
-fn regular_polygon(sides: usize, tx: &impl Fn(f32, f32) -> (f32, f32), path: &mut GfxPath) {
-    for i in 0..sides {
-        let angle = -std::f32::consts::FRAC_PI_2 + i as f32 * std::f32::consts::TAU / sides as f32;
-        let (x, y) = tx(0.5 + 0.5 * angle.cos(), 0.5 + 0.5 * angle.sin());
-        if i == 0 {
-            path.move_f(x, y);
-        } else {
-            path.line_f(x, y);
-        }
-    }
-    path.close();
-}
-
-fn star_polygon(
-    points: usize,
-    inner_ratio: f32,
+fn radial_polygon(
+    count: usize,
+    radius_at: impl Fn(usize) -> f32,
     tx: &impl Fn(f32, f32) -> (f32, f32),
     path: &mut GfxPath,
 ) {
-    let total = points * 2;
-    for i in 0..total {
-        let angle = -std::f32::consts::FRAC_PI_2 + i as f32 * std::f32::consts::TAU / total as f32;
-        let r = if i.is_multiple_of(2) {
-            0.5
-        } else {
-            0.5 * inner_ratio
-        };
-        let (x, y) = tx(0.5 + r * angle.cos(), 0.5 + r * angle.sin());
-        if i == 0 {
-            path.move_f(x, y);
-        } else {
-            path.line_f(x, y);
-        }
-    }
-    path.close();
+    trace_path(
+        path,
+        (0..count).map(|i| {
+            let angle =
+                -std::f32::consts::FRAC_PI_2 + i as f32 * std::f32::consts::TAU / count as f32;
+            let r = radius_at(i);
+            tx(0.5 + r * angle.cos(), 0.5 + r * angle.sin())
+        }),
+        true,
+    );
 }
 
 #[cfg(test)]
@@ -1301,26 +1171,30 @@ mod tests {
         let mut line = LineCurveSession::new(
             vec2(1.0, 1.0),
             vec2(14.0, 13.0),
-            CurveKind::CubicBezier,
-            2,
-            DashPreset::Dash,
-            LineCapStyle::Round,
-            LineCapStyle::ArrowFilled,
             Pixel([20, 90, 220, 255]),
-            StrokeBlend::Normal,
+            LineCurveParams {
+                kind: CurveKind::CubicBezier,
+                thickness: 2,
+                dash: DashPreset::Dash,
+                start_cap: LineCapStyle::Round,
+                end_cap: LineCapStyle::ArrowFilled,
+                blend: StrokeBlend::Normal,
+            },
         );
         line.points[1] = vec2(2.0, 12.0);
         let shape = ShapeSession::new(
-            ShapeKind::Star5,
             vec2(1.0, 1.0),
             vec2(14.0, 14.0),
-            ShapeFillMode::Both,
-            2,
-            4.0,
-            FillPattern::Checker,
             Pixel([255, 0, 0, 255]),
             Pixel([0, 200, 0, 255]),
-            StrokeBlend::Normal,
+            ShapeParams {
+                kind: ShapeKind::Star5,
+                fill_mode: ShapeFillMode::Both,
+                thickness: 2,
+                corner_radius: 4.0,
+                pattern: FillPattern::Checker,
+                blend: StrokeBlend::Normal,
+            },
         );
         for mode in AaMode::ALL {
             let rendered = line.render_preview(&base, size, None, mode);

@@ -2,6 +2,42 @@ use super::i18n::text as tr;
 use eframe::egui::{self, Color32, Pos2, Rect, Vec2, pos2, vec2};
 use openpaintr::Document;
 
+pub const MIN_ZOOM: f32 = 0.01;
+pub const MAX_ZOOM: f32 = 32.0;
+pub const ZOOM_IN_FACTOR: f32 = 1.25;
+pub const ZOOM_OUT_FACTOR: f32 = 0.8;
+
+#[derive(Clone, Copy, Debug)]
+pub struct CanvasViewport {
+    pub rect: Rect,
+    pub zoom: f32,
+}
+
+impl CanvasViewport {
+    pub fn to_screen(self, world: Vec2) -> Pos2 {
+        self.rect.min + world * self.zoom
+    }
+
+    pub fn to_world(self, screen: Pos2) -> Vec2 {
+        (screen - self.rect.min) / self.zoom
+    }
+
+    pub fn to_pixel(self, screen: Pos2, size: (u32, u32)) -> Option<(u32, u32)> {
+        let p = self.to_world(screen);
+        (p.x >= 0.0 && p.y >= 0.0 && p.x < size.0 as f32 && p.y < size.1 as f32)
+            .then_some((p.x as u32, p.y as u32))
+    }
+
+    pub fn project(self, affine: super::geometry::Affine, pt: Vec2) -> Pos2 {
+        let (x, y) = affine.forward((f64::from(pt.x), f64::from(pt.y)));
+        self.to_screen(vec2(x as f32, y as f32))
+    }
+
+    pub fn drag_origin(self, response: &egui::Response, pointer: Pos2) -> Vec2 {
+        self.to_world(pointer - response.total_drag_delta().unwrap_or_default())
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
 pub enum Unit {
     #[default]

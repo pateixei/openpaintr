@@ -1,8 +1,7 @@
 use super::i18n::text as tr;
 use std::{
     collections::{BTreeMap, HashMap},
-    fs::{self, File},
-    io::{self, BufReader, BufWriter, Write},
+    fs, io,
     path::{Path, PathBuf},
 };
 
@@ -12,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use super::{
     dialogs::modal,
     mouse_shortcuts::{self, MouseBindings},
+    storage::JsonWrite,
 };
 
 const FILE_NAME: &str = "atalhos.json";
@@ -19,14 +19,28 @@ const VERSION: u32 = 1;
 const PAINT_NET: &str = "Paint.NET";
 const ADOBE: &str = "Adobe";
 
-// New commands get a stable ID and entries here and in docs/atalhos.schema.json.
-// Empty defaults identify actions without a corresponding reference shortcut.
-macro_rules! actions {
-    ($($action:ident : $id:literal, $label:literal, [$($paint:literal),*], [$($adobe:literal),*];)*) => {
-        #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-        pub enum Command { $($action),* }
+/// Shared surface of the keyboard (`Command`) and mouse (`MouseAction`)
+/// binding registries, used by generic profile code.
+pub(super) trait BindableAction: Copy + 'static {
+    const ALL: &'static [Self];
+    fn id(self) -> &'static str;
+    fn label_key(self) -> &'static str;
+    fn defaults(self, base: Base) -> &'static [&'static str];
+}
 
-        impl Command {
+/// Declares a binding registry enum: each entry has a stable ID (as used in
+/// `atalhos.json`), a translation key and the Paint.NET / Adobe defaults.
+macro_rules! bindable_actions {
+    (
+        $(#[$meta:meta])*
+        $vis:vis enum $ty:ident {
+            $($action:ident : $id:literal, $label:literal, [$($paint:literal),*], [$($adobe:literal),*];)*
+        }
+    ) => {
+        $(#[$meta])*
+        $vis enum $ty { $($action),* }
+
+        impl $ty {
             pub const ALL: &[Self] = &[$(Self::$action),*];
 
             pub fn id(self) -> &'static str {
@@ -34,18 +48,49 @@ macro_rules! actions {
             }
 
             pub fn label(self) -> &'static str {
-                tr(self.label_key())
+                $crate::gui::i18n::text(self.label_key())
             }
 
-            fn label_key(self) -> &'static str {
+            pub(super) fn label_key(self) -> &'static str {
                 match self { $(Self::$action => $label),* }
             }
 
-            fn defaults(self, base: Base) -> &'static [&'static str] {
+            pub(super) fn defaults(self, base: $crate::gui::shortcuts::Base) -> &'static [&'static str] {
+                use $crate::gui::shortcuts::Base;
                 match (self, base) {
                     $((Self::$action, Base::PaintNet) => &[$($paint),*],
                       (Self::$action, Base::Adobe) => &[$($adobe),*],)*
                 }
+            }
+        }
+
+        impl $crate::gui::shortcuts::BindableAction for $ty {
+            const ALL: &'static [Self] = Self::ALL;
+
+            fn id(self) -> &'static str {
+                Self::id(self)
+            }
+
+            fn label_key(self) -> &'static str {
+                Self::label_key(self)
+            }
+
+            fn defaults(self, base: $crate::gui::shortcuts::Base) -> &'static [&'static str] {
+                Self::defaults(self, base)
+            }
+        }
+    };
+}
+pub(super) use bindable_actions;
+
+// New commands get a stable ID and entries here and in docs/atalhos.schema.json.
+// Empty defaults identify actions without a corresponding reference shortcut.
+macro_rules! actions {
+    ($($action:ident : $id:literal, $label:literal, [$($paint:literal),*], [$($adobe:literal),*];)*) => {
+        bindable_actions! {
+            #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+            pub enum Command {
+                $($action : $id, $label, [$($paint),*], [$($adobe),*];)*
             }
         }
     };
@@ -149,6 +194,163 @@ impl Command {
     fn layers_only(self) -> bool {
         matches!(self, Self::InsertLayerInPanel | Self::DeleteLayerInPanel)
     }
+
+    fn cycle_group(self, base: Base) -> Option<u8> {
+        match self {
+            Self::Rectangle | Self::Ellipse => Some(1),
+            Self::Lasso | Self::Wand if base == Base::PaintNet => Some(1),
+            Self::MovePixels | Self::MoveMask if base == Base::PaintNet => Some(2),
+            Self::Bucket | Self::Gradient if base == Base::Adobe => Some(3),
+            Self::LineCurve | Self::Shape => Some(4),
+            Self::Brush | Self::Pencil if base == Base::Adobe => Some(5),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Default, Debug, PartialEq, Eq, Hash)]
+pub(super) struct ModFlags {
+    pub ctrl: bool,
+    pub alt: bool,
+    pub shift: bool,
+}
+
+impl ModFlags {
+    pub(super) fn from_modifiers(modifiers: Modifiers) -> Self {
+        Self {
+            ctrl: modifiers.ctrl,
+            alt: modifiers.alt,
+            shift: modifiers.shift,
+        }
+    }
+
+    pub(super) fn any(self) -> bool {
+        self.ctrl || self.alt || self.shift
+    }
+
+    pub(super) fn matches(self, modifiers: Modifiers) -> bool {
+        self.ctrl == modifiers.ctrl && self.alt == modifiers.alt && self.shift == modifiers.shift
+    }
+
+    pub(super) fn all_held(self, modifiers: Modifiers) -> bool {
+        (!self.ctrl || modifiers.ctrl)
+            && (!self.alt || modifiers.alt)
+            && (!self.shift || modifiers.shift)
+    }
+
+    pub(super) fn apply_token(&mut self, token: &str) -> bool {
+        match token.to_ascii_lowercase().as_str() {
+            "ctrl" if !self.ctrl => self.ctrl = true,
+            "alt" if !self.alt => self.alt = true,
+            "shift" if !self.shift => self.shift = true,
+            _ => return false,
+        }
+        true
+    }
+
+    pub(super) fn push_to(self, out: &mut String) {
+        for (enabled, modifier) in [
+            (self.ctrl, "Ctrl+"),
+            (self.alt, "Alt+"),
+            (self.shift, "Shift+"),
+        ] {
+            if enabled {
+                out.push_str(modifier);
+            }
+        }
+    }
+}
+
+pub(super) fn parse_key(name: &str) -> Option<Key> {
+    Key::from_name(name).or_else(|| {
+        Key::ALL
+            .iter()
+            .copied()
+            .find(|candidate| candidate.name().eq_ignore_ascii_case(name))
+    })
+}
+
+pub(super) fn backfill_missing<A: BindableAction>(
+    bindings: &mut BTreeMap<String, Vec<String>>,
+    base: Base,
+    mut is_valid: impl FnMut(&BTreeMap<String, Vec<String>>) -> bool,
+) {
+    let mut missing = Vec::new();
+    for &action in A::ALL {
+        if let std::collections::btree_map::Entry::Vacant(entry) =
+            bindings.entry(action.id().into())
+        {
+            entry.insert(Vec::new());
+            missing.push(action);
+        }
+    }
+    for action in missing {
+        for &value in action.defaults(base) {
+            bindings
+                .get_mut(action.id())
+                .expect("inserted missing action key")
+                .push(value.into());
+            if !is_valid(bindings) {
+                // On schema evolution a new default yields to an existing customization.
+                bindings
+                    .get_mut(action.id())
+                    .expect("inserted missing action key")
+                    .pop();
+            }
+        }
+    }
+}
+
+/// Error for a binding value that `action` cannot use (`key` takes the
+/// action label and the value).
+pub(super) fn binding_value_error(key: &str, action: impl BindableAction, value: &str) -> String {
+    super::i18n::format_logical(
+        key,
+        &[&super::i18n::logical_text(action.label_key()), &value],
+    )
+}
+
+/// Error for `binding` claimed by both `other` and `action` (`key` takes the
+/// binding and both action labels).
+pub(super) fn binding_conflict_error<A: BindableAction>(
+    key: &str,
+    binding: &str,
+    other: A,
+    action: A,
+) -> String {
+    super::i18n::format_logical(
+        key,
+        &[
+            &binding,
+            &super::i18n::logical_text(other.label_key()),
+            &super::i18n::logical_text(action.label_key()),
+        ],
+    )
+}
+
+pub(super) fn binding_editor_row(
+    ui: &mut egui::Ui,
+    label: impl Into<egui::WidgetText>,
+    id: &'static str,
+    text_width: f32,
+    values: &mut Vec<String>,
+    defaults: &[&str],
+) {
+    ui.label(label);
+    let mut text = values.join(";");
+    if ui
+        .add_sized(
+            [text_width, 19.0],
+            egui::TextEdit::singleline(&mut text).id_salt(id),
+        )
+        .changed()
+    {
+        *values = text.split(';').map(str::to_string).collect();
+    }
+    if ui.small_button(tr("preset-default")).clicked() {
+        *values = defaults.iter().map(ToString::to_string).collect();
+    }
+    ui.end_row();
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -176,81 +378,61 @@ impl Profile {
     }
 
     fn add_missing_actions(&mut self) {
-        let mut missing = Vec::new();
-        for &action in Command::ALL {
-            if let std::collections::btree_map::Entry::Vacant(entry) =
-                self.bindings.entry(action.id().into())
-            {
-                entry.insert(Vec::new());
-                missing.push(action);
-            }
-        }
-        for action in missing {
-            for value in action.defaults(self.base) {
-                self.bindings
-                    .get_mut(action.id())
-                    .unwrap()
-                    .push((*value).into());
-                if self.actions().is_err() {
-                    // On schema evolution a new default yields to an existing customization.
-                    self.bindings.get_mut(action.id()).unwrap().pop();
-                }
-            }
-        }
+        let base = self.base;
+        backfill_missing::<Command>(&mut self.bindings, base, |bindings| {
+            Self::actions_for(base, bindings).is_ok()
+        });
         mouse_shortcuts::add_missing(&mut self.bindings, self.base);
     }
 
     fn actions(&self) -> Result<Bindings, String> {
+        Self::actions_for(self.base, &self.bindings)
+    }
+
+    fn actions_for(
+        base: Base,
+        all_bindings: &BTreeMap<String, Vec<String>>,
+    ) -> Result<Bindings, String> {
         let mut mapped = Bindings::default();
         for &action in Command::ALL {
-            for binding in &self.bindings[action.id()] {
-                let chord = Chord::parse(binding).ok_or_else(|| {
-                    super::i18n::format_logical(
-                        "invalid-binding",
-                        &[&super::i18n::logical_text(action.label_key()), &binding],
-                    )
-                })?;
+            for binding in all_bindings.get(action.id()).into_iter().flatten() {
+                let chord = Chord::parse(binding)
+                    .ok_or_else(|| binding_value_error("invalid-binding", action, binding))?;
                 let candidates = mapped.entry((chord, action.layers_only())).or_default();
                 if candidates.contains(&action) {
                     continue;
                 }
                 let native_group = |member: Command| {
-                    let group = match member {
-                        Command::Rectangle | Command::Ellipse | Command::Lasso | Command::Wand => 1,
-                        Command::MovePixels | Command::MoveMask if self.base == Base::PaintNet => 2,
-                        Command::Bucket | Command::Gradient if self.base == Base::Adobe => 3,
-                        Command::LineCurve | Command::Shape => 4,
-                        Command::Brush | Command::Pencil if self.base == Base::Adobe => 5,
-                        _ => 0,
-                    };
-                    if member
-                        .defaults(self.base)
-                        .iter()
-                        .any(|value| Chord::parse(value) == Some(chord))
-                    {
-                        group
-                    } else {
-                        0
-                    }
+                    member
+                        .cycle_group(base)
+                        .filter(|_| {
+                            member
+                                .defaults(base)
+                                .iter()
+                                .any(|value| Chord::parse(value) == Some(chord))
+                        })
+                        .unwrap_or(0)
                 };
                 let group = native_group(action);
                 if let Some(other) = candidates
                     .iter()
                     .find(|&&other| group == 0 || native_group(other) != group)
                 {
-                    return Err(super::i18n::format_logical(
+                    return Err(binding_conflict_error(
                         "binding-conflict",
-                        &[
-                            &chord.label(),
-                            &super::i18n::logical_text(other.label_key()),
-                            &super::i18n::logical_text(action.label_key()),
-                        ],
+                        &chord.label(),
+                        *other,
+                        action,
                     ));
                 }
                 candidates.push(action);
             }
         }
         Ok(mapped)
+    }
+
+    fn compile(&self) -> Result<(Bindings, MouseBindings), String> {
+        Ok((self.actions()?, MouseBindings::compile(&self.bindings)?))
     }
 }
 
@@ -275,9 +457,17 @@ impl Default for Profiles {
 }
 
 impl Profiles {
+    fn validate_all(&self) -> Result<(), String> {
+        for (name, profile) in &self.profiles {
+            profile
+                .compile()
+                .map_err(|error| format!("{name}: {error}"))?;
+        }
+        Ok(())
+    }
+
     fn read(path: &Path) -> io::Result<Self> {
-        let mut config: Self =
-            serde_json::from_reader(BufReader::new(File::open(path)?)).map_err(io::Error::other)?;
+        let mut config: Self = super::storage::read_json(path)?;
         if config.version != VERSION {
             return Err(io::Error::new(
                 io::ErrorKind::Unsupported,
@@ -296,42 +486,32 @@ impl Profiles {
                 tr("no-active-profile"),
             ));
         }
-        for (name, profile) in &mut config.profiles {
+        for profile in config.profiles.values_mut() {
             profile.add_missing_actions();
-            profile.actions().map_err(|error| {
-                io::Error::new(io::ErrorKind::InvalidData, format!("{name}: {error}"))
-            })?;
-            MouseBindings::compile(&profile.bindings).map_err(|error| {
-                io::Error::new(io::ErrorKind::InvalidData, format!("{name}: {error}"))
-            })?;
         }
+        config
+            .validate_all()
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
         Ok(config)
     }
 
     fn write(&self, path: &Path, replace: bool) -> io::Result<()> {
-        let mut file = tempfile::NamedTempFile::new_in(path.parent().unwrap_or(Path::new(".")))?;
-        {
-            let mut writer = BufWriter::new(file.as_file_mut());
-            serde_json::to_writer_pretty(&mut writer, self).map_err(io::Error::other)?;
-            writeln!(writer)?;
-            writer.flush()?;
-        }
-        file.as_file().sync_all()?;
-        if replace {
-            file.persist(path)?;
-        } else {
-            file.persist_noclobber(path)?;
-        }
-        Ok(())
+        super::storage::write_json_atomic(
+            path,
+            self,
+            JsonWrite {
+                trailing_newline: true,
+                replace,
+                ..JsonWrite::PRETTY
+            },
+        )
     }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 struct Chord {
     key: Key,
-    ctrl: bool,
-    shift: bool,
-    alt: bool,
+    mods: ModFlags,
 }
 
 impl Chord {
@@ -344,24 +524,15 @@ impl Chord {
         } else {
             text.rsplit_once('+').unwrap_or(("", text))
         };
-        let key = key.trim();
-        let key = Key::from_name(key).or_else(|| {
-            Key::ALL
-                .iter()
-                .copied()
-                .find(|candidate| candidate.name().eq_ignore_ascii_case(key))
-        })?;
+        let key = parse_key(key.trim())?;
         let mut chord = Self::from_input(key, Modifiers::NONE);
         for value in modifiers
             .split('+')
             .map(str::trim)
             .filter(|value| !value.is_empty())
         {
-            match value.to_ascii_lowercase().as_str() {
-                "ctrl" => chord.ctrl = true,
-                "shift" => chord.shift = true,
-                "alt" => chord.alt = true,
-                _ => return None,
+            if !chord.mods.apply_token(value) {
+                return None;
             }
         }
         Some(chord)
@@ -370,32 +541,22 @@ impl Chord {
     fn from_input(key: Key, modifiers: Modifiers) -> Self {
         Self {
             key,
-            ctrl: modifiers.ctrl,
-            shift: modifiers.shift,
-            alt: modifiers.alt,
+            mods: ModFlags::from_modifiers(modifiers),
         }
     }
 
     fn label(self) -> String {
         let mut label = String::new();
-        for (enabled, modifier) in [
-            (self.ctrl, "Ctrl+"),
-            (self.alt, "Alt+"),
-            (self.shift, "Shift+"),
-        ] {
-            if enabled {
-                label.push_str(modifier);
-            }
-        }
+        self.mods.push_to(&mut label);
         label.push_str(self.key.name());
         label
     }
 
     fn clipboard_release(self) -> bool {
         matches!(self.key, Key::Copy | Key::Cut | Key::Paste)
-            || (self.ctrl && matches!(self.key, Key::C | Key::X | Key::V))
-            || (self.shift && matches!(self.key, Key::Delete | Key::Insert))
-            || (self.ctrl && self.key == Key::Insert)
+            || (self.mods.ctrl && matches!(self.key, Key::C | Key::X | Key::V))
+            || (self.mods.shift && matches!(self.key, Key::Delete | Key::Insert))
+            || (self.mods.ctrl && self.key == Key::Insert)
     }
 }
 
@@ -414,9 +575,9 @@ pub struct Shortcuts {
 impl Default for Shortcuts {
     fn default() -> Self {
         let config = Profiles::default();
-        let active = &config.profiles[&config.active];
-        let bindings = active.actions().expect("atalhos padrão válidos");
-        let mouse = MouseBindings::compile(&active.bindings).expect("gestos padrão válidos");
+        let (bindings, mouse) = config.profiles[&config.active]
+            .compile()
+            .expect("valid default shortcuts");
         Self {
             path: None,
             storage_error: None,
@@ -431,14 +592,10 @@ impl Default for Shortcuts {
 
 impl Shortcuts {
     pub fn from_executable() -> Self {
-        match std::env::current_exe().and_then(|exe| {
-            exe.parent()
-                .map(|parent| parent.join(FILE_NAME))
-                .ok_or_else(|| io::Error::other(tr("executable-dir-unavailable")))
-        }) {
+        match super::storage::exe_adjacent(FILE_NAME) {
             Ok(path) => Self::load(path),
-            Err(error) => Self {
-                storage_error: Some(error.to_string()),
+            Err(_) => Self {
+                storage_error: Some(tr("executable-dir-unavailable").to_owned()),
                 ..Self::default()
             },
         }
@@ -448,10 +605,11 @@ impl Shortcuts {
         let mut shortcuts = Self::default();
         match Profiles::read(&path) {
             Ok(config) => {
-                let active = &config.profiles[&config.active];
-                shortcuts.bindings = active.actions().expect("configuração validada");
-                shortcuts.mouse =
-                    MouseBindings::compile(&active.bindings).expect("gestos validados");
+                let (bindings, mouse) = config.profiles[&config.active]
+                    .compile()
+                    .expect("validated configuration");
+                shortcuts.bindings = bindings;
+                shortcuts.mouse = mouse;
                 shortcuts.config = config;
             }
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
@@ -465,12 +623,27 @@ impl Shortcuts {
         shortcuts
     }
 
+    fn hint_for(&self, id: &str) -> String {
+        self.config.profiles[&self.config.active]
+            .bindings
+            .get(id)
+            .map(|values| values.join(" / "))
+            .unwrap_or_default()
+    }
+
     pub fn hint(&self, action: Command) -> String {
-        self.config.profiles[&self.config.active].bindings[action.id()].join(" / ")
+        self.hint_for(action.id())
     }
 
     pub fn mouse_hint(&self, action: mouse_shortcuts::MouseAction) -> String {
-        self.config.profiles[&self.config.active].bindings[action.id()].join(" / ")
+        self.hint_for(action.id())
+    }
+
+    pub fn tooltip(&self, label_key: &str, action: Command) -> String {
+        super::i18n::format(
+            "shortcut-with-hint",
+            &[&super::i18n::logical_text(label_key), &self.hint(action)],
+        )
     }
 
     pub fn button(&self, ui: &egui::Ui, action: Command) -> egui::Button<'static> {
@@ -492,18 +665,11 @@ impl Shortcuts {
         })
     }
 
-    fn tool_cycle_group(action: Command) -> Option<u8> {
-        match action {
-            Command::Rectangle | Command::Ellipse => Some(1),
-            Command::Bucket | Command::Gradient => Some(3),
-            Command::LineCurve | Command::Shape => Some(4),
-            Command::Brush | Command::Pencil => Some(5),
-            _ => None,
-        }
-    }
-
     pub fn remember_tool(&mut self, action: Command) {
-        if let Some(group) = Self::tool_cycle_group(action) {
+        let base = self.config.profiles[&self.config.active].base;
+        if base == Base::Adobe
+            && let Some(group) = action.cycle_group(base)
+        {
             self.adobe_group_current.insert(group, action);
         }
     }
@@ -553,20 +719,27 @@ impl Shortcuts {
                     }
                     let base = self.config.profiles[&self.config.active].base;
                     let index = if base == Base::Adobe {
-                        let active = Self::tool_cycle_group(actions[0])
+                        let active = actions[0]
+                            .cycle_group(base)
                             .and_then(|g| self.adobe_group_current.get(&g).copied())
                             .unwrap_or(actions[0]);
                         let current = actions
                             .iter()
                             .position(|action| *action == active)
                             .unwrap_or(0);
-                        (current + usize::from(chord.shift)) % actions.len()
+                        (current + usize::from(chord.mods.shift)) % actions.len()
                     } else if let Some((previous, at, index)) = self.last_cycle
                         && previous == chord
                         && input.time - at <= 1.0
                     {
-                        (index + if chord.shift { actions.len() - 1 } else { 1 }) % actions.len()
-                    } else if chord.shift {
+                        (index
+                            + if chord.mods.shift {
+                                actions.len() - 1
+                            } else {
+                                1
+                            })
+                            % actions.len()
+                    } else if chord.mods.shift {
                         actions.len() - 1
                     } else {
                         0
@@ -654,30 +827,18 @@ impl Shortcuts {
                                 );
                             } else {
                                 for &action in Command::ALL {
-                                    ui.label(action.label());
                                     let values = profile
                                         .bindings
                                         .get_mut(action.id())
-                                        .expect("ação cadastrada");
-                                    let mut text = values.join(";");
-                                    if ui
-                                        .add_sized(
-                                            [175.0, 19.0],
-                                            egui::TextEdit::singleline(&mut text)
-                                                .id_salt(action.id()),
-                                        )
-                                        .changed()
-                                    {
-                                        *values = text.split(';').map(str::to_string).collect();
-                                    }
-                                    if ui.small_button(tr("preset-default")).clicked() {
-                                        *values = action
-                                            .defaults(profile.base)
-                                            .iter()
-                                            .map(ToString::to_string)
-                                            .collect();
-                                    }
-                                    ui.end_row();
+                                        .expect("registered action");
+                                    binding_editor_row(
+                                        ui,
+                                        action.label(),
+                                        action.id(),
+                                        175.0,
+                                        values,
+                                        action.defaults(profile.base),
+                                    );
                                 }
                             }
                         });
@@ -706,12 +867,9 @@ impl Shortcuts {
     }
 
     fn save_draft(&mut self, mut config: Profiles) -> Result<(), String> {
-        for (name, profile) in &mut config.profiles {
+        for profile in config.profiles.values_mut() {
             for &action in Command::ALL {
-                let values = profile
-                    .bindings
-                    .get_mut(action.id())
-                    .expect("ação conhecida");
+                let values = profile.bindings.get_mut(action.id()).expect("known action");
                 values.retain(|value| !value.trim().is_empty());
                 for value in values {
                     if let Some(chord) = Chord::parse(value) {
@@ -720,15 +878,9 @@ impl Shortcuts {
                 }
             }
             mouse_shortcuts::clean_empty(&mut profile.bindings);
-            profile
-                .actions()
-                .map_err(|error| format!("{name}: {error}"))?;
-            MouseBindings::compile(&profile.bindings)
-                .map_err(|error| format!("{name}: {error}"))?;
         }
-        let active = &config.profiles[&config.active];
-        let bindings = active.actions()?;
-        let mouse = MouseBindings::compile(&active.bindings)?;
+        config.validate_all()?;
+        let (bindings, mouse) = config.profiles[&config.active].compile()?;
         let path = self
             .path
             .as_ref()
@@ -776,10 +928,10 @@ mod tests {
     ) -> Vec<Command> {
         let chord = Chord::parse(input).unwrap();
         let modifiers = Modifiers {
-            ctrl: chord.ctrl,
-            command: chord.ctrl,
-            shift: chord.shift,
-            alt: chord.alt,
+            ctrl: chord.mods.ctrl,
+            command: chord.mods.ctrl,
+            shift: chord.mods.shift,
+            alt: chord.mods.alt,
             ..Modifiers::NONE
         };
         let event = egui::Event::Key {

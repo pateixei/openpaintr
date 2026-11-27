@@ -12,9 +12,10 @@ use eframe::egui::{
 use openpaintr::Pixel;
 
 use super::{
-    mouse_shortcuts::{BUTTONS, MouseAction, MouseBindings, Scope, Trigger},
+    mouse_shortcuts::{MouseAction, MouseBindings, Scope, Trigger},
     theme::Theme,
     tool_icons::{self, ActionIcon},
+    widgets::{paint_checker, pixel_to_color32},
 };
 
 const PALETTE_FILE: &str = "paleta.txt";
@@ -111,13 +112,55 @@ impl PalettePreset {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+struct EditableColor {
+    pixel: Pixel,
+    hsva: Hsva,
+}
+
+impl EditableColor {
+    fn new(pixel: Pixel) -> Self {
+        let [r, g, b, alpha] = pixel.0;
+        let mut hsva = Hsva::from_srgb([r, g, b]);
+        hsva.a = f32::from(alpha) / 255.0;
+        Self { pixel, hsva }
+    }
+
+    fn set_alpha(&mut self, alpha: u8) {
+        self.pixel.0[3] = alpha;
+        self.hsva.a = f32::from(alpha) / 255.0;
+    }
+
+    fn update_rgb(&mut self) {
+        self.pixel.0[..3].copy_from_slice(&self.hsva.to_srgb());
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RibbonSwatch {
+    Custom,
+    Black,
+    White,
+}
+
+impl RibbonSwatch {
+    const ALL: [Self; 3] = [Self::Custom, Self::Black, Self::White];
+
+    fn label(self) -> &'static str {
+        tr(match self {
+            Self::Custom => "color-ribbon-custom",
+            Self::Black => "color-ribbon-black",
+            Self::White => "color-ribbon-white",
+        })
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct ColorPalette {
-    pub primary: Pixel,
-    pub secondary: Pixel,
-    pub primary_hsva: Hsva,
-    pub secondary_hsva: Hsva,
-    pub editing_secondary: bool,
+    primary_swatches: [EditableColor; 3],
+    selected_swatch: RibbonSwatch,
+    secondary: EditableColor,
+    editing_secondary: bool,
     pub expanded: bool,
     pub swatches: Vec<[u8; 4]>,
     hex_draft: String,
@@ -127,9 +170,7 @@ pub struct ColorPalette {
 
 impl ColorPalette {
     pub fn new(primary: [u8; 3], secondary: [u8; 3]) -> Self {
-        let palette_path = std::env::current_exe()
-            .ok()
-            .and_then(|p| p.parent().map(|dir| dir.join(PALETTE_FILE)));
+        let palette_path = super::storage::exe_adjacent(PALETTE_FILE).ok();
         let loaded = palette_path
             .as_deref()
             .and_then(|p| fs::read_to_string(p).ok())
@@ -137,10 +178,13 @@ impl ColorPalette {
             .filter(|s| !s.is_empty());
         let p_rgba = [primary[0], primary[1], primary[2], 255];
         Self {
-            primary: Pixel(p_rgba),
-            secondary: Pixel([secondary[0], secondary[1], secondary[2], 255]),
-            primary_hsva: Hsva::from_srgb(primary),
-            secondary_hsva: Hsva::from_srgb(secondary),
+            primary_swatches: [
+                EditableColor::new(Pixel(p_rgba)),
+                EditableColor::new(Pixel([0, 0, 0, 255])),
+                EditableColor::new(Pixel([255, 255, 255, 255])),
+            ],
+            selected_swatch: RibbonSwatch::Custom,
+            secondary: EditableColor::new(Pixel([secondary[0], secondary[1], secondary[2], 255])),
             editing_secondary: false,
             expanded: false,
             swatches: loaded.unwrap_or_else(|| DEFAULT_SWATCHES.to_vec()),
@@ -151,66 +195,97 @@ impl ColorPalette {
     }
 
     pub fn swap(&mut self) {
-        std::mem::swap(&mut self.primary, &mut self.secondary);
-        std::mem::swap(&mut self.primary_hsva, &mut self.secondary_hsva);
+        let primary = self.primary_swatches[self.selected_swatch as usize];
+        self.primary_swatches[RibbonSwatch::Custom as usize] = self.secondary;
+        self.selected_swatch = RibbonSwatch::Custom;
+        self.secondary = primary;
     }
 
     pub fn reset(&mut self) {
-        self.primary = Pixel([0, 0, 0, 255]);
-        self.primary_hsva = Hsva::from_srgb([0, 0, 0]);
-        self.secondary = Pixel([255, 255, 255, 255]);
-        self.secondary_hsva = Hsva::from_srgb([255, 255, 255]);
+        self.set_primary(Pixel([0, 0, 0, 255]));
+        self.set_secondary(Pixel([255, 255, 255, 255]));
+    }
+
+    pub fn primary(&self) -> Pixel {
+        self.primary_swatches[self.selected_swatch as usize].pixel
+    }
+
+    pub fn secondary(&self) -> Pixel {
+        self.secondary.pixel
+    }
+
+    pub fn color(&self, secondary: bool) -> Pixel {
+        if secondary {
+            self.secondary()
+        } else {
+            self.primary()
+        }
+    }
+
+    pub fn pair(&self, swapped: bool) -> (Pixel, Pixel) {
+        if swapped {
+            (self.secondary(), self.primary())
+        } else {
+            (self.primary(), self.secondary())
+        }
     }
 
     pub fn set_primary(&mut self, px: Pixel) {
-        self.primary = px;
-        let mut hsva = Hsva::from_srgb([px.0[0], px.0[1], px.0[2]]);
-        hsva.a = f32::from(px.0[3]) / 255.0;
-        self.primary_hsva = hsva;
+        self.primary_swatches[RibbonSwatch::Custom as usize] = EditableColor::new(px);
+        self.selected_swatch = RibbonSwatch::Custom;
     }
 
     pub fn set_secondary(&mut self, px: Pixel) {
-        self.secondary = px;
-        let mut hsva = Hsva::from_srgb([px.0[0], px.0[1], px.0[2]]);
-        hsva.a = f32::from(px.0[3]) / 255.0;
-        self.secondary_hsva = hsva;
+        self.secondary = EditableColor::new(px);
     }
 
-    pub fn set_primary_hue(&mut self, hue: f32) {
+    fn set_primary_hue(&mut self, hue: f32) {
+        self.selected_swatch = RibbonSwatch::Custom;
         self.editing_secondary = false;
-        self.primary_hsva.h = hue.clamp(0.0, 1.0);
-        if self.primary_hsva.s < 0.02 {
-            self.primary_hsva.s = 1.0;
+        let color = &mut self.primary_swatches[RibbonSwatch::Custom as usize];
+        color.hsva.h = hue.clamp(0.0, 1.0);
+        if color.hsva.s < 0.02 {
+            color.hsva.s = 1.0;
         }
-        if self.primary_hsva.v < 0.02 {
-            self.primary_hsva.v = 1.0;
+        if color.hsva.v < 0.02 {
+            color.hsva.v = 1.0;
         }
-        let srgb = self.primary_hsva.to_srgb();
-        self.primary.0[0..3].copy_from_slice(&srgb);
+        color.update_rgb();
     }
 
-    pub fn active_pixel(&self) -> Pixel {
+    fn active_color(&self) -> EditableColor {
         if self.editing_secondary {
             self.secondary
         } else {
-            self.primary
+            self.primary_swatches[self.selected_swatch as usize]
         }
     }
 
-    pub fn set_active_rgba(&mut self, rgba: [u8; 4]) {
-        if self.editing_secondary {
-            self.set_secondary(Pixel(rgba));
+    fn set_active_rgba(&mut self, rgba: [u8; 4]) {
+        if self.active_color().pixel.0[..3] == rgba[..3] {
+            self.set_active_alpha(rgba[3]);
         } else {
-            self.set_primary(Pixel(rgba));
+            *self.edit_active_color() = EditableColor::new(Pixel(rgba));
         }
     }
 
-    fn active_mut(&mut self) -> (&mut Pixel, &mut Hsva) {
-        if self.editing_secondary {
-            (&mut self.secondary, &mut self.secondary_hsva)
+    fn set_active_alpha(&mut self, alpha: u8) {
+        let color = if self.editing_secondary {
+            &mut self.secondary
         } else {
-            (&mut self.primary, &mut self.primary_hsva)
+            &mut self.primary_swatches[self.selected_swatch as usize]
+        };
+        color.set_alpha(alpha);
+    }
+
+    fn edit_active_color(&mut self) -> &mut EditableColor {
+        if self.editing_secondary {
+            return &mut self.secondary;
         }
+        let color = self.primary_swatches[self.selected_swatch as usize];
+        self.selected_swatch = RibbonSwatch::Custom;
+        self.primary_swatches[RibbonSwatch::Custom as usize] = color;
+        &mut self.primary_swatches[RibbonSwatch::Custom as usize]
     }
 
     pub fn apply_preset(&mut self, preset: PalettePreset) {
@@ -223,7 +298,7 @@ impl ColorPalette {
     }
 
     pub fn add_current_swatch(&mut self) {
-        let current = self.active_pixel().0;
+        let current = self.active_color().pixel.0;
         if !self.swatches.contains(&current) {
             self.swatches.push(current);
             self.autosave();
@@ -231,34 +306,19 @@ impl ColorPalette {
     }
 
     pub fn parse_palette_txt(content: &str) -> Vec<[u8; 4]> {
-        let mut colors = Vec::new();
-        for raw in content.lines() {
-            let line = raw.trim();
-            if line.is_empty()
-                || line.starts_with(';')
-                || line.starts_with('#') && line.len() != 7 && line.len() != 9
-            {
-                continue;
-            }
-            let hex = line.trim_start_matches('#');
-            if hex.len() == 8
-                && let Ok(v) = u32::from_str_radix(hex, 16)
-            {
-                let a = ((v >> 24) & 0xff) as u8;
-                let r = ((v >> 16) & 0xff) as u8;
-                let g = ((v >> 8) & 0xff) as u8;
-                let b = (v & 0xff) as u8;
-                colors.push([r, g, b, a]);
-            } else if hex.len() == 6
-                && let Ok(v) = u32::from_str_radix(hex, 16)
-            {
-                let r = ((v >> 16) & 0xff) as u8;
-                let g = ((v >> 8) & 0xff) as u8;
-                let b = (v & 0xff) as u8;
-                colors.push([r, g, b, 255]);
-            }
-        }
-        colors
+        content
+            .lines()
+            .filter_map(|raw| {
+                let line = raw.trim();
+                if line.is_empty()
+                    || line.starts_with(';')
+                    || (line.starts_with('#') && line.len() != 7 && line.len() != 9)
+                {
+                    return None;
+                }
+                parse_hex(line)
+            })
+            .collect()
     }
 
     pub fn serialize_palette_txt(&self) -> String {
@@ -273,7 +333,8 @@ impl ColorPalette {
     }
 
     pub fn save_to(&self, path: &Path) -> io::Result<()> {
-        fs::write(path, self.serialize_palette_txt())
+        super::storage::ensure_parent_dir(path)?;
+        super::storage::atomic_write_bytes(path, self.serialize_palette_txt().as_bytes(), true)
     }
 
     pub fn load_from(&mut self, path: &Path) -> io::Result<()> {
@@ -305,8 +366,7 @@ pub enum PaletteAction {
 
 pub struct RibbonOutput {
     pub chevron_rect: Rect,
-    pub bar_rect: Rect,
-    pub preview_rect: Rect,
+    pub rect: Rect,
     pub toggle_clicked: bool,
 }
 
@@ -316,146 +376,151 @@ pub fn ribbon(
     ui: &mut egui::Ui,
     palette: &mut ColorPalette,
     open: bool,
+    mouse: &MouseBindings,
     theme: Theme,
     checker: &egui::TextureHandle,
 ) -> RibbonOutput {
     ui.set_height(RIBBON_CONTENT_HEIGHT);
-    let (preview_rect, bar_rect, chevron_rect, toggle_clicked) = ui
-        .horizontal(|ui| {
-            ui.set_height(RIBBON_CONTENT_HEIGHT);
-            ui.spacing_mut().item_spacing.x = 6.0;
+    let row = ui.horizontal(|ui| {
+        ui.set_height(RIBBON_CONTENT_HEIGHT);
+        ui.spacing_mut().item_spacing.x = 6.0;
 
-            // Left: 18x18 primary color preview square
-            let (preview_slot, preview_resp) =
+        let swatches = RibbonSwatch::ALL.map(|swatch| {
+            let (slot, response) =
                 ui.allocate_exact_size(vec2(18.0, RIBBON_CONTENT_HEIGHT), Sense::click());
-            let preview_rect = Rect::from_center_size(preview_slot.center(), vec2(18.0, 18.0));
-            let px = palette.primary;
-            let p = ui.painter();
-            if px.0[3] < 255 {
-                p.image(
-                    checker.id(),
-                    preview_rect,
-                    Rect::from_min_max(pos2(0.0, 0.0), pos2(2.0, 2.0)),
-                    Color32::WHITE,
-                );
-            }
-            p.rect_filled(
-                preview_rect,
-                CornerRadius::same(4),
-                Color32::from_rgba_unmultiplied(px.0[0], px.0[1], px.0[2], px.0[3]),
-            );
-            p.rect_stroke(
-                preview_rect,
-                CornerRadius::same(4),
-                Stroke::new(1.0_f32, theme.border_color()),
-                StrokeKind::Outside,
-            );
-            if preview_resp.clicked() {
+            let action = mouse.click(&response, Scope::ColorRibbonSwatch, false);
+            if action == Some(MouseAction::RibbonSwatchSecondary) {
+                palette.secondary = palette.primary_swatches[swatch as usize];
+            } else if action == Some(MouseAction::RibbonSwatchPrimary)
+                || (response.clicked() && !response.clicked_by(egui::PointerButton::Primary))
+            {
+                palette.selected_swatch = swatch;
                 palette.editing_secondary = false;
             }
-            preview_resp.on_hover_text(super::i18n::format(
-                "primary-color-value",
-                &[&format_hex(px.0)],
-            ));
-
-            // Middle: fill remaining space before the 26px right Chevron button
-            let chevron_w = 26.0_f32;
-            let gap = ui.spacing().item_spacing.x;
-            let bar_w = (ui.available_width() - chevron_w - gap).max(32.0);
-            let (bar_slot, bar_resp) =
-                ui.allocate_exact_size(vec2(bar_w, RIBBON_CONTENT_HEIGHT), Sense::click_and_drag());
-            let bar_rect = Rect::from_center_size(bar_slot.center(), vec2(bar_w, 16.0));
-            let radius = 8.0_f32.min(bar_rect.width() * 0.25);
-
-            if (bar_resp.hovered() || bar_resp.dragged()) && !bar_resp.is_pointer_button_down_on() {
-                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-            }
-            if (bar_resp.clicked() || bar_resp.dragged() || bar_resp.is_pointer_button_down_on())
-                && let Some(ptr) = bar_resp.interact_pointer_pos()
-            {
-                let span = (bar_rect.width() - 2.0 * radius).max(1.0);
-                let hue = ((ptr.x - (bar_rect.left() + radius)) / span).clamp(0.0, 1.0);
-                palette.set_primary_hue(hue);
-                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-            }
-
-            let left_cap_center = pos2(bar_rect.left() + radius, bar_rect.center().y);
-            let right_cap_center = pos2(bar_rect.right() - radius, bar_rect.center().y);
-            let red: Color32 = Hsva::new(0.0, 1.0, 1.0, 1.0).into();
-            let p = ui.painter();
-            p.circle_filled(left_cap_center, radius, red);
-            p.circle_filled(right_cap_center, radius, red);
-
-            let strip_rect = Rect::from_min_max(
-                pos2(left_cap_center.x, bar_rect.top()),
-                pos2(right_cap_center.x, bar_rect.bottom()),
-            );
-            let steps = 48usize;
-            let mut mesh = Mesh::default();
-            for i in 0..=steps {
-                let t = i as f32 / steps as f32;
-                let x = egui::lerp(strip_rect.left()..=strip_rect.right(), t);
-                let color: Color32 = Hsva::new(t, 1.0, 1.0, 1.0).into();
-                mesh.colored_vertex(pos2(x, strip_rect.top()), color);
-                mesh.colored_vertex(pos2(x, strip_rect.bottom()), color);
-            }
-            for i in 0..steps {
-                let base = (i * 2) as u32;
-                mesh.add_triangle(base, base + 1, base + 2);
-                mesh.add_triangle(base + 1, base + 3, base + 2);
-            }
-            p.add(mesh);
-            p.rect_stroke(
-                bar_rect,
-                CornerRadius::same(radius.round() as u8),
-                Stroke::new(1.0_f32, theme.border_color()),
-                StrokeKind::Outside,
-            );
-
-            // Indicator: white-ringed 12px circle aligned to active hue
-            let hue = palette.primary_hsva.h.clamp(0.0, 1.0);
-            let marker_x = egui::lerp(strip_rect.left()..=strip_rect.right(), hue);
-            let marker_pos = pos2(marker_x, bar_rect.center().y);
-            let marker_fill: Color32 = Hsva::new(hue, 1.0, 1.0, 1.0).into();
-            p.circle_stroke(
-                marker_pos,
-                6.5,
-                Stroke::new(1.0_f32, Color32::from_black_alpha(110)),
-            );
-            p.circle_filled(marker_pos, 6.0, marker_fill);
-            p.circle_stroke(marker_pos, 6.0, Stroke::new(2.0_f32, Color32::WHITE));
-
-            // Right: 26x24 Chevron toggle button
-            let chevron_resp = tool_icons::icon_button(
-                ui,
-                theme,
-                if open {
-                    ActionIcon::ChevronUp
-                } else {
-                    ActionIcon::ChevronDown
-                },
-                true,
-                open,
-                vec2(chevron_w, RIBBON_CONTENT_HEIGHT),
-                if open {
-                    tr("close-colors")
-                } else {
-                    tr("open-colors")
-                },
-            );
             (
-                preview_rect,
-                bar_rect,
-                chevron_resp.rect,
-                chevron_resp.clicked(),
+                swatch,
+                Rect::from_center_size(slot.center(), vec2(18.0, 18.0)),
+                response,
             )
-        })
-        .inner;
+        });
+
+        let primary = palette.primary();
+        let opacity = (u16::from(primary.0[3]) * 100 + 127) / 255;
+        if let Some(alpha) = alpha_bar(
+            ui,
+            theme,
+            vec2(108.0, RIBBON_CONTENT_HEIGHT),
+            primary,
+            checker,
+            &super::i18n::format("color-ribbon-opacity", &[&opacity]),
+        ) {
+            palette.editing_secondary = false;
+            palette.set_active_alpha(alpha);
+        }
+
+        // Middle: fill remaining space before the 26px right Chevron button
+        let chevron_w = 26.0_f32;
+        let gap = ui.spacing().item_spacing.x;
+        let bar_w = (ui.available_width() - chevron_w - gap).max(32.0);
+        let (bar_slot, bar_resp) =
+            ui.allocate_exact_size(vec2(bar_w, RIBBON_CONTENT_HEIGHT), Sense::click_and_drag());
+        let bar_rect = Rect::from_center_size(bar_slot.center(), vec2(bar_w, 16.0));
+        let radius = 8.0_f32.min(bar_rect.width() * 0.25);
+
+        if (bar_resp.hovered() || bar_resp.dragged()) && !bar_resp.is_pointer_button_down_on() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+        if (bar_resp.clicked() || bar_resp.dragged() || bar_resp.is_pointer_button_down_on())
+            && let Some(ptr) = bar_resp.interact_pointer_pos()
+        {
+            let span = (bar_rect.width() - 2.0 * radius).max(1.0);
+            let hue = ((ptr.x - (bar_rect.left() + radius)) / span).clamp(0.0, 1.0);
+            palette.set_primary_hue(hue);
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+
+        let left_cap_center = pos2(bar_rect.left() + radius, bar_rect.center().y);
+        let right_cap_center = pos2(bar_rect.right() - radius, bar_rect.center().y);
+        let red: Color32 = Hsva::new(0.0, 1.0, 1.0, 1.0).into();
+        let p = ui.painter();
+        p.circle_filled(left_cap_center, radius, red);
+        p.circle_filled(right_cap_center, radius, red);
+
+        let strip_rect = Rect::from_min_max(
+            pos2(left_cap_center.x, bar_rect.top()),
+            pos2(right_cap_center.x, bar_rect.bottom()),
+        );
+        paint_horizontal_gradient_mesh(p, strip_rect, 48, |t| Hsva::new(t, 1.0, 1.0, 1.0).into());
+        p.rect_stroke(
+            bar_rect,
+            CornerRadius::same(radius.round() as u8),
+            Stroke::new(1.0_f32, theme.border_color()),
+            StrokeKind::Outside,
+        );
+
+        // The spectrum edits the custom swatch.
+        let custom = palette.primary_swatches[RibbonSwatch::Custom as usize];
+        let hue = custom.hsva.h;
+        let marker_x = egui::lerp(strip_rect.left()..=strip_rect.right(), hue);
+        let marker_pos = pos2(marker_x, bar_rect.center().y);
+        let marker_fill: Color32 = Hsva::new(hue, 1.0, 1.0, 1.0).into();
+        p.circle_stroke(
+            marker_pos,
+            6.5,
+            Stroke::new(1.0_f32, Color32::from_black_alpha(110)),
+        );
+        p.circle_filled(marker_pos, 6.0, marker_fill);
+        p.circle_stroke(marker_pos, 6.0, Stroke::new(2.0_f32, Color32::WHITE));
+
+        for (swatch, rect, response) in swatches {
+            let pixel = palette.primary_swatches[swatch as usize].pixel;
+            let selected = swatch == palette.selected_swatch;
+            let border = if selected || response.has_focus() {
+                Stroke::new(1.5_f32, theme.accent())
+            } else {
+                Stroke::new(1.0_f32, theme.border_color())
+            };
+            paint_color_swatch(p, Some(checker), rect, pixel, 4.0, border);
+            response.widget_info(|| {
+                egui::WidgetInfo::selected(
+                    egui::WidgetType::SelectableLabel,
+                    ui.is_enabled(),
+                    selected,
+                    swatch.label(),
+                )
+            });
+            response
+                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                .on_hover_ui(|ui| {
+                    ui.label(swatch.label());
+                    ui.monospace(format_hex(pixel.0));
+                });
+        }
+
+        // Right: 26x24 Chevron toggle button
+        let chevron_resp = tool_icons::icon_button(
+            ui,
+            theme,
+            if open {
+                ActionIcon::ChevronUp
+            } else {
+                ActionIcon::ChevronDown
+            },
+            true,
+            open,
+            vec2(chevron_w, RIBBON_CONTENT_HEIGHT),
+            if open {
+                tr("close-colors")
+            } else {
+                tr("open-colors")
+            },
+        );
+        (chevron_resp.rect, chevron_resp.clicked())
+    });
     RibbonOutput {
-        chevron_rect,
-        bar_rect,
-        preview_rect,
-        toggle_clicked,
+        chevron_rect: row.inner.0,
+        rect: row.response.rect,
+        toggle_clicked: row.inner.1,
     }
 }
 
@@ -481,37 +546,22 @@ pub fn picker(
             palette.editing_secondary = true;
         }
         let draw_swatch = |rect: Rect, px: Pixel, selected: bool| {
-            let p = ui.painter();
-            let c = Color32::from_rgba_unmultiplied(px.0[0], px.0[1], px.0[2], px.0[3]);
-            if px.0[3] < 255 {
-                p.image(
-                    checker.id(),
-                    rect,
-                    Rect::from_min_max(pos2(0.0, 0.0), pos2(2.0, 2.0)),
-                    Color32::WHITE,
-                );
-            }
-            p.rect_filled(rect, CornerRadius::same(4), c);
-            p.rect_stroke(
-                rect,
-                CornerRadius::same(4),
-                Stroke::new(
-                    if selected { 1.8_f32 } else { 1.0_f32 },
-                    if selected {
-                        theme.accent()
-                    } else {
-                        theme.border_color()
-                    },
-                ),
-                StrokeKind::Outside,
+            let border = Stroke::new(
+                if selected { 1.8_f32 } else { 1.0_f32 },
+                if selected {
+                    theme.accent()
+                } else {
+                    theme.border_color()
+                },
             );
+            paint_color_swatch(ui.painter(), Some(checker), rect, px, 4.0, border);
         };
         if palette.editing_secondary {
-            draw_swatch(prim_rect, palette.primary, false);
-            draw_swatch(sec_rect, palette.secondary, true);
+            draw_swatch(prim_rect, palette.primary(), false);
+            draw_swatch(sec_rect, palette.secondary(), true);
         } else {
-            draw_swatch(sec_rect, palette.secondary, false);
-            draw_swatch(prim_rect, palette.primary, true);
+            draw_swatch(sec_rect, palette.secondary(), false);
+            draw_swatch(prim_rect, palette.primary(), true);
         }
         prim_resp.on_hover_text(tr("primary-color"));
         sec_resp.on_hover_text(tr("secondary-color"));
@@ -530,13 +580,10 @@ pub fn picker(
             palette.swap();
         }
         {
-            let (pixel, hsva) = palette.active_mut();
-            let mut rgb = [pixel.0[0], pixel.0[1], pixel.0[2]];
+            let [r, g, b, alpha] = palette.active_color().pixel.0;
+            let mut rgb = [r, g, b];
             if ui.color_edit_button_srgb(&mut rgb).changed() {
-                pixel.0[0..3].copy_from_slice(&rgb);
-                let prev_a = hsva.a;
-                *hsva = Hsva::from_srgb(rgb);
-                hsva.a = prev_a;
+                palette.set_active_rgba([rgb[0], rgb[1], rgb[2], alpha]);
             }
         }
         if ui
@@ -573,60 +620,47 @@ pub fn picker(
     let center = wheel_rect.center();
 
     let modifiers = ui.ctx().input(|i| i.modifiers);
-    if let Some(pointer) = response.interact_pointer_pos() {
-        let active_btn = ui.ctx().input(|input| {
-            BUTTONS
-                .into_iter()
-                .find(|&btn| input.pointer.button_down(btn) || input.pointer.button_pressed(btn))
-        });
-        if let Some(btn) = active_btn {
-            let delta = pointer - center;
-            let dist = delta.length();
-            if dist <= radius + 6.0 {
-                let h = (delta.y.atan2(delta.x) / TAU).rem_euclid(1.0);
-                let sat = (dist / radius).clamp(0.0, 1.0);
-                let action = mouse.at(ui.ctx(), Scope::ColorWheel, Trigger::Button(btn), modifiers);
-                let target_secondary = match action {
-                    Some(MouseAction::ColorSecondary) => true,
-                    Some(MouseAction::ColorPrimary) => false,
-                    _ => palette.editing_secondary,
-                };
-                palette.editing_secondary = target_secondary;
-                let (pixel, hsva) = if target_secondary {
-                    (&mut palette.secondary, &mut palette.secondary_hsva)
-                } else {
-                    (&mut palette.primary, &mut palette.primary_hsva)
-                };
-                match action {
-                    Some(MouseAction::ColorHue) => {
-                        hsva.h = h;
-                    }
-                    Some(MouseAction::ColorSaturation) => {
-                        hsva.s = sat;
-                    }
-                    Some(MouseAction::ColorSnap) => {
-                        hsva.h = snap_hue(h);
-                        hsva.s = sat;
-                    }
-                    Some(MouseAction::ColorSnapHue) => {
-                        hsva.h = snap_hue(h);
-                    }
-                    _ => {
-                        hsva.h = h;
-                        hsva.s = sat;
-                    }
+    if let Some(pointer) = response.interact_pointer_pos()
+        && let Some(btn) = MouseBindings::active_button(ui.ctx())
+    {
+        let delta = pointer - center;
+        let dist = delta.length();
+        if dist <= radius + 6.0 {
+            let h = (delta.y.atan2(delta.x) / TAU).rem_euclid(1.0);
+            let sat = (dist / radius).clamp(0.0, 1.0);
+            let action = mouse.at(ui.ctx(), Scope::ColorWheel, Trigger::Button(btn), modifiers);
+            let target_secondary = match action {
+                Some(MouseAction::ColorSecondary) => true,
+                Some(MouseAction::ColorPrimary) => false,
+                _ => palette.editing_secondary,
+            };
+            palette.editing_secondary = target_secondary;
+            let color = palette.edit_active_color();
+            let hsva = &mut color.hsva;
+            match action {
+                Some(MouseAction::ColorHue) => {
+                    hsva.h = h;
                 }
-                let srgb = hsva.to_srgb();
-                pixel.0[0..3].copy_from_slice(&srgb);
+                Some(MouseAction::ColorSaturation) => {
+                    hsva.s = sat;
+                }
+                Some(MouseAction::ColorSnap) => {
+                    hsva.h = snap_hue(h);
+                    hsva.s = sat;
+                }
+                Some(MouseAction::ColorSnapHue) => {
+                    hsva.h = snap_hue(h);
+                }
+                _ => {
+                    hsva.h = h;
+                    hsva.s = sat;
+                }
             }
+            color.update_rgb();
         }
     }
 
-    let active_hsva = if palette.editing_secondary {
-        palette.secondary_hsva
-    } else {
-        palette.primary_hsva
-    };
+    let active_hsva = palette.active_color().hsva;
     let steps = 48;
     let mut wheel = Mesh::default();
     wheel.colored_vertex(center, Hsva::new(0.0, 0.0, active_hsva.v, 1.0).into());
@@ -648,52 +682,35 @@ pub fn picker(
 
     // 3. Value / Brightness Gradient Bar + Opacity / Alpha Gradient Bar
     let bar_width = ui.available_width().max(80.0);
-    let (h, s, v_cur, a_cur) = {
-        let (_, hsva) = palette.active_mut();
-        (hsva.h, hsva.s, hsva.v, hsva.a)
-    };
+    let Hsva { h, s, v, .. } = active_hsva;
     if let Some(next_v) = gradient_bar(
         ui,
         theme,
-        "color_value_bar",
         vec2(bar_width, 13.0),
-        v_cur,
+        v,
         None,
         |t| Hsva::new(h, s, t, 1.0).into(),
         tr("brightness"),
     ) {
-        let (pixel, hsva) = palette.active_mut();
-        hsva.v = next_v;
-        let srgb = hsva.to_srgb();
-        pixel.0[0..3].copy_from_slice(&srgb);
+        let color = palette.edit_active_color();
+        color.hsva.v = next_v;
+        color.update_rgb();
     }
 
-    let full_rgb = Hsva::new(h, s, v_cur, 1.0).to_srgb();
-    if let Some(next_a) = gradient_bar(
+    if let Some(alpha) = alpha_bar(
         ui,
         theme,
-        "color_alpha_bar",
         vec2(bar_width, 13.0),
-        a_cur,
-        Some(checker),
-        |t| {
-            Color32::from_rgba_unmultiplied(
-                full_rgb[0],
-                full_rgb[1],
-                full_rgb[2],
-                (t * 255.0).round() as u8,
-            )
-        },
+        palette.active_color().pixel,
+        checker,
         tr("opacity"),
     ) {
-        let (pixel, hsva) = palette.active_mut();
-        hsva.a = next_a;
-        pixel.0[3] = (next_a * 255.0).round() as u8;
+        palette.set_active_alpha(alpha);
     }
 
     // 4. Expanded numeric RGB / HSV / Hex / Alpha editor
     if palette.expanded {
-        let current = palette.active_pixel().0;
+        let current = palette.active_color().pixel.0;
         if current != palette.hex_last {
             palette.hex_draft = format_hex(current);
             palette.hex_last = current;
@@ -714,7 +731,7 @@ pub fn picker(
             palette.set_active_rgba([rgb[0], rgb[1], rgb[2], alpha]);
         }
 
-        let (_, hsva) = palette.active_mut();
+        let hsva = palette.active_color().hsva;
         let mut h_deg = (hsva.h * 360.0).round() as i32;
         let mut s_pct = (hsva.s * 100.0).round() as i32;
         let mut v_pct = (hsva.v * 100.0).round() as i32;
@@ -733,12 +750,11 @@ pub fn picker(
                 .changed();
         });
         if hsv_changed {
-            let (pixel, hsva) = palette.active_mut();
-            hsva.h = (h_deg.rem_euclid(360) as f32) / 360.0;
-            hsva.s = (s_pct.clamp(0, 100) as f32) / 100.0;
-            hsva.v = (v_pct.clamp(0, 100) as f32) / 100.0;
-            let srgb = hsva.to_srgb();
-            pixel.0[0..3].copy_from_slice(&srgb);
+            let color = palette.edit_active_color();
+            color.hsva.h = (h_deg.rem_euclid(360) as f32) / 360.0;
+            color.hsva.s = (s_pct.clamp(0, 100) as f32) / 100.0;
+            color.hsva.v = (v_pct.clamp(0, 100) as f32) / 100.0;
+            color.update_rgb();
         }
 
         ui.horizontal(|ui| {
@@ -761,9 +777,7 @@ pub fn picker(
                 .add(egui::DragValue::new(&mut alpha).speed(1).range(0..=255))
                 .changed()
             {
-                let (pixel, hsva) = palette.active_mut();
-                pixel.0[3] = alpha;
-                hsva.a = f32::from(alpha) / 255.0;
+                palette.set_active_alpha(alpha);
             }
         });
     }
@@ -797,7 +811,7 @@ pub fn picker(
         });
     });
 
-    let active_rgba = palette.active_pixel().0;
+    let active_rgba = palette.active_color().pixel.0;
     let swatch_size = 17.0_f32;
     let gap = 3.0_f32;
     let cols = ((ui.available_width() + gap) / (swatch_size + gap))
@@ -813,30 +827,16 @@ pub fn picker(
                 let idx = row_idx * cols + col_idx;
                 let (rect, resp) =
                     ui.allocate_exact_size(vec2(swatch_size, swatch_size), Sense::click());
-                if rgba[3] < 255 {
-                    ui.painter().image(
-                        checker.id(),
-                        rect,
-                        Rect::from_min_max(pos2(0.0, 0.0), pos2(2.0, 2.0)),
-                        Color32::WHITE,
-                    );
-                }
-                let c = Color32::from_rgba_unmultiplied(rgba[0], rgba[1], rgba[2], rgba[3]);
                 let selected = active_rgba == rgba;
-                ui.painter().rect_filled(rect, CornerRadius::same(4), c);
-                ui.painter().rect_stroke(
-                    rect,
-                    CornerRadius::same(4),
-                    Stroke::new(
-                        if selected { 1.8_f32 } else { 1.0_f32 },
-                        if selected {
-                            theme.accent()
-                        } else {
-                            theme.border_color()
-                        },
-                    ),
-                    StrokeKind::Outside,
+                let border = Stroke::new(
+                    if selected { 1.8_f32 } else { 1.0_f32 },
+                    if selected {
+                        theme.accent()
+                    } else {
+                        theme.border_color()
+                    },
                 );
+                paint_color_swatch(ui.painter(), Some(checker), rect, Pixel(rgba), 4.0, border);
                 if resp.clicked() {
                     picked = Some(rgba);
                 } else if resp.secondary_clicked() && palette.swatches.len() > 1 {
@@ -865,7 +865,8 @@ pub fn format_hex([r, g, b, a]: [u8; 4]) -> String {
 }
 
 pub fn parse_hex(raw: &str) -> Option<[u8; 4]> {
-    let hex = raw.trim().trim_start_matches('#');
+    let trimmed = raw.trim();
+    let hex = trimmed.strip_prefix('#').unwrap_or(trimmed);
     if hex.len() == 6 {
         let v = u32::from_str_radix(hex, 16).ok()?;
         Some([
@@ -887,11 +888,31 @@ pub fn parse_hex(raw: &str) -> Option<[u8; 4]> {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+fn alpha_bar(
+    ui: &mut egui::Ui,
+    theme: Theme,
+    size: Vec2,
+    pixel: Pixel,
+    checker: &egui::TextureHandle,
+    tooltip: &str,
+) -> Option<u8> {
+    let [r, g, b, a] = pixel.0;
+    let quantize = |value: f32| (value * 255.0).round() as u8;
+    gradient_bar(
+        ui,
+        theme,
+        size,
+        f32::from(a) / 255.0,
+        Some(checker),
+        |t| Color32::from_rgba_unmultiplied(r, g, b, quantize(t)),
+        tooltip,
+    )
+    .map(quantize)
+}
+
 fn gradient_bar(
     ui: &mut egui::Ui,
     theme: Theme,
-    id_salt: &str,
     size: Vec2,
     value: f32,
     checker: Option<&egui::TextureHandle>,
@@ -899,33 +920,20 @@ fn gradient_bar(
     tooltip: &str,
 ) -> Option<f32> {
     let (rect, resp) = ui.allocate_exact_size(size, Sense::click_and_drag());
-    let inner = Rect::from_min_max(rect.min + vec2(4.0, 2.0), rect.max - vec2(4.0, 2.0));
+    let inner = Rect::from_center_size(rect.center(), vec2(size.x - 8.0, size.y.min(20.0) - 4.0));
+    let updated = resp
+        .interact_pointer_pos()
+        .map(|pos| ((pos.x - inner.left()) / inner.width().max(1.0)).clamp(0.0, 1.0));
+    let value = updated.unwrap_or(value);
     let p = ui.painter();
     if let Some(tex) = checker {
-        let tiles_x = (inner.width() / 8.0).max(1.0);
-        let tiles_y = (inner.height() / 8.0).max(1.0);
-        p.image(
-            tex.id(),
-            inner,
-            Rect::from_min_max(pos2(0.0, 0.0), pos2(tiles_x, tiles_y)),
-            Color32::WHITE,
+        let tiles = vec2(
+            (inner.width() / 8.0).max(1.0),
+            (inner.height() / 8.0).max(1.0),
         );
+        paint_checker(p, tex, inner, tiles);
     }
-    let segments = 24;
-    let mut mesh = Mesh::default();
-    for i in 0..=segments {
-        let t = i as f32 / segments as f32;
-        let x = egui::lerp(inner.left()..=inner.right(), t);
-        let c = color_at(t);
-        mesh.colored_vertex(Pos2::new(x, inner.top()), c);
-        mesh.colored_vertex(Pos2::new(x, inner.bottom()), c);
-    }
-    for i in 0..segments {
-        let base = (i * 2) as u32;
-        mesh.add_triangle(base, base + 1, base + 2);
-        mesh.add_triangle(base + 1, base + 3, base + 2);
-    }
-    p.add(mesh);
+    paint_horizontal_gradient_mesh(p, inner, 24, color_at);
     p.rect_stroke(
         inner,
         CornerRadius::same(4),
@@ -938,12 +946,51 @@ fn gradient_bar(
     p.circle_filled(handle_pos, 5.5, Color32::WHITE);
     p.circle_stroke(handle_pos, 5.5, Stroke::new(1.8_f32, theme.accent()));
 
-    let updated = resp
-        .interact_pointer_pos()
-        .map(|pos| ((pos.x - inner.left()) / inner.width().max(1.0)).clamp(0.0, 1.0));
-    resp.on_hover_text(tooltip);
-    let _ = id_salt;
+    resp.widget_info(|| {
+        egui::WidgetInfo::slider(ui.is_enabled(), f64::from(value) * 100.0, tooltip)
+    });
+    resp.on_hover_cursor(egui::CursorIcon::ResizeHorizontal)
+        .on_hover_text(tooltip);
     updated
+}
+
+pub(super) fn paint_color_swatch(
+    painter: &egui::Painter,
+    checker: Option<&egui::TextureHandle>,
+    rect: Rect,
+    pixel: Pixel,
+    corner_radius: f32,
+    border: Stroke,
+) {
+    if pixel.0[3] < 255
+        && let Some(checker) = checker
+    {
+        paint_checker(painter, checker, rect, vec2(2.0, 2.0));
+    }
+    painter.rect_filled(rect, corner_radius, pixel_to_color32(pixel));
+    painter.rect_stroke(rect, corner_radius, border, StrokeKind::Outside);
+}
+
+fn paint_horizontal_gradient_mesh(
+    painter: &egui::Painter,
+    rect: Rect,
+    steps: usize,
+    color_at: impl Fn(f32) -> Color32,
+) {
+    let mut mesh = Mesh::default();
+    for i in 0..=steps {
+        let t = i as f32 / steps as f32;
+        let x = egui::lerp(rect.left()..=rect.right(), t);
+        let color = color_at(t);
+        mesh.colored_vertex(pos2(x, rect.top()), color);
+        mesh.colored_vertex(pos2(x, rect.bottom()), color);
+    }
+    for i in 0..steps {
+        let base = (i * 2) as u32;
+        mesh.add_triangle(base, base + 1, base + 2);
+        mesh.add_triangle(base + 1, base + 3, base + 2);
+    }
+    painter.add(mesh);
 }
 
 fn snap_hue(h: f32) -> f32 {
