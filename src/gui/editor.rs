@@ -12,7 +12,7 @@ use super::{
     app_settings::AaMode,
     bucket_edges,
     clipboard::Image,
-    geometry::{self, Affine, Resampling},
+    geometry::{self, Affine, Area, Resampling},
     stroke_raster,
     tolerance::{self, AlphaMatchMode, FillPattern, StrokeBlend},
 };
@@ -1153,8 +1153,9 @@ impl Editor {
         self.selection
             .as_ref()
             .map(|selection| {
+                let inverse = transform.prepared();
                 Selection::from_coverage(size, |(x, y)| {
-                    let (x, y) = transform.inverse((f64::from(x) + 0.5, f64::from(y) + 0.5));
+                    let (x, y) = inverse.inverse((f64::from(x) + 0.5, f64::from(y) + 0.5));
                     if x >= 0.0 && y >= 0.0 && x < f64::from(size.0) && y < f64::from(size.1) {
                         selection.coverage_u8((x as u32, y as u32))
                     } else {
@@ -1165,18 +1166,36 @@ impl Editor {
             .transpose()
     }
 
+    /// Resamples the content of `at`, which is transparent outside `content`,
+    /// over `base_at` or over transparency.
     fn resample_over(
         &self,
         transform: Affine,
         method: Resampling,
+        content: Option<Area>,
         overlay_on_base: bool,
         at: impl Fn(i64, i64) -> Pixel,
         base_at: impl Fn(u32, u32) -> Pixel,
     ) -> io::Result<Vec<Pixel>> {
         let size = self.document.dimensions();
+        let transform = transform.prepared();
+        // Only these pixels can receive content.
+        let reach = content.map(|content| transform.destination(content, size));
         let mut out = try_vec_with_capacity(size.0 as usize * size.1 as usize)?;
+        let untouched = |x: u32, y: u32| {
+            if overlay_on_base {
+                base_at(x, y)
+            } else {
+                Pixel::default()
+            }
+        };
         for y in 0..size.1 {
-            for x in 0..size.0 {
+            let columns = reach
+                .as_ref()
+                .filter(|reach| reach.y.contains(&y))
+                .map_or(0..0, |reach| reach.x.clone());
+            out.extend((0..columns.start).map(|x| untouched(x, y)));
+            for x in columns.clone() {
                 let fg = geometry::resample(&at, |pt| transform.inverse(pt), (x, y), method);
                 if !overlay_on_base {
                     out.push(fg);
@@ -1189,6 +1208,7 @@ impl Editor {
                     });
                 }
             }
+            out.extend((columns.end..size.0).map(|x| untouched(x, y)));
         }
         Ok(out)
     }
@@ -1203,9 +1223,16 @@ impl Editor {
         let size = self.document.dimensions();
         let source = self.document.layer_pixels(self.selected).unwrap();
         let selection = self.selection.as_ref().filter(|_| use_selection);
+        let content = match selection {
+            Some(selection) => selection
+                .coverage_area(size)
+                .map(|(min, max)| Area::new(min, (max.0 - min.0 + 1, max.1 - min.1 + 1))),
+            None => Some(Area::new((0, 0), size)),
+        };
         self.resample_over(
             transform,
             method,
+            content,
             selection.is_some(),
             |x, y| match selection {
                 Some(sel) if x >= 0 && y >= 0 && x < i64::from(size.0) && y < i64::from(size.1) => {
@@ -1237,6 +1264,7 @@ impl Editor {
         self.resample_over(
             transform,
             method,
+            Some(Area::new(origin, floating.size)),
             true,
             |x, y| {
                 geometry::pixel(

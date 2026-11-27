@@ -462,6 +462,27 @@ impl Selection {
         }
     }
 
+    /// A rectangle holding every pixel with any coverage, possibly larger than
+    /// needed, or `None` when there is none.
+    pub fn coverage_area(&self, size: Point) -> Option<Bounds> {
+        let everything = ((0, 0), (size.0 - 1, size.1 - 1));
+        if self.inverted {
+            return Some(everything);
+        }
+        let (min, max) = match &self.region {
+            Region::Mask(mask) => mask.bounds(false)?,
+            Region::Shape(_, bounds) => *bounds,
+        };
+        // Antialiased edges may touch the neighboring pixels.
+        Some((
+            (min.0.saturating_sub(2), min.1.saturating_sub(2)),
+            (
+                max.0.saturating_add(2).min(everything.1.0),
+                max.1.saturating_add(2).min(everything.1.1),
+            ),
+        ))
+    }
+
     pub fn mask_pixel(&self, source: &[Pixel], size: Point, pt: Point) -> Pixel {
         let cov = self.coverage_u8(pt);
         if cov == 0 {

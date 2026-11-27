@@ -1,5 +1,5 @@
 use super::i18n::text as tr;
-use std::io;
+use std::{io, ops::Range};
 
 use openpaintr::{Document, Pixel};
 
@@ -154,29 +154,121 @@ impl Affine {
         out
     }
 
-    pub fn inverse(self, (x, y): (f64, f64)) -> (f64, f64) {
+    /// The transform with its rotation computed once, for use on many points.
+    pub fn prepared(self) -> PreparedAffine {
         let (sin, cos) = self.degrees.to_radians().sin_cos();
-        let x = x - self.center.0 - self.shift.0;
-        let y = y - self.center.1 - self.shift.1;
-        (
-            (x * cos + y * sin) / self.scale.0 + self.center.0,
-            (-x * sin + y * cos) / self.scale.1 + self.center.1,
-        )
+        PreparedAffine {
+            affine: self,
+            sin,
+            cos,
+        }
     }
 
-    pub fn forward(self, (x, y): (f64, f64)) -> (f64, f64) {
-        let (sin, cos) = self.degrees.to_radians().sin_cos();
-        let x = (x - self.center.0) * self.scale.0;
-        let y = (y - self.center.1) * self.scale.1;
-        (
-            x * cos - y * sin + self.center.0 + self.shift.0,
-            x * sin + y * cos + self.center.1 + self.shift.1,
-        )
+    pub fn inverse(self, point: (f64, f64)) -> (f64, f64) {
+        self.prepared().inverse(point)
+    }
+
+    pub fn forward(self, point: (f64, f64)) -> (f64, f64) {
+        self.prepared().forward(point)
     }
 
     pub fn is_identity(self) -> bool {
         self.shift == (0.0, 0.0) && self.scale == (1.0, 1.0) && self.degrees == 0.0
     }
+}
+
+/// An [`Affine`] and the sine and cosine of its rotation.
+#[derive(Clone, Copy, Debug)]
+pub struct PreparedAffine {
+    affine: Affine,
+    sin: f64,
+    cos: f64,
+}
+
+impl PreparedAffine {
+    pub fn inverse(&self, (x, y): (f64, f64)) -> (f64, f64) {
+        let Self { affine, sin, cos } = *self;
+        let x = x - affine.center.0 - affine.shift.0;
+        let y = y - affine.center.1 - affine.shift.1;
+        (
+            (x * cos + y * sin) / affine.scale.0 + affine.center.0,
+            (-x * sin + y * cos) / affine.scale.1 + affine.center.1,
+        )
+    }
+
+    pub fn forward(&self, (x, y): (f64, f64)) -> (f64, f64) {
+        let Self { affine, sin, cos } = *self;
+        let x = (x - affine.center.0) * affine.scale.0;
+        let y = (y - affine.center.1) * affine.scale.1;
+        (
+            x * cos - y * sin + affine.center.0 + affine.shift.0,
+            x * sin + y * cos + affine.center.1 + affine.shift.1,
+        )
+    }
+
+    /// The canvas pixels that resampling `source` can reach: every other pixel
+    /// resamples to transparency with any [`Resampling`] method.
+    pub fn destination(&self, source: Area, canvas: Point) -> PixelRange {
+        let everything = PixelRange {
+            x: 0..canvas.0,
+            y: 0..canvas.1,
+        };
+        let Area { min, max } = source;
+        // A collapsed axis has no meaningful inverse: leave nothing out.
+        if self.affine.scale.0 == 0.0 || self.affine.scale.1 == 0.0 {
+            return everything;
+        }
+        // Bilinear sampling reaches half a source pixel past the content; the
+        // full pixel also absorbs rounding.
+        let corners = [
+            (min.0 - 1.0, min.1 - 1.0),
+            (max.0 + 1.0, min.1 - 1.0),
+            (min.0 - 1.0, max.1 + 1.0),
+            (max.0 + 1.0, max.1 + 1.0),
+        ]
+        .map(|corner| self.forward(corner));
+        if corners
+            .iter()
+            .any(|(x, y)| !x.is_finite() || !y.is_finite())
+        {
+            return everything;
+        }
+        // One more destination pixel covers the supersampling offsets.
+        let range = |values: [f64; 4], limit: u32| {
+            let low = values.into_iter().fold(f64::INFINITY, f64::min).floor() - 1.0;
+            let high = values.into_iter().fold(f64::NEG_INFINITY, f64::max).ceil() + 1.0;
+            let clip = |value: f64| value.clamp(0.0, f64::from(limit)) as u32;
+            clip(low)..clip(high)
+        };
+        PixelRange {
+            x: range(corners.map(|corner| corner.0), canvas.0),
+            y: range(corners.map(|corner| corner.1), canvas.1),
+        }
+    }
+}
+
+/// A rectangle in continuous pixel coordinates, `max` excluded.
+#[derive(Clone, Copy, Debug)]
+pub struct Area {
+    pub min: (f64, f64),
+    pub max: (f64, f64),
+}
+
+impl Area {
+    pub fn new(origin: (u32, u32), size: Point) -> Self {
+        let min = (f64::from(origin.0), f64::from(origin.1));
+        Self {
+            min,
+            max: (min.0 + f64::from(size.0), min.1 + f64::from(size.1)),
+        }
+    }
+}
+
+/// Columns and rows of the canvas.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PixelRange {
+    pub x: Range<u32>,
+    pub y: Range<u32>,
 }
 
 pub fn pixel_checked(source: &[Pixel], size: Point, x: i64, y: i64) -> Option<Pixel> {
@@ -318,6 +410,55 @@ mod tests {
         assert_eq!(resized.pixel(layer, 1, 1), Some(red));
         assert_eq!(resized.pixel(layer, 2, 0), Some(Pixel::default()));
         Ok(())
+    }
+
+    #[test]
+    fn destination_covers_every_pixel_that_resampling_reaches() {
+        let canvas = (31, 23);
+        let (source_size, origin) = ((6, 4), (12, 9));
+        let source = vec![Pixel([255, 255, 255, 255]); 24];
+        for step in 0..240_u32 {
+            let affine = Affine {
+                center: (15.0, 11.0),
+                shift: (f64::from(step % 9) - 4.0, f64::from(step % 7) * 0.5),
+                scale: (0.1 + f64::from(step % 5), 0.2 + f64::from(step % 4) * 1.5),
+                degrees: f64::from(step) * 7.3,
+            };
+            let prepared = affine.prepared();
+            let range = prepared.destination(Area::new(origin, source_size), canvas);
+            for method in Resampling::ALL {
+                for y in 0..canvas.1 {
+                    for x in 0..canvas.0 {
+                        let result = resample(
+                            |x, y| {
+                                pixel(
+                                    &source,
+                                    source_size,
+                                    x - i64::from(origin.0),
+                                    y - i64::from(origin.1),
+                                )
+                            },
+                            |point| prepared.inverse(point),
+                            (x, y),
+                            method,
+                        );
+                        if result != Pixel::default() {
+                            assert!(
+                                range.x.contains(&x) && range.y.contains(&y),
+                                "{affine:?} {method:?} ({x}, {y}) outside {range:?}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        // Content far off the canvas leaves nothing to sample.
+        let mut away = Affine::centered(canvas);
+        away.shift = (500.0, 0.0);
+        let range = away
+            .prepared()
+            .destination(Area::new(origin, source_size), canvas);
+        assert!(range.x.is_empty());
     }
 
     #[test]
