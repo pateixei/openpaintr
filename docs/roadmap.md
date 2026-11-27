@@ -220,6 +220,19 @@ Switching to Adobe, creating a custom profile, and restoring its binding after a
   | Freeform spiral | preview | `3.89` / `51.14` | `2.60` / `40.64` |
   | Freeform spiral | commit | `10.21` / `142.88` | `5.88` / `89.45` |
 
+  **Outline text (plan item 2.5, November 27, 2026).** Same environment, comparing commit `fa069ba` with `9b5959e`: the middle of three alternating rounds of five timed runs, in milliseconds (typical / large). Text edges now follow the antialiasing mode (Analytical here), so pixels differ.
+
+  | Text size | Phase | Before | After |
+  | --- | --- | ---: | ---: |
+  | `24 px` | typing | `2.92` / `39.09` | `2.22` / `38.11` |
+  | `24 px` | commit | `5.52` / `74.96` | `4.18` / `73.04` |
+  | `96 px` | typing | `11.22` / `46.97` | `2.34` / `38.25` |
+  | `96 px` | commit | `19.11` / `88.10` | `4.24` / `74.34` |
+  | `240 px` | typing | `44.17` / `91.31` | `2.52` / `38.07` |
+  | `240 px` | commit | `55.63` / `177.26` | `4.52` / `73.06` |
+
+  At `240 px` on the typical document, peak `VmHWM` fell from `117,616 kB` to `44,776 kB`.
+
 **Acceptance criteria** — Publish the format and metadata support matrix, test file and clipboard integration on Wayland and X11, and record reproducible interactive benchmarks.
 
 ### Formats shown in the Paint.NET 5.2 Open dialog
