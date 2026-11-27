@@ -1,6 +1,6 @@
 use super::app_settings::AaMode;
 use super::i18n::text as tr;
-use std::collections::HashMap;
+use std::ops::Range;
 
 use eframe::egui::{self, Color32, Stroke, Vec2, vec2};
 use gfx::{
@@ -342,10 +342,78 @@ impl ShapeKind {
     }
 }
 
-pub fn rasterize_path_ssaa(path_4x: &GfxPath, rule: u32, size: Point) -> HashMap<Point, u16> {
-    let mut map = HashMap::new();
+/// A value per pixel, such as coverage, inside the bounding box of a path
+/// clipped to the canvas, stored row by row.
+pub struct CoverageMask<T> {
+    columns: Range<u32>,
+    rows: Range<u32>,
+    data: Vec<T>,
+}
+
+impl<T: Copy + Default + PartialEq> CoverageMask<T> {
+    /// An empty mask for `path`, whose coordinates are `scale` units per pixel.
+    fn around(path: &mut GfxPath, scale: f32, size: Point) -> Self {
+        let points = path.pts_mut();
+        let range = |values: fn(&(f32, f32)) -> f32, limit: u32| {
+            if points.is_empty() {
+                return 0..0;
+            }
+            if points.iter().any(|point| !values(point).is_finite()) {
+                return 0..limit;
+            }
+            let low = points.iter().map(values).fold(f32::INFINITY, f32::min);
+            let high = points.iter().map(values).fold(f32::NEG_INFINITY, f32::max);
+            // A pixel of margin: antialiasing spills past the outline.
+            let clip = |value: f32| value.clamp(0.0, limit as f32) as u32;
+            clip((low / scale).floor() - 1.0)..clip((high / scale).ceil() + 2.0)
+        };
+        let columns = range(|point| point.0, size.0);
+        let rows = range(|point| point.1, size.1);
+        let area = columns.len() * rows.len();
+        Self {
+            columns,
+            rows,
+            data: vec![T::default(); area],
+        }
+    }
+
+    /// The stored values of row `y`, one for each of `self.columns`.
+    fn row_mut(&mut self, y: u32) -> Option<&mut [T]> {
+        if !self.rows.contains(&y) {
+            return None;
+        }
+        let width = self.columns.len();
+        let start = (y - self.rows.start) as usize * width;
+        Some(&mut self.data[start..start + width])
+    }
+
+    /// Every pixel with a value other than zero, row by row.
+    pub fn pixels(&self) -> impl Iterator<Item = (Point, T)> + '_ {
+        self.data
+            .chunks_exact(self.columns.len().max(1))
+            .zip(self.rows.clone())
+            .flat_map(move |(row, y)| {
+                row.iter()
+                    .zip(self.columns.clone())
+                    .filter(|(value, _)| **value != T::default())
+                    .map(move |(&value, x)| ((x, y), value))
+            })
+    }
+
+    fn map<U>(self, convert: impl Fn(T) -> U) -> CoverageMask<U> {
+        CoverageMask {
+            columns: self.columns,
+            rows: self.rows,
+            data: self.data.into_iter().map(convert).collect(),
+        }
+    }
+}
+
+/// The 4 x 4 subsample bits of each pixel covered by a path in 4x coordinates.
+pub fn rasterize_path_ssaa(path_4x: &mut GfxPath, rule: u32, size: Point) -> CoverageMask<u16> {
+    let mut mask = CoverageMask::around(path_4x, 4.0, size);
     if size.0 == 0 || size.1 == 0 || path_4x.is_empty() {
-        return map;
+        return mask;
     }
     let mut ras = Raster::default();
     path_4x.fill_lines(&mut ras);
@@ -356,6 +424,7 @@ pub fn rasterize_path_ssaa(path_4x: &GfxPath, rule: u32, size: Point) -> HashMap
             let sy = sub_y as u32;
             let py = sy >> 2;
             let bit_y = (sy & 3) * 4;
+            let columns = mask.columns.clone();
             for (i, &cov) in covs.iter().enumerate() {
                 if cov < 128 {
                     continue;
@@ -363,19 +432,27 @@ pub fn rasterize_path_ssaa(path_4x: &GfxPath, rule: u32, size: Point) -> HashMap
                 let sx = (sub_x + i as i32) as u32;
                 let px = sx >> 2;
                 if px < size.0 && py < size.1 {
-                    let bit = bit_y + (sx & 3);
-                    *map.entry((px, py)).or_insert(0) |= 1u16 << bit;
+                    debug_assert!(columns.contains(&px) && mask.rows.contains(&py));
+                    let column = px.wrapping_sub(columns.start) as usize;
+                    if let Some(slot) = mask.row_mut(py).and_then(|row| row.get_mut(column)) {
+                        *slot |= 1u16 << (bit_y + (sx & 3));
+                    }
                 }
             }
         },
     );
-    map
+    mask
 }
 
-pub fn rasterize_path_analytical(path_1x: &GfxPath, rule: u32, size: Point) -> HashMap<Point, u8> {
-    let mut map = HashMap::new();
+/// The analytical coverage of each pixel covered by a path.
+pub fn rasterize_path_analytical(
+    path_1x: &mut GfxPath,
+    rule: u32,
+    size: Point,
+) -> CoverageMask<u8> {
+    let mut mask = CoverageMask::around(path_1x, 1.0, size);
     if size.0 == 0 || size.1 == 0 || path_1x.is_empty() {
-        return map;
+        return mask;
     }
     let mut ras = Raster::default();
     path_1x.fill_lines(&mut ras);
@@ -383,34 +460,31 @@ pub fn rasterize_path_analytical(path_1x: &GfxPath, rule: u32, size: Point) -> H
         [0, 0, size.0 as i32, size.1 as i32],
         rule,
         &mut |y, x, covs| {
-            let py = y as u32;
-            if py >= size.1 {
+            // The clip keeps spans on the canvas, and each row comes only once.
+            let (Ok(y), Ok(x)) = (u32::try_from(y), u32::try_from(x)) else {
                 return;
-            }
-            for (i, &cov) in covs.iter().enumerate() {
-                if cov == 0 {
-                    continue;
-                }
-                let px = (x + i as i32) as u32;
-                if px < size.0 {
-                    map.insert((px, py), cov);
-                }
+            };
+            let columns = mask.columns.clone();
+            let end = x + covs.len() as u32;
+            debug_assert!(columns.start <= x && end <= columns.end);
+            let Some(row) = mask.row_mut(y) else {
+                debug_assert!(y >= size.1);
+                return;
+            };
+            let (from, to) = (x.max(columns.start), end.min(columns.end));
+            if from < to {
+                row[(from - columns.start) as usize..(to - columns.start) as usize]
+                    .copy_from_slice(&covs[(from - x) as usize..(to - x) as usize]);
             }
         },
     );
-    map
+    mask
 }
 
-fn rasterize_path(path: &GfxPath, rule: u32, size: Point, aa_mode: AaMode) -> HashMap<Point, u8> {
+fn rasterize_path(path: &mut GfxPath, rule: u32, size: Point, aa_mode: AaMode) -> CoverageMask<u8> {
     match aa_mode {
         AaMode::Analytical => rasterize_path_analytical(path, rule, size),
-        AaMode::Ssaa4x4 => rasterize_path_ssaa(path, rule, size)
-            .into_iter()
-            .filter_map(|(pt, mask)| {
-                let alpha = stroke_raster::mask16_to_u8(mask);
-                (alpha > 0).then_some((pt, alpha))
-            })
-            .collect(),
+        AaMode::Ssaa4x4 => rasterize_path_ssaa(path, rule, size).map(stroke_raster::mask16_to_u8),
     }
 }
 
@@ -519,12 +593,12 @@ impl LineCurveSession {
             self.params.end_cap.code(),
         );
         dash_stroke(&mut path, &style);
-        let cov_map = rasterize_path(&path, RULE_NONZERO, size, aa_mode);
+        let coverage = rasterize_path(&mut path, RULE_NONZERO, size, aa_mode);
         tolerance::blend_coverage_in_place(
             &mut out,
             size,
             selection,
-            cov_map,
+            coverage.pixels(),
             self.params.blend,
             |_| self.color,
         );
@@ -743,7 +817,7 @@ impl ShapeSession {
         );
 
         if do_fill {
-            let fill_map = rasterize_path(&fill_path, RULE_EVENODD, size, aa_mode);
+            let fill = rasterize_path(&mut fill_path, RULE_EVENODD, size, aa_mode);
             let fg = if self.params.fill_mode == ShapeFillMode::Fill {
                 self.outline_color
             } else {
@@ -758,7 +832,7 @@ impl ShapeSession {
                 &mut out,
                 size,
                 selection,
-                fill_map,
+                fill.pixels(),
                 self.params.blend,
                 |pt| self.params.pattern.sample(pt.0, pt.1, fg, bg),
             );
@@ -772,12 +846,12 @@ impl ShapeSession {
                 LCAP_ROUND,
             );
             dash_stroke(&mut fill_path, &style);
-            let stroke_map = rasterize_path(&fill_path, RULE_NONZERO, size, aa_mode);
+            let stroke = rasterize_path(&mut fill_path, RULE_NONZERO, size, aa_mode);
             tolerance::blend_coverage_in_place(
                 &mut out,
                 size,
                 selection,
-                stroke_map,
+                stroke.pixels(),
                 self.params.blend,
                 |_| self.outline_color,
             );

@@ -226,9 +226,12 @@ impl Selection {
                     pts.iter().map(|&(x, y)| (x * scale, y * scale)),
                     true,
                 );
-                let cov_map =
-                    super::vector_tools::rasterize_path_ssaa(&gfx_path, gfx::RULE_EVENODD, size);
-                for (pt, cov_mask) in cov_map {
+                let coverage = super::vector_tools::rasterize_path_ssaa(
+                    &mut gfx_path,
+                    gfx::RULE_EVENODD,
+                    size,
+                );
+                for (pt, cov_mask) in coverage.pixels() {
                     let cov = super::stroke_raster::mask16_to_u8(cov_mask);
                     if cov > 0 {
                         mask.set(pt, cov);
