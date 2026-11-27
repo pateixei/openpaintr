@@ -13,7 +13,7 @@ This document specifies the planned portable package format, hybrid execution mo
   - **Parity and fallback.** Plugins with a GPU path can use it when available. The reference Wasm implementation supports systems without a compatible GPU, automated Linux and WSL tests, and deterministic inspection.
 - **Host-rendered declarative UI.** The host creates controls directly in **`egui`** and provides the active light pastel or dark theme, asynchronous previews, and shortcuts. Plugins use the host UI and require no GUI libraries or native windows.
 - **Security and stability.** Isolate linear memory per instance, deny arbitrary disk and network access, limit memory, and use cooperative epoch or fuel interruption to cancel obsolete previews. Report plugin errors in the status bar or dialog while keeping the editor open.
-- **Selection fidelity and antialiasing.** Plugins work on tiles copied from the active layer. The host commits the results using the `TMask` coverage mask with **4×4 SSAA** always enabled.
+- **Selection fidelity and antialiasing.** Plugins work on tiles copied from the active layer. The host commits the results using the selection's own `TMask` coverage, as rasterized under the antialiasing mode active when the selection was created.
 
 ## 2. Architecture flow
 
@@ -26,7 +26,7 @@ flowchart LR
     PLAN -->|"CpuTiles"| WASM["Wasmtime sandbox (SIMD128)"]
     PLAN -->|"GpuPasses"| WGPU["wgpu pipeline (WGSL via naga)"]
     WGPU -.->|"CPU fallback"| WASM
-    WASM --> COMP["Host TMask compositor (4x4 SSAA)"]
+    WASM --> COMP["Host TMask compositor (selection coverage)"]
     WGPU --> COMP
     COMP -->|"One Edit::Raster entry"| HIST["History and Repeat Last Effect"]
 ```
@@ -224,11 +224,11 @@ Use this pipeline for costly parallel effects such as large-radius blurs, distor
 
 4. If no supported `wgpu` device is available, such as in a headless session or on incompatible hardware, the host falls back to the Wasm module's `render_tile`.
 
-### 5.3. Final compositing and `TMask` selection (4×4 SSAA)
+### 5.3. Final compositing and `TMask` selection coverage
 
 The host owns writes to `Document`. When it receives a processed tile, it applies these rules.
 - With no active selection, write the tile to the temporary preview or commit layer.
-- With an active selection, interpolate each pixel `(x, y)` between its original and effect values using the **4×4 SSAA** `TMask` coverage `cov = selection.coverage_u8((x, y))`.
+- With an active selection, interpolate each pixel `(x, y)` between its original and effect values using the selection's `TMask` coverage `cov = selection.coverage_u8((x, y))`.
 - On **OK**, save the consolidated changes as a single `Edit::Raster` entry in the document history.
 
 ## 6. Declarative UI (`UiSchema`) and host rendering
