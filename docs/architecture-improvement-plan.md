@@ -491,7 +491,7 @@ This maps to the roadmap's phase 4 **Performance** item ("portable GPU backend")
 - [x] 2.1 Zero-copy `Pixel`
 - [x] 2.2 Affine resampling
 - [x] 2.3 Gradient row buffer
-- [ ] 2.4 Vector rasterization without `HashMap`
+- [x] 2.4 Vector rasterization without `HashMap`
 - [ ] 2.5 Outline-based text rendering
 - [ ] 2.6 Incremental thumbnails
 - [ ] 2.7 Save options dialog off the UI thread
