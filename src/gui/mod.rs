@@ -4605,6 +4605,7 @@ impl eframe::App for App {
 mod tests {
     use super::*;
 
+    mod golden_resample;
     mod perf_baseline;
 
     fn fixture_path(name: &str) -> PathBuf {
