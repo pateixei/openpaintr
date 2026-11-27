@@ -75,7 +75,9 @@ fn invalid_input(message: Message) -> io::Error {
     Diagnostic::io(io::ErrorKind::InvalidInput, message)
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+/// An RGBA pixel, laid out exactly as its four bytes.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
+#[repr(transparent)]
 pub struct Pixel(pub [u8; 4]);
 
 impl Pixel {
@@ -122,24 +124,28 @@ impl Pixel {
         (u32::from(a) << 24) | (u32::from(r) << 16) | (u32::from(g) << 8) | u32::from(b)
     }
 
+    /// A copy of the pixels' bytes. To only read them, borrow them with
+    /// `bytemuck::cast_slice`.
     pub fn to_rgba_bytes(pixels: &[Self]) -> io::Result<Vec<u8>> {
-        let byte_len = pixels
-            .len()
-            .checked_mul(4)
-            .ok_or_else(|| io::Error::new(io::ErrorKind::OutOfMemory, "pixel buffer too large"))?;
-        let mut bytes = try_vec_with_capacity(byte_len)?;
-        for &Self(rgba) in pixels {
-            bytes.extend_from_slice(&rgba);
-        }
-        Ok(bytes)
+        let bytes: &[u8] = bytemuck::cast_slice(pixels);
+        let mut copy = try_vec_with_capacity(bytes.len())?;
+        copy.extend_from_slice(bytes);
+        Ok(copy)
     }
 
+    /// A copy of the bytes as pixels. Trailing bytes that don't make a pixel
+    /// are ignored.
     pub fn from_rgba_bytes(bytes: &[u8]) -> io::Result<Vec<Self>> {
-        let mut pixels = try_vec_with_capacity(bytes.len() / 4)?;
-        for &rgba in bytes.as_chunks::<4>().0 {
-            pixels.push(Self(rgba));
-        }
+        let whole: &[Self] = bytemuck::cast_slice(&bytes[..bytes.len() / 4 * 4]);
+        let mut pixels = try_vec_with_capacity(whole.len())?;
+        pixels.extend_from_slice(whole);
         Ok(pixels)
+    }
+
+    /// Like [`Self::from_rgba_bytes`], reusing the allocation when possible.
+    pub fn from_rgba_vec(bytes: Vec<u8>) -> io::Result<Vec<Self>> {
+        bytemuck::allocation::try_cast_vec(bytes)
+            .or_else(|(_, bytes)| Self::from_rgba_bytes(&bytes))
     }
 
     pub fn over(self, background: Self, opacity: u8) -> Self {
@@ -175,6 +181,19 @@ pub struct LayerData {
 }
 
 impl LayerData {
+    /// An opaque, visible layer in Normal mode.
+    fn new(name: String, pixels: Vec<Pixel>) -> Self {
+        Self {
+            name,
+            visible: true,
+            opacity: 255,
+            blend: img_pdn::PDNB_NORMAL,
+            pixels,
+            pdn_background: 0,
+            pdn_metadata: Vec::new(),
+        }
+    }
+
     fn with_pixels(&self, pixels: Vec<Pixel>) -> Self {
         Self {
             name: self.name.clone(),
@@ -232,6 +251,25 @@ impl Document {
         Ok(document)
     }
 
+    /// A single-layer document that takes ownership of its pixels, like
+    /// [`Self::new`] without first allocating a blank layer.
+    pub(crate) fn from_layer_pixels(
+        width: u32,
+        height: u32,
+        pixels: Vec<Pixel>,
+    ) -> io::Result<Self> {
+        let count = check_image_dimensions(width, height, 1)?;
+        if pixels.len() as u64 != count {
+            return Err(invalid_input(msg::INVALID_LAYER_SIZE));
+        }
+        Ok(Self {
+            width,
+            height,
+            layers: vec![Layer(LayerData::new("Background".into(), pixels))],
+            pdn_metadata: Default::default(),
+        })
+    }
+
     pub fn add_layer(&mut self, name: impl Into<String>) -> io::Result<usize> {
         let index = self.layers.len();
         self.insert_blank_layer(index, name)?;
@@ -241,18 +279,8 @@ impl Document {
     pub fn insert_blank_layer(&mut self, index: usize, name: impl Into<String>) -> io::Result<()> {
         self.check_insert_position(index)?;
         let pixels = self.allocate_pixels()?;
-        self.layers.insert(
-            index,
-            Layer(LayerData {
-                name: name.into(),
-                visible: true,
-                opacity: 255,
-                blend: img_pdn::PDNB_NORMAL,
-                pixels,
-                pdn_background: 0,
-                pdn_metadata: Vec::new(),
-            }),
-        );
+        self.layers
+            .insert(index, Layer(LayerData::new(name.into(), pixels)));
         Ok(())
     }
 
@@ -316,15 +344,9 @@ impl Document {
             layers: Vec::new(),
             pdn_metadata: self.pdn_metadata.clone(),
         };
-        document.layers.push(Layer(LayerData {
-            name: "Merged image".to_owned(),
-            visible: true,
-            opacity: 255,
-            blend: img_pdn::PDNB_NORMAL,
-            pixels,
-            pdn_background: 0,
-            pdn_metadata: Vec::new(),
-        }));
+        document
+            .layers
+            .push(Layer(LayerData::new("Merged image".to_owned(), pixels)));
         Ok(document)
     }
 
@@ -443,49 +465,39 @@ impl Document {
         }
         let bottom_before = self.clone_layer_data(index - 1)?;
         let needs_blend = self.layers[index].visible && self.layers[index].opacity > 0;
-        let mut buffers = if needs_blend {
-            let byte_len = self.layers[index - 1]
-                .pixels
-                .len()
-                .checked_mul(4)
-                .ok_or_else(|| io::Error::new(io::ErrorKind::OutOfMemory, "layer too large"))?;
-            Some((
-                try_vec_filled(byte_len, 0u8)?,
-                try_vec_filled(byte_len, 0u8)?,
-            ))
+        // Allocated before the top layer is removed, so a failure changes nothing.
+        let merged = if needs_blend {
+            Some(try_vec_filled(
+                self.layers[index - 1].pixels.len(),
+                Pixel::default(),
+            )?)
         } else {
             None
         };
         let top = self.remove_layer(index)?;
-        if let Some((ref mut dst, ref mut src)) = buffers {
-            let blend_onto =
-                |dst: &mut [u8], src: &mut [u8], pixels: &[Pixel], blend: u8, opacity: u8| {
-                    pixels_to_bytes(pixels, src);
-                    bm_row_inplace(dst, src, blend_mode_op(blend, opacity));
-                };
+        if let Some(mut merged) = merged {
             if bottom_before.visible {
                 if bottom_before.opacity == 255 {
-                    pixels_to_bytes(&bottom_before.pixels, dst);
-                    blend_onto(dst, src, &top.pixels, top.blend, top.opacity);
+                    merged.copy_from_slice(&bottom_before.pixels);
+                    blend_onto(&mut merged, &top.pixels, top.blend, top.opacity);
                 } else {
                     blend_onto(
-                        dst,
-                        src,
+                        &mut merged,
                         &bottom_before.pixels,
                         img_pdn::PDNB_NORMAL,
                         bottom_before.opacity,
                     );
-                    blend_onto(dst, src, &top.pixels, top.blend, top.opacity);
+                    blend_onto(&mut merged, &top.pixels, top.blend, top.opacity);
                     self.layers[index - 1].opacity = 255;
                 }
             } else {
-                blend_onto(dst, src, &top.pixels, img_pdn::PDNB_NORMAL, top.opacity);
+                blend_onto(&mut merged, &top.pixels, img_pdn::PDNB_NORMAL, top.opacity);
                 let bottom = &mut self.layers[index - 1];
                 bottom.visible = true;
                 bottom.opacity = 255;
                 bottom.blend = top.blend;
             }
-            bytes_to_pixels(dst, &mut self.layers[index - 1].pixels);
+            self.layers[index - 1].pixels = merged;
         }
         Ok((top, bottom_before))
     }
@@ -574,11 +586,7 @@ impl Document {
         let count = rect_w
             .checked_mul(rect_h)
             .ok_or_else(|| invalid_input(msg::REGION_TOO_LARGE))?;
-        let byte_len = count
-            .checked_mul(4)
-            .ok_or_else(|| invalid_input(msg::REGION_TOO_LARGE))?;
-        let mut dst = try_vec_filled(byte_len, 0u8)?;
-        let mut src_row = try_vec_filled(rect_w * 4, 0u8)?;
+        let mut composite = try_vec_filled(count, Pixel::default())?;
 
         let full_w = self.width as usize;
         let start_x = min.0 as usize;
@@ -589,20 +597,18 @@ impl Document {
             .iter()
             .filter(|layer| layer.visible && layer.opacity != 0)
         {
-            let mode_op = blend_mode_op(layer.blend, layer.opacity);
-            for row_idx in 0..rect_h {
+            for (row_idx, row) in composite.chunks_exact_mut(rect_w).enumerate() {
                 let src_start = (start_y + row_idx) * full_w + start_x;
-                pixels_to_bytes(&layer.pixels[src_start..src_start + rect_w], &mut src_row);
-                let dst_start = row_idx * rect_w * 4;
-                bm_row_inplace(
-                    &mut dst[dst_start..dst_start + rect_w * 4],
-                    &src_row,
-                    mode_op,
+                blend_onto(
+                    row,
+                    &layer.pixels[src_start..src_start + rect_w],
+                    layer.blend,
+                    layer.opacity,
                 );
             }
         }
 
-        Pixel::from_rgba_bytes(&dst)
+        Ok(composite)
     }
 
     pub fn write_pam(&self, mut output: impl Write) -> io::Result<()> {
@@ -612,8 +618,7 @@ impl Document {
             "P7\nWIDTH {}\nHEIGHT {}\nDEPTH 4\nMAXVAL 255\nTUPLTYPE RGB_ALPHA\nENDHDR",
             self.width, self.height,
         )?;
-        let bytes = Pixel::to_rgba_bytes(&pixels)?;
-        output.write_all(&bytes)
+        output.write_all(bytemuck::cast_slice(&pixels))
     }
 
     fn layer(&self, layer: usize) -> io::Result<&Layer> {
@@ -644,16 +649,13 @@ fn blend_mode_op(blend: u8, opacity: u8) -> u32 {
     mode | (u32::from(opacity) << BM_OPAC_SHIFT)
 }
 
-fn pixels_to_bytes(pixels: &[Pixel], bytes: &mut [u8]) {
-    for (dst, &Pixel(rgba)) in bytes.as_chunks_mut::<4>().0.iter_mut().zip(pixels) {
-        *dst = rgba;
-    }
-}
-
-fn bytes_to_pixels(bytes: &[u8], pixels: &mut [Pixel]) {
-    for (dst, &rgba) in pixels.iter_mut().zip(bytes.as_chunks::<4>().0) {
-        *dst = Pixel(rgba);
-    }
+/// Blends a row of pixels onto another in place.
+fn blend_onto(destination: &mut [Pixel], source: &[Pixel], blend: u8, opacity: u8) {
+    bm_row_inplace(
+        bytemuck::cast_slice_mut(destination),
+        bytemuck::cast_slice(source),
+        blend_mode_op(blend, opacity),
+    );
 }
 
 fn sample_thumbnail(

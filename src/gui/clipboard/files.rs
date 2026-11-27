@@ -63,7 +63,7 @@ pub(super) fn read_image(path: &Path) -> io::Result<Option<(Point, Vec<Pixel>)>>
         .map_err(decode_error)?
         .into_rgba8();
     let size = (rgba.width(), rgba.height());
-    let pixels = Pixel::from_rgba_bytes(&rgba.into_raw())?;
+    let pixels = Pixel::from_rgba_vec(rgba.into_raw())?;
     Ok(Some((size, pixels)))
 }
 

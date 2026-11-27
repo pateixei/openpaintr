@@ -110,17 +110,23 @@ pub fn decode_png_rgba(input: impl BufRead + Seek) -> io::Result<DecodedPng> {
 
     let pixel_count = usize::try_from(u64::from(frame.width) * u64::from(frame.height))
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
-    let mut pixels = try_vec_with_capacity(pixel_count)?;
+    bytes.truncate(frame.buffer_size());
     let channels = frame.color_type.samples();
-    for sample in bytes[..frame.buffer_size()].chunks_exact(channels) {
-        pixels.push(Pixel(match sample {
-            [gray] => [*gray, *gray, *gray, 255],
-            [gray, alpha] => [*gray, *gray, *gray, *alpha],
-            [red, green, blue] => [*red, *green, *blue, 255],
-            [red, green, blue, alpha] => [*red, *green, *blue, *alpha],
-            _ => unreachable!("invalid PNG color type"),
-        }));
-    }
+    let pixels = if channels == 4 {
+        // RGBA samples already are pixels.
+        Pixel::from_rgba_vec(bytes)?
+    } else {
+        let mut pixels = try_vec_with_capacity(pixel_count)?;
+        for sample in bytes.chunks_exact(channels) {
+            pixels.push(Pixel(match sample {
+                [gray] => [*gray, *gray, *gray, 255],
+                [gray, alpha] => [*gray, *gray, *gray, *alpha],
+                [red, green, blue] => [*red, *green, *blue, 255],
+                _ => unreachable!("invalid PNG color type"),
+            }));
+        }
+        pixels
+    };
     let dpi = reader
         .info()
         .pixel_dims
@@ -141,12 +147,11 @@ pub fn decode_png_rgba(input: impl BufRead + Seek) -> io::Result<DecodedPng> {
 
 impl Document {
     pub fn read_png(input: impl BufRead + Seek) -> io::Result<Self> {
-        let mut decoded = decode_png_rgba(input)?;
-        let mut document = Self::new(decoded.width, decoded.height)?;
+        let decoded = decode_png_rgba(input)?;
+        let mut document = Self::from_layer_pixels(decoded.width, decoded.height, decoded.pixels)?;
         if let Some((dpi_x, dpi_y)) = decoded.dpi {
             document.pdn_metadata = PdnMetadata::with_dpi(dpi_x, dpi_y);
         }
-        document.swap_layer_pixels(0, &mut decoded.pixels)?;
         Ok(document)
     }
 
@@ -175,15 +180,14 @@ impl Document {
         let mut row = try_vec_with_capacity(stride)?;
         let bg = depth.background();
         for pixels in pixels.chunks_exact(self.width as usize) {
+            if bg.is_none() {
+                stream.write_all(bytemuck::cast_slice(pixels))?;
+                continue;
+            }
             row.clear();
-            match bg {
-                None => row.extend(pixels.iter().flat_map(|pixel| pixel.0)),
-                Some(_) => {
-                    for &pixel in pixels {
-                        let Pixel([r, g, b, _]) = depth.flatten_pixel(pixel);
-                        row.extend_from_slice(&[r, g, b]);
-                    }
-                }
+            for &pixel in pixels {
+                let Pixel([r, g, b, _]) = depth.flatten_pixel(pixel);
+                row.extend_from_slice(&[r, g, b]);
             }
             stream.write_all(&row)?;
         }

@@ -18,6 +18,8 @@ winit = { version = "0.30", default-features = false, features = ["wayland", "x1
 rfd = { version = "0.15.4", optional = true }
 tempfile = { version = "3", optional = true }
 png = "0.18.1"
+# Zero-copy views between pixels and bytes.
+bytemuck = { version = "1.25", features = ["derive", "extern_crate_alloc"] }
 jflib-gfx = "0.2.1"
 jflib-img-core = "0.2.1"
 jflib-img-pdn = "0.2.1"
