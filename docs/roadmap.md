@@ -233,6 +233,14 @@ Switching to Adobe, creating a custom profile, and restoring its binding after a
 
   At `240 px` on the typical document, peak `VmHWM` fell from `117,602 kB` to about `46,500 kB`.
 
+  **Incremental thumbnails (plan item 2.6, November 27, 2026).** Same environment, comparing commit `d097a62` with `cbc77db`: the middle of three alternating rounds of five timed runs, in milliseconds (typical / large).
+
+  | Measurement | Before | After |
+  | --- | ---: | ---: |
+  | Thumbnail refresh frame after a stroke | `1.84` / `33.58` | `0.12` / `0.14` |
+  | Open to editable canvas | `9.54` / `109.22` | `7.81` / `75.54` |
+  | Layer opacity drag frame | `1.94` / `35.03` | `1.96` / `34.97` |
+
 **Acceptance criteria** — Publish the format and metadata support matrix, test file and clipboard integration on Wayland and X11, and record reproducible interactive benchmarks.
 
 ### Formats shown in the Paint.NET 5.2 Open dialog
